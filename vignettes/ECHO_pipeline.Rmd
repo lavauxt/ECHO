@@ -1,0 +1,47 @@
+```rmarkdown
+---
+title: "Getting Started with ECHO"
+author: "TL"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with ECHO}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## Introduction
+The `ECHO` package provides an end-to-end workflow for detecting rare Copy Number Variants (CNVs) in exome sequencing data using `ExomeDepth`.
+
+## Data Preparation
+Before running the pipeline, ensure your data meets the following criteria:
+
+1. **BAM Files**: BAM files must be coordinate-sorted and indexed (`.bai` files present).
+2. **BED File**: Your target regions file must be a 4-column tab-delimited file:
+    - Column 1: Chromosome
+    - Column 2: Start position
+    - Column 3: End position
+    - Column 4: Gene/Region Name
+3. **Reference FASTA**: The FASTA file used for alignment must be provided, along with its index (`.fai`).
+
+## The Configuration Workflow
+`ECHO` utilizes a YAML configuration file. This allows you to manage different cohorts without altering your R code.
+
+### Pipeline Stages
+The `run_echo_pipeline` function performs four sequential operations:
+
+1. **`run_bam_coverage`**: Scans your BAM directory and uses `ExomeDepth` to generate a count matrix.
+2. **`run_metrics`**: Calculates inter-sample correlation and per-exon read depth. Failures are exported to `Metrics.tsv`.
+3. **`run_cnv_calling`**: Performs HMM calling across all samples in parallel.
+4. **`generate_plots`**: Visualizes CNV calls by plotting the observed vs. expected read depth ratio.
+
+## Interpreting Output
+Once the pipeline finishes, your output directory will contain:
+
+* **Coverage.Rdata**: The raw count matrix for your cohort.
+* **Metrics.tsv**: A report of samples or exons that failed QC.
+* **CNV_calls.tsv**: The finalized table of detected CNVs.
+* **Plots/**: A directory containing individual PDF visualizations for every detected CNV.
+
+## Troubleshooting
+* **Missing Files**: Ensure the `fasta` and `bed` paths in your config are absolute paths or relative.

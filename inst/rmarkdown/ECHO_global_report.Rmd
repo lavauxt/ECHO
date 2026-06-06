@@ -1,0 +1,586 @@
+---
+title: "ECHO CNV Global Report"
+author: "ECHO Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+params:
+  cnv_calls: NA
+  qc_metrics: NA
+  counts: NA
+  bed_file: NA
+  models: NA
+  refs: NA
+  settings: NA
+  config: NA
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE
+)
+
+library(DT)
+library(plotly)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(tidyr)
+library(htmltools)
+library(ExomeDepth)
+
+# Helper function to get CNV-specific data for plotting
+get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
+
+  sample <- call_row$Sample
+  idx_start <- if ("global_start" %in% colnames(call_row)) as.numeric(call_row$global_start) else as.numeric(call_row$Start.p)
+  idx_end <- if ("global_end" %in% colnames(call_row)) as.numeric(call_row$global_end) else as.numeric(call_row$End.p)
+
+  ref_samples <- refs[[sample]]
+
+  if (is.null(ref_samples) || length(ref_samples) == 0) {
+    return(NULL)
+  }
+
+  exon_range <- seq(
+    max(1, idx_start - 5),
+    min(nrow(bed_file), idx_end + 5)
+  )
+
+  if (length(exon_range) == 0) {
+    return(NULL)
+  }
+
+  test_counts <- counts[exon_range, sample]
+
+  ref_counts <- rowSums(
+    counts[exon_range, ref_samples, drop = FALSE]
+  )
+
+  test_median <- median(test_counts)
+  ref_median <- median(ref_counts)
+
+  expected <- ref_counts * (test_median / ref_median)
+  expected_safe <- pmax(expected, 1)
+
+  totals <- test_counts + ref_counts
+
+  p_expected <- expected_safe / pmax(totals, 1)
+  p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
+
+  ratio <- test_counts / expected_safe
+
+  rho <- max(models[[sample]][1], 0.005)
+
+  ci_low <- vapply(seq_along(exon_range), function(i) {
+    ExomeDepth:::qbetabinom(
+      0.025,
+      totals[i],
+      rho,
+      p_expected[i]
+    ) / expected_safe[i]
+  }, numeric(1))
+
+  ci_high <- vapply(seq_along(exon_range), function(i) {
+    ExomeDepth:::qbetabinom(
+      0.975,
+      totals[i],
+      rho,
+      p_expected[i]
+    ) / expected_safe[i]
+  }, numeric(1))
+
+  exon_labels <- if ("exon" %in% colnames(bed_file)) {
+    bed_file$exon[exon_range]
+  } else {
+    ave(seq_len(nrow(bed_file)),
+        bed_file$gene,
+        FUN = seq_along)[exon_range]
+  }
+
+  data.frame(
+    Exon = exon_range,
+    ExonLabel = exon_labels,
+    
+    Observed = test_counts,
+    Expected = expected_safe,
+    Ratio = ratio,
+    CI_low = ci_low,
+    CI_high = ci_high,
+    ReferenceCI_low = 1,
+    ReferenceCI_high = 1,
+    Affected = exon_range %in% (idx_start:idx_end)
+  )
+}
+```
+
+# ECHO CNV Analysis – Global Report
+
+## Summary
+
+- **Number of samples with CNV calls**:
+  `r length(unique(params$cnv_calls$Sample))`
+
+- **Total CNV calls**:
+  `r nrow(params$cnv_calls)`
+
+- **Report generated**:
+  `r Sys.time()`
+
+## QC Metrics Overview (all samples)
+
+```{r qc_overview}
+if (!is.null(params$qc_metrics) &&
+    nrow(params$qc_metrics) > 0) {
+
+  DT::datatable(
+    params$qc_metrics,
+    options = list(
+      pageLength = 15,
+      scrollX = TRUE
+    ),
+    caption = "QC flags across all samples"
+  )
+
+} else {
+
+  cat("No QC issues detected.\n")
+}
+```
+
+---
+
+# Per-sample Reports
+
+```{r per_sample_loop, results='asis'}
+
+samples <- unique(params$cnv_calls$Sample)
+
+if (length(samples) == 0) {
+
+  cat("No CNV calls found in any sample.\n")
+
+} else {
+
+  for (s in samples) {
+
+    cat("\n\n## ", s, "\n")
+
+    # QC metrics for this sample
+    qc_s <- params$qc_metrics[
+      params$qc_metrics$Sample == s |
+        params$qc_metrics$Sample == "All",
+    ]
+
+    if (nrow(qc_s) > 0) {
+
+      cat("\n### QC flags\n")
+
+      w_qc <- DT::datatable(
+        qc_s,
+        options = list(
+          dom = 't',
+          pageLength = 5
+        )
+      )
+
+      rendered_qc <- htmltools::renderTags(w_qc)
+
+      knitr::knit_meta_add(
+        rendered_qc$dependencies
+      )
+
+      cat(rendered_qc$html)
+      cat("\n")
+    }
+
+    # Key metrics for this sample
+    if (!is.null(params$counts) &&
+        s %in% colnames(params$counts)) {
+
+      cov <- params$counts[, s]
+
+      median_depth <- median(
+        cov,
+        na.rm = TRUE
+      )
+
+      total_reads <- sum(
+        cov,
+        na.rm = TRUE
+      )
+
+      cat("\n### Key metrics\n")
+
+      cat(
+        paste0(
+          "- Median exon depth: ",
+          round(median_depth, 1),
+          "\n"
+        )
+      )
+
+      cat(
+        paste0(
+          "- Total reads: ",
+          format(total_reads, big.mark = ","),
+          "\n"
+        )
+      )
+
+      if (!is.null(params$settings$min_cov) &&
+          median_depth < params$settings$min_cov) {
+
+        cat(
+          "⚠️ **Below minimum depth threshold**\n"
+        )
+      }
+
+      if (!is.null(params$settings$min_total_reads) &&
+          total_reads < params$settings$min_total_reads) {
+
+        cat(
+          "⚠️ **Below minimum total reads**\n"
+        )
+      }
+    }
+
+    # CNV table for this sample
+    cnv_s <- params$cnv_calls[
+      params$cnv_calls$Sample == s,
+    ]
+
+    cat("\n### CNV calls\n")
+
+    if (nrow(cnv_s) > 0) {
+
+      w_cnv <- DT::datatable(
+        cnv_s[, c(
+          "CNV.ID",
+          "Chromosome",
+          "Start",
+          "End",
+          "Type",
+          "Nexons",
+          "Reads.ratio",
+          "Confidence",
+          "Gene"
+        )],
+
+        extensions = 'Buttons',
+
+        options = list(
+          dom = 'Bfrtip',
+          buttons = c(
+            'copy',
+            'csv',
+            'excel'
+          ),
+          scrollX = TRUE
+        ),
+
+        caption = paste(
+          "Detected CNVs for",
+          s
+        )
+
+      ) %>%
+        formatStyle(
+          "Confidence",
+
+          backgroundColor = styleEqual(
+            c(
+              "HIGH",
+              "MEDIUM",
+              "LOW"
+            ),
+
+            c(
+              "lightgreen",
+              "yellow",
+              "salmon"
+            )
+          )
+        )
+
+      rendered_cnv <- htmltools::renderTags(
+        w_cnv
+      )
+
+      knitr::knit_meta_add(
+        rendered_cnv$dependencies
+      )
+
+      cat(rendered_cnv$html)
+      cat("\n")
+
+    } else {
+
+      cat(
+        "No CNV calls detected for this sample.\n"
+      )
+    }
+
+    # Warning for low-confidence genes
+    low_conf_genes <- params$settings$score_low_confidence_genes
+
+    all_genes <- unique(
+      unlist(
+        strsplit(cnv_s$Gene, "_")
+      )
+    )
+
+    flag <- intersect(
+      all_genes,
+      low_conf_genes
+    )
+
+    if (length(flag) > 0) {
+
+      cat(
+        "\n⚠️ **Warning:** This sample has CNVs involving genes with known pseudogene issues: ",
+        paste(flag, collapse = ", "),
+        ". Consider orthogonal validation.\n"
+      )
+    }
+
+    # Interactive plots for each CNV
+    if (nrow(cnv_s) > 0) {
+
+      cat("\n### CNV plots\n")
+
+      for (i in seq_len(nrow(cnv_s))) {
+
+        call <- cnv_s[i, ]
+
+        cat(
+          "\n#### ",
+          call$Gene,
+          " (",
+          call$Type,
+          ")\n"
+        )
+
+        cat(
+          "*Confidence: ",
+          call$Confidence,
+          " | Reads ratio: ",
+          round(call$Reads.ratio, 2),
+          "*\n\n"
+        )
+
+        # Prepare CNV plotting data using plots.R logic
+        plot_data <- get_cnv_plot_data(
+          call,
+          params$counts,
+          params$bed_file,
+          params$models,
+          params$refs
+        )
+
+        if (is.null(plot_data) || nrow(plot_data) == 0) {
+          cat("*(Insufficient data to generate plot)*\n")
+          next
+        }
+
+        # Ratio plot with CI ribbon around reference expectation
+        p_ratio <- ggplot(plot_data, aes(x = Exon)) +
+          geom_ribbon(
+            aes(
+              ymin = CI_low,
+              ymax = CI_high
+            ),
+            fill = "grey80",
+            alpha = 0.35
+          ) +
+          geom_hline(
+            yintercept = 1,
+            linetype = "dashed",
+            colour = "grey40"
+          ) +
+          geom_point(
+            data = subset(plot_data, !Affected),
+            aes(
+              y = Ratio,
+              color = "Reference samples",
+              text = paste0("Exon: ", ExonLabel,
+                "<br>Observed/Expected: ", round(Ratio, 3)
+              )
+            ),
+            size = 3
+          ) +
+          geom_point(
+            data = subset(plot_data, Affected),
+            aes(
+              y = Ratio,
+              color = "Affected exon(s)",
+              text = paste0("Exon: ", ExonLabel,
+                "<br>Observed/Expected: ", round(Ratio, 3)
+              )
+            ),
+            size = 3.5
+          ) +
+
+          labs(
+            y = "Observed / Expected",
+            x = NULL
+          ) +
+          theme_bw() +
+          scale_color_manual(
+            values = c(
+              "Reference samples" = "steelblue",
+              "Affected exon(s)" = "red"
+            ),
+            name = NULL
+          ) +
+          theme(
+            legend.position = "top",
+            axis.text.x = element_text(
+              angle = 45,
+              size = 8,
+              hjust = 1
+            )
+          ) +
+          scale_x_continuous(
+            breaks = plot_data$Exon,
+            labels = plot_data$ExonLabel
+          )  
+
+        # Coverage plot aligned with plots.R lower panel
+        # Build per-reference-sample rows (mirrors plots.R cov_list logic)
+        ref_samples_s <- params$refs[[s]]
+        exon_range_s  <- plot_data$Exon
+        test_median_s <- median(params$counts[exon_range_s, s])
+
+        ref_rows <- lapply(ref_samples_s, function(r) {
+          scaling <- test_median_s / median(params$counts[exon_range_s, r])
+          data.frame(
+            Exon      = exon_range_s,
+            Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
+            Group     = "Reference samples",
+            ExonLabel = plot_data$ExonLabel,
+            stringsAsFactors = FALSE
+          )
+        })
+
+        obs_df <- data.frame(
+          Exon      = plot_data$Exon,
+          Count     = log(pmax(plot_data$Observed, 1)),
+          Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
+          ExonLabel = plot_data$ExonLabel,
+          stringsAsFactors = FALSE
+        )
+
+        p_cov_data <- bind_rows(c(ref_rows, list(obs_df)))
+
+        p_cov <- ggplot() +
+          geom_point(
+            data = subset(p_cov_data, Group == "Reference samples"),
+            aes(
+              x = Exon,
+              y = Count,
+              color = Group,
+              text = paste0("Exon: ", ExonLabel,
+                "<br>Log coverage: ", round(Count, 3)
+              )
+            ),
+            alpha = 0.7,
+            size = 2.5
+          ) +
+          geom_point(
+            data = subset(p_cov_data, Group == "Test sample"),
+            aes(
+              x = Exon,
+              y = Count,
+              color = Group,
+              text = paste0("Exon: ", ExonLabel,
+                "<br>Log coverage: ", round(Count, 3)
+              )
+            ),
+            size = 2.5
+          ) +
+          geom_point(
+            data = subset(p_cov_data, Group == "Affected exon(s)"),
+            aes(
+              x = Exon,
+              y = Count,
+              color = Group,
+              text = paste0("Exon: ", ExonLabel,
+                "<br>Log coverage: ", round(Count, 3)
+              )
+            ),
+            size = 3.5
+          ) +
+          labs(
+            y = "Log(Coverage)",
+            x = NULL
+          ) +
+          theme_bw() +
+          scale_color_manual(
+            values = c(
+              "Reference samples" = "grey50",
+              "Test sample" = "blue",
+              "Affected exon(s)" = "red"
+            ),
+            name = NULL
+          ) +
+          theme(
+            legend.position = "top",
+            axis.text.x = element_text(
+              angle = 45,
+              size = 8,
+              hjust = 1
+            )
+          ) +
+          scale_x_continuous(
+            breaks = plot_data$Exon,
+            labels = plot_data$ExonLabel
+          ) 
+
+        # Convert to interactive and adjust layout to prevent truncation
+        # Use ggplotly with fixed height and margin
+        w_ratio <- ggplotly(p_ratio, tooltip = "text", height = 400) %>%
+          layout(
+                margin = list(t = 60, b = 80),
+                legend = list(orientation = "h", y = 1.1))
+
+        w_cov <- ggplotly(p_cov, tooltip = "text", height = 400) %>%
+          layout(
+                margin = list(t = 60, b = 80),
+                legend = list(orientation = "h", y = 1.1))
+
+        # Render with proper dependency handling
+        rendered_ratio <- htmltools::renderTags(w_ratio)
+        knitr::knit_meta_add(rendered_ratio$dependencies)
+        cat(rendered_ratio$html)
+        cat("\n")
+
+        rendered_cov <- htmltools::renderTags(w_cov)
+        knitr::knit_meta_add(rendered_cov$dependencies)
+        cat(rendered_cov$html)
+        cat("\n")
+              }
+    }
+  }
+}
+```
+
+## Session Info
+
+<details>
+
+<summary>
+Click to expand/collapse session information
+</summary>
+
+```{r session}
+sessionInfo()
+```
+
+</details>
