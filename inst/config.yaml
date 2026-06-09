@@ -9,22 +9,16 @@ output:
   prefix: "GOM"
 
 settings:
-  # General QC
   modechrom: "A"
   min_corr: 0.98
   min_cov: 100
   min_total_reads: 300000
   max_exon_cv: 0.5
-
-  # CNV calling – ExomeDepth parameters
   transition_probability: 0.0001
   expected_CNV_length: 50000
   n_bins_reduced: 10000
   phi_bins: 1
   formula: "cbind(test, reference) ~ 1"
-  # data: (optional) path to covariate file – not used by default
-
-  # Confidence thresholds
   score_high_corr: 0.985
   score_med_corr: 0.95
   score_high_refs: 3
@@ -38,29 +32,21 @@ settings:
   score_low_confidence_genes: ["PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR"]
 
 # -------------------------------
-# BED PREPROCESSING (optional)
+# BED PREPROCESSING
 # -------------------------------
-# Remove or comment out this entire section if you do not need BED preprocessing.
 bed_preprocess:
-  # Processing mode: "NO", "STANDARD", or "REGEN"
   bed_process: "STANDARD"
-       # index of gene column in input BED (0-based)
-
-  # For "STANDARD" mode: path to a file listing panel BED files (one per line).
-  # If omitted or empty, the input BED is simply cleaned (first 4 columns, exon_sep applied).
+  genome_version: "hg19"
+  unknown_gene: false
+  exon_sep: "_"                 # Split token used to break apart complex labels
   
-  # For "REGEN" mode: RefSeq annotation or genome version
-  genome_version: "hg19"       # "hg19" or "hg38"
+  # Configuration for complex gene identifiers (when auto_exon_number is false)
+  gene_name_keep: "2"         # Keeps parts 1 and 2 joined together (e.g., "MUC4_PROT")
   
-  # Common options for all modes:
-  unknown_gene: false           # if true, keep unknown genes as "Unknown"
-  # gene_list_restrict: ["ARID1A", "TP53"]   # restrict to these genes
-  # chr_list_restrict: ["chrY", "chrM"]      # exclude these chromosomes
-  exon_sep: "_"                 # split gene column and keep first part
-  gene_field_index: null           # index of gene column name after split
-  # customexon: false             # add a Custom.Exon column (5th column)
   customexon: true
-  # Coordinate handling (applied after preprocessing)
-  bed_zero_based: true          # convert BED start from 0‑based to 1‑based
-  skip_invalid_intervals: true  # remove intervals that cannot be extracted from FASTA
-  auto_exon_number: true    # if true, add an Exon.Number column (6th column) with sequential exon numbers per gene
+  bed_zero_based: true
+  skip_invalid_intervals: true
+  
+  # Region Numbering Controls
+  auto_exon_number: false       # Set to FALSE to switch from global genomic order re-numbering
+  region_numbering_mode: "file_order" # "bed_text" to keep old text digits, or "file_order" for pure per-region sequential indexes

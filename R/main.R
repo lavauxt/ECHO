@@ -214,6 +214,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                     gene_list_restrict = cfg$gene_list_restrict %||% NULL,
                     exon_sep = cfg$exon_sep %||% NULL,
                     customexon = cfg$customexon %||% FALSE,
+                    auto_exon_number = cfg$auto_exon_number %||% TRUE,
+                    region_numbering_mode = cfg$region_numbering_mode %||% "bed_text",
+                    gene_name_keep = cfg$gene_name_keep %||% NULL,
                     list_genes = cfg$list_genes %||% NULL,
                     genes_file = cfg$genes_file %||% NULL,
                     panel_files = cfg$panel_files %||% NULL,
@@ -226,7 +229,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             } else {
                 log_msg("BED preprocessing skipped (bed_process = 'NO').")
             }
-
+            
             # -----------------------------------------------------------------
             # 5. Run pipeline steps with warning capture
             # -----------------------------------------------------------------

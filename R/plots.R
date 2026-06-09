@@ -200,7 +200,23 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
     }
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
-    exon_index <- compute_exon_index(bed_file)   # unified indexing
+    
+    # -------------------------------------------------------------------------
+    # FIX: Extract specific per-gene exon numbering from bed_file if available.
+    # Checks for common column names or falls back safely to the 5th column.
+    # -------------------------------------------------------------------------
+    exon_col <- grep("^(exon|custom\\.exon|exonnum)$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
+    if (length(exon_col) > 0) {
+        exon_index <- bed_file[[exon_col[1]]]
+    } else if (ncol(bed_file) >= 5) {
+        exon_index <- bed_file[[5]]
+    } else {
+        exon_index <- compute_exon_index(bed_file) # fallback to unified indexing if column missing
+    }
+    # Clean up NA values to prevent literal "NA" prints on the x-axis
+    exon_index <- ifelse(is.na(exon_index), "", as.character(exon_index))
+    # -------------------------------------------------------------------------
+
     n_written <- 0L
 
     for (i in seq_len(nrow(cnv_plot))) {
