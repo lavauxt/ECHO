@@ -11,7 +11,11 @@ generate_report(
   settings,
   config = NULL,
   global = TRUE,
-  sample_name = NULL
+  sample_name = NULL,
+  sample_table = NULL,
+  ref_bams = NULL,
+  log_file = NULL,
+  pdf_output = FALSE
 )
 }
 \arguments{
@@ -29,6 +33,10 @@ generate_report(
 If FALSE (default), generate one report per sample (legacy mode).}
 
 \item{sample_name}{Optional single sample name (only used when global = FALSE).}
+
+\item{sample_table}{Optional path to sample table (CSV/TSV) to display in report.}
+
+\item{ref_bams}{Optional path to external reference BAM list (TSV with 'bam' column).}
 }
 \value{
 Invisibly returns the output file path(s).

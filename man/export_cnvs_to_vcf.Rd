@@ -13,20 +13,22 @@ export_cnvs_to_vcf(
 )
 }
 \arguments{
-\item{cnv_calls}{Data frame of CNV calls (must contain columns: Sample, Chromosome, Start, End, Type, Confidence, etc.)}
+\item{cnv_calls}{Data frame of CNV calls (must contain columns: Sample, Chromosome,
+Start, End, Type, Confidence, etc.)}
 
 \item{output_vcf}{Character string. Output VCF file path.}
 
-\item{sample_name}{Character string. Single sample name to export. If NULL, all samples are written to separate VCFs (appending sample name).}
+\item{sample_name}{Character string. If provided, write a single-sample VCF.
+If NULL, write a single multi-sample VCF.}
 
 \item{source}{Character string. Source description for VCF header.}
 
 \item{reference}{Character string. Reference genome assembly (e.g., "hg19").}
 }
 \value{
-Invisibly returns a vector of the written VCF file path(s).
+Invisibly returns the written VCF path.
 }
 \description{
-Converts a data frame of CNV calls (from \code{run_cnv_calling}) into a VCF file
-with conformant structural variant records.
+Converts a data frame of CNV calls (from \code{run_cnv_calling}) into VCF.
+When \code{sample_name} is NULL, a single multi-sample VCF is written.
 }

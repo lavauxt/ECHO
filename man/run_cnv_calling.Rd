@@ -15,6 +15,8 @@ run_cnv_calling(
   formula = "cbind(test, reference) ~ 1",
   data = NULL,
   save_ed_objects = FALSE,
+  modechrom = "A",
+  sample_table = NULL,
   ...
 )
 }
@@ -38,6 +40,12 @@ run_cnv_calling(
 \item{data}{Data frame. Optional covariate data for the formula. Default \code{NULL}.}
 
 \item{save_ed_objects}{Logical. If TRUE, save full ExomeDepth objects per sample (can be large). Default FALSE.}
+
+\item{modechrom}{Character. Mode for sex chromosome handling: "A" (autosomes only, default),
+"X" (chrX only, split by gender), "Y" (chrY only, males only).}
+
+\item{sample_table}{Optional character string. Path to sample table (CSV/TSV) with columns
+\code{sample_name} and \code{gender} (M/F or male/female). Required for "X" or "Y" modes.}
 
 \item{...}{Additional parameters passed to \code{score_cnv_confidence}.}
 }

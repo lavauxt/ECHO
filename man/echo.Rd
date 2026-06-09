@@ -14,6 +14,8 @@ echo(
   custom_sample_names = NULL,
   log_file = NULL,
   gene_field_index = 1,
+  sample_table = NULL,
+  ref_bams = NULL,
   ...
 )
 }
@@ -40,6 +42,12 @@ Default `"1"` (keep the first part before the first delimiter).}
 
 \item{gene_field_index}{Integer. Which field to keep after splitting by exon_sep in BED processing.
 Default 1 (first field). Use 3 for BEDs like "NM_006015_ARID1A_ex5...".}
+
+\item{sample_table}{Optional character string. Path to a CSV/TSV file with columns
+\code{sample_name} and \code{gender} (M/F or male/female). Required for sex chromosome modes.}
+
+\item{ref_bams}{Optional character string. Path to a TSV file with a \code{bam} column
+listing external reference BAMs (used for reporting only).}
 
 \item{...}{Optional named overrides (see details).}
 }
