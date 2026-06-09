@@ -17,6 +17,10 @@
 #' @param log_file Character string. Path to log file. If \code{NULL}, a default log file is created inside the output directory.
 #' @param gene_field_index Integer. Which field to keep after splitting by exon_sep in BED processing.
 #'   Default 1 (first field). Use 3 for BEDs like "NM_006015_ARID1A_ex5...".
+#' @param sample_table Optional character string. Path to a CSV/TSV file with columns
+#'   \code{sample_name} and \code{gender} (M/F or male/female). Required for sex chromosome modes.
+#' @param ref_bams Optional character string. Path to a TSV file with a \code{bam} column
+#'   listing external reference BAMs (used for reporting only).
 #'
 #' @return Invisibly returns \code{TRUE} on success.
 #' @export
@@ -27,6 +31,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  custom_sample_names = NULL,
                  log_file = NULL,
                  gene_field_index = 1,
+                 sample_table = NULL,
+                 ref_bams = NULL,
                  ...) {
     args <- list(...)
 
@@ -98,7 +104,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         stop("[ERROR] Either config_path or pipeline parameters must be provided.")
     }
 
-    # Also allow gene_field_index from config (e.g., via bed_preprocess)
+    # Allow gene_field_index from config
     if (!is.null(cfg$gene_field_index)) {
         gene_field_index <- cfg$gene_field_index
     } else if (!is.null(cfg$bed_preprocess$gene_field_index)) {
@@ -112,19 +118,17 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     }
 
     # -------------------------------------------------------------------------
-    # 2. Setup logging (default log file inside output directory)
+    # 2. Setup logging
     # -------------------------------------------------------------------------
     if (is.null(log_file)) {
         log_file <- file.path(cfg$output$dir, "pipeline.log")
     }
-    # Create log file directory if needed
     log_dir <- dirname(log_file)
     if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
-    # Open log file and write header (without absolute paths)
     log_con <- file(log_file, open = "wt")
     writeLines(paste0("# ECHO Pipeline Log - ", Sys.time()), log_con)
-    writeLines(paste0("# Output directory: ", basename(cfg$output$dir)), log_con)  # only folder name
+    writeLines(paste0("# Output directory: ", basename(cfg$output$dir)), log_con)
     writeLines("#", log_con)
     writeLines("## Session Info", log_con)
     si <- utils::sessionInfo()
@@ -137,7 +141,6 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     writeLines("", log_con)
     close(log_con)
 
-    # Logging function: writes to both console and log file, captures warnings globally
     log_msg <- function(msg, type = "INFO") {
         timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
         formatted <- paste0("[", type, "] ", timestamp, " ", msg)
@@ -145,93 +148,79 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         cat(formatted, "\n", file = log_file, append = TRUE)
     }
 
-    # Redirect warnings to log as they occur
-    old_warn_handler <- getOption("warning.length")
-    options(warning.length = 8170)
-    old_warn <- options(warn = 1)  # print warnings as they occur
+    old_warn <- options(warn = 1)
     on.exit(options(warn = old_warn$warn), add = TRUE)
 
-    # Use withCallingHandlers to capture warnings and write them to log
     tryCatch({
-        # Set up warning handler
-        handle_warnings <- function(w) {
-            log_msg(conditionMessage(w), "WARNING")
-            invokeRestart("muffleWarning")
-        }
-        # We'll wrap the pipeline in withCallingHandlers, but to keep code clean,
-        # we'll apply it inside the main tryCatch.
-
-        log_msg("ECHO pipeline started")
-        log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
-        log_msg(paste("Output directory:", basename(cfg$output$dir)))  # only folder name
-        log_msg(paste("Log file:", basename(log_file)))  # only file name
-
-        # ---------------------------------------------------------------------
-        # 3. Define output file paths
-        # ---------------------------------------------------------------------
-        paths <- list(
-            rdata   = file.path(cfg$output$dir, "ECHO_coverage.Rdata"),
-            metrics = file.path(cfg$output$dir, "QC_metrics.tsv"),
-            cnvs    = file.path(cfg$output$dir, "CNV_calls.tsv"),
-            summary = file.path(cfg$output$dir, "ECHO_summary.RData"),
-            plots   = file.path(cfg$output$dir, "Plots")
-        )
-
-        if (!is.null(args$rdata))   paths$rdata   <- args$rdata
-        if (!is.null(args$metrics)) paths$metrics <- args$metrics
-        if (!is.null(args$cnvs))    paths$cnvs    <- args$cnvs
-        if (!is.null(args$summary)) paths$summary <- args$summary
-
-        # Create directories for output files
-        lapply(paths[!names(paths) %in% "plots"], function(p) {
-            if (grepl("\\.[a-zA-Z]+$", p)) {
-                dir.create(dirname(p), showWarnings = FALSE, recursive = TRUE)
-            } else {
-                dir.create(p, showWarnings = FALSE, recursive = TRUE)
-            }
-        })
-
-        if (is.null(vcf_output)) {
-            vcf_output <- file.path(cfg$output$dir, "CNVs.vcf")
-        }
-
-        # Validate required input files
-        stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
-        stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
-
-        # ---------------------------------------------------------------------
-        # 4. Optional BED preprocessing
-        # ---------------------------------------------------------------------
-        if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
-            log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
-            processed_bed <- file.path(cfg$output$dir, paste0(cfg$output$prefix, "_targets.bed"))
-            process_bed_file(
-                input_bed = cfg$input$bed,
-                output_bed = processed_bed,
-                bed_process = cfg$bed_process,
-                refseqgene = cfg$refseqgene %||% NULL,
-                transcripts_file = cfg$transcripts_file %||% NULL,
-                unknown_gene = cfg$unknown_gene %||% FALSE,
-                gene_list_restrict = cfg$gene_list_restrict %||% NULL,
-                exon_sep = cfg$exon_sep %||% NULL,
-                customexon = cfg$customexon %||% FALSE,
-                list_genes = cfg$list_genes %||% NULL,
-                genes_file = cfg$genes_file %||% NULL,
-                genome_version = cfg$genome_version %||% "hg19",
-                txdb = NULL,
-                gene_field_index = gene_field_index
-            )
-            cfg$input$bed <- processed_bed
-            log_msg("Processed BED saved to: ", processed_bed)
-        } else {
-            log_msg("BED preprocessing skipped (bed_process = 'NO').")
-        }
-
-        # ---------------------------------------------------------------------
-        # 5. Run pipeline steps with warning capture
-        # ---------------------------------------------------------------------
         withCallingHandlers({
 
+            log_msg("ECHO pipeline started")
+            log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
+            log_msg(paste("Output directory:", basename(cfg$output$dir)))
+            log_msg(paste("Log file:", basename(log_file)))
+
+            # -----------------------------------------------------------------
+            # 3. Define output file paths
+            # -----------------------------------------------------------------
+            paths <- list(
+                rdata   = file.path(cfg$output$dir, "ECHO_coverage.Rdata"),
+                metrics = file.path(cfg$output$dir, "QC_metrics.tsv"),
+                cnvs    = file.path(cfg$output$dir, "CNV_calls.tsv"),
+                summary = file.path(cfg$output$dir, "ECHO_summary.RData"),
+                plots   = file.path(cfg$output$dir, "Plots")
+            )
+
+            if (!is.null(args$rdata))   paths$rdata   <- args$rdata
+            if (!is.null(args$metrics)) paths$metrics <- args$metrics
+            if (!is.null(args$cnvs))    paths$cnvs    <- args$cnvs
+            if (!is.null(args$summary)) paths$summary <- args$summary
+
+            lapply(paths[!names(paths) %in% "plots"], function(p) {
+                if (grepl("\\.[a-zA-Z]+$", p)) {
+                    dir.create(dirname(p), showWarnings = FALSE, recursive = TRUE)
+                } else {
+                    dir.create(p, showWarnings = FALSE, recursive = TRUE)
+                }
+            })
+
+            if (is.null(vcf_output)) {
+                vcf_output <- file.path(cfg$output$dir, "CNVs.vcf")
+            }
+
+            stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
+            stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
+
+            # -----------------------------------------------------------------
+            # 4. Optional BED preprocessing
+            # -----------------------------------------------------------------
+            if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
+                log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
+                processed_bed <- file.path(cfg$output$dir, paste0(cfg$output$prefix, "_targets.bed"))
+                process_bed_file(
+                    input_bed = cfg$input$bed,
+                    output_bed = processed_bed,
+                    bed_process = cfg$bed_process,
+                    refseqgene = cfg$refseqgene %||% NULL,
+                    transcripts_file = cfg$transcripts_file %||% NULL,
+                    unknown_gene = cfg$unknown_gene %||% FALSE,
+                    gene_list_restrict = cfg$gene_list_restrict %||% NULL,
+                    exon_sep = cfg$exon_sep %||% NULL,
+                    customexon = cfg$customexon %||% FALSE,
+                    list_genes = cfg$list_genes %||% NULL,
+                    genes_file = cfg$genes_file %||% NULL,
+                    genome_version = cfg$genome_version %||% "hg19",
+                    txdb = NULL,
+                    gene_field_index = gene_field_index
+                )
+                cfg$input$bed <- processed_bed
+                log_msg("Processed BED saved to: ", processed_bed)
+            } else {
+                log_msg("BED preprocessing skipped (bed_process = 'NO').")
+            }
+
+            # -----------------------------------------------------------------
+            # 5. Run pipeline steps with warning capture
+            # -----------------------------------------------------------------
             log_msg("Step 1/6: Extracting BAM coverage...")
             run_bam_coverage(
                 bamfiles = cfg$input$bamfiles,
@@ -272,7 +261,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 phi.bins              = cfg$settings$phi_bins,
                 formula               = cfg$settings$formula,
                 data                  = NULL,
-                save_ed_objects       = save_ed_objects
+                save_ed_objects       = save_ed_objects,
+                modechrom             = cfg$settings$modechrom,
+                sample_table          = sample_table
             ), cnv_args)
 
             do.call(run_cnv_calling, cnv_args)
@@ -294,7 +285,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                                 qc_metrics_file = paths$metrics,
                                 output_dir = cfg$output$dir,
                                 settings = cfg$settings,
-                                config = cfg)
+                                config = cfg,
+                                sample_table = sample_table,
+                                ref_bams = ref_bams %||% cfg$input$rbams,
+                                log_file = log_file)
                 log_msg("Step 5/6 completed.")
             } else {
                 log_msg("Step 5/6: Report generation skipped (report = FALSE).")

@@ -35,12 +35,10 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
                                  score_low_confidence_genes = c("PMS2")) {
     if (nrow(cnv_calls) == 0) return(cnv_calls)
 
-    # --- FIX: Vectorised construction of Gene column ---
     cnv_calls$Gene <- vapply(seq_len(nrow(cnv_calls)), function(i) {
         paste(unique(bed_file$gene[cnv_calls$start.p[i]:cnv_calls$end.p[i]]), collapse = "_")
     }, character(1))
 
-    # Remove unused Start.b/End.b columns (they were not used downstream)
     cnv_calls$Start.b <- NULL
     cnv_calls$End.b   <- NULL
 
@@ -83,6 +81,10 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
 #' @param formula Character. Formula for the model. Default \code{"cbind(test, reference) ~ 1"}.
 #' @param data Data frame. Optional covariate data for the formula. Default \code{NULL}.
 #' @param save_ed_objects Logical. If TRUE, save full ExomeDepth objects per sample (can be large). Default FALSE.
+#' @param modechrom Character. Mode for sex chromosome handling: "A" (autosomes only, default),
+#'   "X" (chrX only, split by gender), "Y" (chrY only, males only).
+#' @param sample_table Optional character string. Path to sample table (CSV/TSV) with columns
+#'   \code{sample_name} and \code{gender} (M/F or male/female). Required for "X" or "Y" modes.
 #' @param ... Additional parameters passed to \code{score_cnv_confidence}.
 #'
 #' @return Invisibly returns \code{NULL}. Writes TSV and RData outputs to disk.
@@ -97,12 +99,79 @@ run_cnv_calling <- function(rdata_file,
                             formula = "cbind(test, reference) ~ 1",
                             data = NULL,
                             save_ed_objects = FALSE,
+                            modechrom = "A",
+                            sample_table = NULL,
                             ...) {
     message("[INFO] ", Sys.time(), " BEGIN CNV calls")
     objs <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
     counts       <- objs$counts
     sample_names <- objs$sample_names
     bed_file     <- objs$bed_file
+
+    # -------------------------------------------------------------------------
+    # Sex chromosome mode: filter BED and counts
+    # -------------------------------------------------------------------------
+    if (modechrom == "X") {
+        message("[INFO] Mode X: restricting to chromosome X")
+        chr_x <- if (any(grepl("^chrX", bed_file$chromosome))) "chrX" else "X"
+        keep_idx <- which(bed_file$chromosome == chr_x)
+        if (length(keep_idx) == 0) stop("[ERROR] No chrX intervals found in BED")
+        bed_file <- bed_file[keep_idx, ]
+        counts <- counts[keep_idx, ]
+    } else if (modechrom == "Y") {
+        message("[INFO] Mode Y: restricting to chromosome Y")
+        chr_y <- if (any(grepl("^chrY", bed_file$chromosome))) "chrY" else "Y"
+        keep_idx <- which(bed_file$chromosome == chr_y)
+        if (length(keep_idx) == 0) stop("[ERROR] No chrY intervals found in BED")
+        bed_file <- bed_file[keep_idx, ]
+        counts <- counts[keep_idx, ]
+    } else {
+        # Mode A: keep autosomes only (exclude X/Y)
+        message("[INFO] Mode A: autosomes only (excluding X and Y)")
+        autosomes <- if (any(grepl("^chr", bed_file$chromosome))) {
+            paste0("chr", c(1:22))
+        } else {
+            as.character(1:22)
+        }
+        keep_idx <- which(bed_file$chromosome %in% autosomes)
+        if (length(keep_idx) == 0) stop("[ERROR] No autosomal intervals found in BED")
+        bed_file <- bed_file[keep_idx, ]
+        counts <- counts[keep_idx, ]
+    }
+
+    # -------------------------------------------------------------------------
+    # Load sample table for sex chromosome modes
+    # -------------------------------------------------------------------------
+    gender_map <- NULL
+    if (modechrom %in% c("X", "Y")) {
+        if (is.null(sample_table) || !file.exists(sample_table)) {
+            stop("[ERROR] sample_table required for mode ", modechrom)
+        }
+        gender_df <- utils::read.table(sample_table, header = TRUE, sep = "\t",
+                                       stringsAsFactors = FALSE)
+        if (!all(c("sample_name", "gender") %in% colnames(gender_df))) {
+            stop("[ERROR] sample_table must have columns 'sample_name' and 'gender'")
+        }
+        # Normalise gender: M/male -> "M", F/female -> "F"
+        gender_df$gender <- toupper(substr(gender_df$gender, 1, 1))
+        gender_df$gender[gender_df$gender == "M"] <- "M"
+        gender_df$gender[gender_df$gender == "F"] <- "F"
+        gender_map <- setNames(gender_df$gender, gender_df$sample_name)
+
+        # Check all samples are present
+        missing <- setdiff(sample_names, names(gender_map))
+        if (length(missing) > 0) {
+            stop("[ERROR] Missing gender for samples: ", paste(missing, collapse = ", "))
+        }
+    }
+
+    # For mode Y, keep only male samples
+    if (modechrom == "Y") {
+        male_samples <- names(gender_map[gender_map == "M"])
+        sample_names <- intersect(sample_names, male_samples)
+        if (length(sample_names) == 0) stop("[ERROR] No male samples found for mode Y")
+        message("[INFO] Mode Y: keeping only male samples (", length(sample_names), " samples)")
+    }
 
     clean_chroms <- sub("^chr", "", counts$chromosome)
 
@@ -114,7 +183,19 @@ run_cnv_calling <- function(rdata_file,
     for (sample in sample_names) {
         message("[INFO] Processing sample: ", sample)
 
-        ref_samples <- sample_names[sample_names != sample]
+        # Determine reference samples based on mode and gender
+        if (modechrom == "A") {
+            ref_samples <- sample_names[sample_names != sample]
+        } else {
+            this_gender <- gender_map[[sample]]
+            if (modechrom == "X") {
+                # For X, use same gender references
+                ref_samples <- names(gender_map[gender_map == this_gender & names(gender_map) != sample])
+            } else { # mode Y
+                # Y: use male references (already filtered)
+                ref_samples <- sample_names[sample_names != sample]
+            }
+        }
 
         if (length(ref_samples) == 0) {
             message("[WARNING] No reference samples available for ", sample, ". Skipping.")
@@ -125,19 +206,24 @@ run_cnv_calling <- function(rdata_file,
         test_counts <- counts[, sample, drop = TRUE]
         ref_matrix  <- as.matrix(counts[, ref_samples, drop = FALSE])
 
-        best_refs <- tryCatch({
-            ExomeDepth::select.reference.set(
-                test.counts = test_counts,
-                reference.counts = ref_matrix,
-                bin.length = (counts$end - counts$start),
-                n.bins.reduced = n.bins.reduced,
-                phi.bins = phi.bins,
-                formula = formula,
-                data = data
-            )$reference.choice
-        }, error = function(e) {
-            message("[WARNING] Reference selection failed for ", sample, ": ", e$message)
-            character(0)
+        withCallingHandlers({
+            best_refs <- tryCatch({
+                ExomeDepth::select.reference.set(
+                    test.counts = test_counts,
+                    reference.counts = ref_matrix,
+                    bin.length = (counts$end - counts$start),
+                    n.bins.reduced = n.bins.reduced,
+                    phi.bins = phi.bins,
+                    formula = formula,
+                    data = data
+                )$reference.choice
+            }, error = function(e) {
+                message("[WARNING] Reference selection failed for ", sample, ": ", e$message)
+                character(0)
+            })
+        }, warning = function(w) {
+            if (grepl("sequence levels not in the other", conditionMessage(w)))
+                invokeRestart("muffleWarning")
         })
 
         if (length(best_refs) == 0) {
@@ -148,22 +234,27 @@ run_cnv_calling <- function(rdata_file,
 
         ref_counts <- rowSums(counts[, best_refs, drop = FALSE])
 
-        ed <- methods::new(
-            "ExomeDepth",
-            test = test_counts,
-            reference = ref_counts,
-            formula = "cbind(test, reference) ~ 1"
-        )
-
-        ed <- ExomeDepth::CallCNVs(
-            x = ed,
-            transition.probability = transition.probability,
-            expected.CNV.length = expected.CNV.length,
-            chromosome = clean_chroms,
-            start = counts$start,
-            end = counts$end,
-            name = counts$exon
-        )
+        withCallingHandlers({
+            ed <- methods::new(
+                "ExomeDepth",
+                test = test_counts,
+                reference = ref_counts,
+                formula = "cbind(test, reference) ~ 1"
+            )
+    
+            ed <- ExomeDepth::CallCNVs(
+                x = ed,
+                transition.probability = transition.probability,
+                expected.CNV.length = expected.CNV.length,
+                chromosome = clean_chroms,
+                start = counts$start,
+                end = counts$end,
+                name = counts$exon
+            )
+        }, warning = function(w) {
+            if (grepl("sequence levels not in the other", conditionMessage(w)))
+                invokeRestart("muffleWarning")
+        })
 
         raw_calls <- ed@CNV.calls
         processed_calls <- data.frame()
@@ -199,7 +290,6 @@ run_cnv_calling <- function(rdata_file,
             names(processed_calls)[names(processed_calls) == "reads.observed"] <- "Reads.observed"
             names(processed_calls)[names(processed_calls) == "reads.ratio"] <- "Reads.ratio"
 
-            # --- FIX: Genomic.ID created after renaming ---
             processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
                                                  processed_calls$Start, "-",
                                                  processed_calls$End)
@@ -236,10 +326,11 @@ run_cnv_calling <- function(rdata_file,
         message("[INFO] No CNVs detected across any samples.")
     }
 
+    # Also save gender map if available (for report)
     if (save_ed_objects) {
-        save(counts, cnv_calls, refs, models, bed_file, ed_objects, file = out_rdata)
+        save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map, file = out_rdata)
     } else {
-        save(counts, cnv_calls, refs, models, bed_file, file = out_rdata)
+        save(counts, cnv_calls, refs, models, bed_file, gender_map, file = out_rdata)
     }
     message("[INFO] Saved summary RData to: ", out_rdata)
     message("[INFO] ", Sys.time(), " END CNV calls")

@@ -43,8 +43,7 @@ Imports:
     GenomicFeatures,
     IRanges,
     S4Vectors,
-    AnnotationDbi
-Suggests:
+    AnnotationDbi,
     matrixStats,
     org.Hs.eg.db,
     TxDb.Hsapiens.UCSC.hg19.knownGene,

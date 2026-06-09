@@ -17,6 +17,9 @@ params:
   refs: NA
   settings: NA
   config: NA
+  sample_table: NA
+  ref_bams: NA
+  log_file: NA
 ---
 
 ```{r setup, include=FALSE}
@@ -571,16 +574,53 @@ if (length(samples) == 0) {
 }
 ```
 
-## Session Info
+---
 
-<details>
+## Pipeline Log
 
-<summary>
-Click to expand/collapse session information
-</summary>
+```{r log_warnings, results='asis'}
+if (!is.null(params$log_file) && !identical(params$log_file, NA) && file.exists(params$log_file)) {
+  log_lines <- readLines(params$log_file, warn = FALSE)
 
-```{r session}
-sessionInfo()
+  # Split into warnings and non-warning lines
+  warning_lines <- log_lines[grepl("^\\[WARNING\\]", log_lines)]
+  session_lines <- log_lines[grepl("^(R version|Platform|  )", log_lines)]
+  info_lines    <- log_lines[!grepl("^\\[WARNING\\]", log_lines) &
+                              !grepl("^(R version|Platform|  )", log_lines)]
+
+  # --- Warnings block ---
+  cat('<details>\n<summary><strong>&#9888; Warnings (', length(warning_lines), ')</strong></summary>\n\n', sep = "")
+  if (length(warning_lines) > 0) {
+    cat('<pre style="max-height:400px;overflow-y:auto;background:#fff8e1;border-left:4px solid #f9a825;padding:8px;">\n')
+    cat(paste(htmltools::htmlEscape(warning_lines), collapse = "\n"))
+    cat('\n</pre>\n')
+  } else {
+    cat('<p><em>No warnings recorded.</em></p>\n')
+  }
+  cat('</details>\n\n')
+
+  # --- Full log block ---
+  cat('<details>\n<summary><strong>&#128196; Full pipeline log</strong></summary>\n\n')
+  cat('<pre style="max-height:500px;overflow-y:auto;background:#f5f5f5;padding:8px;">\n')
+  cat(paste(htmltools::htmlEscape(info_lines), collapse = "\n"))
+  cat('\n</pre>\n')
+  cat('</details>\n\n')
+
+} else {
+  cat("*Log file not available.*\n")
+}
 ```
 
-</details>
+## Session Info
+
+```{r session_info, results='asis'}
+si <- sessionInfo()
+
+si_lines <- capture.output(print(si))
+
+cat('<details>\n<summary><strong>&#128196; Session information</strong></summary>\n\n')
+cat('<pre style="max-height:400px;overflow-y:auto;background:#f5f5f5;padding:8px;">\n')
+cat(paste(htmltools::htmlEscape(si_lines), collapse = "\n"))
+cat('\n</pre>\n')
+cat('</details>\n')
+```

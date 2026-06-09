@@ -8,11 +8,14 @@
 #' @param global Logical. If TRUE, generate a single global report for all samples.
 #'   If FALSE (default), generate one report per sample (legacy mode).
 #' @param sample_name Optional single sample name (only used when global = FALSE).
+#' @param sample_table Optional path to sample table (CSV/TSV) to display in report.
+#' @param ref_bams Optional path to external reference BAM list (TSV with 'bam' column).
 #'
 #' @return Invisibly returns the output file path(s).
 #' @export
 generate_report <- function(summary_rdata, qc_metrics_file, output_dir, 
-                            settings, config = NULL, global = TRUE, sample_name = NULL) {
+                            settings, config = NULL, global = TRUE, sample_name = NULL,
+                            sample_table = NULL, ref_bams = NULL, log_file = NULL) {
   if (!requireNamespace("rmarkdown", quietly = TRUE))
     stop("Package 'rmarkdown' is required for report generation.")
 
@@ -31,9 +34,37 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   bed_file  <- local_env$bed_file
   models    <- local_env$models
   refs      <- local_env$refs
-  
+  gender_map <- local_env$gender_map  # may be NULL
+
   qc_metrics <- read.table(qc_metrics_file, header = TRUE, sep = "\t", 
                            stringsAsFactors = FALSE)
+
+  # Load sample table if provided and not already in RData
+  sample_df <- NULL
+  if (!is.null(sample_table) && file.exists(sample_table)) {
+    sample_df <- utils::read.table(sample_table, header = TRUE, sep = "\t",
+                                   stringsAsFactors = FALSE)
+    if (!all(c("sample_name", "gender") %in% colnames(sample_df))) {
+      warning("sample_table missing required columns 'sample_name' or 'gender'")
+      sample_df <- NULL
+    }
+  } else if (!is.null(gender_map)) {
+    # Convert gender_map to data frame
+    sample_df <- data.frame(sample_name = names(gender_map),
+                            gender = gender_map,
+                            stringsAsFactors = FALSE)
+  }
+
+  # Load external reference BAM list if provided
+  ref_bams_df <- NULL
+  if (!is.null(ref_bams) && file.exists(ref_bams)) {
+    ref_bams_df <- utils::read.table(ref_bams, header = TRUE, sep = "\t",
+                                     stringsAsFactors = FALSE)
+    if (!"bam" %in% colnames(ref_bams_df)) {
+      warning("ref_bams file missing 'bam' column")
+      ref_bams_df <- NULL
+    }
+  }
 
   if (global) {
     template <- system.file("rmarkdown/ECHO_global_report.Rmd", package = "ECHO")
@@ -48,7 +79,10 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                         models = models,
                         refs = refs,
                         settings = settings,
-                        config = config
+                        config = config,
+                        sample_table = sample_df,
+                        ref_bams = ref_bams_df,
+                        log_file = log_file
                       ),
                       output_file = out_file,
                       quiet = FALSE)
@@ -79,7 +113,10 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                           models = models,
                           refs = refs,
                           settings = settings,
-                          config = config
+                          config = config,
+                          sample_table = sample_df,
+                          ref_bams = ref_bams_df,
+                          log_file = log_file
                         ),
                         output_file = out_file,
                         quiet = FALSE)

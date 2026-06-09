@@ -40,7 +40,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     sh <- S4Vectors::subjectHits(hits)
 
     ov <- GenomicRanges::pintersect(gr1[qh], gr2[sh])
-    w <- width(ov)
+    w <- IRanges::width(ov)
 
     df <- data.frame(q = qh, s = sh, w = w)
     df <- df[order(df$q, -df$w), ]
@@ -103,7 +103,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     # -----------------------------
     if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
       ref_df$Gene <- suppressMessages(AnnotationDbi::mapIds(
-        org.Hs.eg.db,
+        org.Hs.eg.db::org.Hs.eg.db,
         keys = ref_df$GeneID,
         keytype = "ENTREZID",
         column = "SYMBOL",
@@ -174,7 +174,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     sh <- S4Vectors::subjectHits(hits)
 
     ov <- GenomicRanges::pintersect(bed_gr[qh], ref_gr[sh])
-    w <- width(ov)
+    w <- IRanges::width(ov)
 
     hit_df <- data.frame(q = qh, s = sh, w = w)
     hit_df <- hit_df[order(hit_df$q, -hit_df$w), ]
