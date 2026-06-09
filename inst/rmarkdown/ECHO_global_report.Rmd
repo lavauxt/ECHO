@@ -1,6 +1,5 @@
 ---
 title: "ECHO CNV Global Report"
-author: "ECHO Pipeline"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -38,6 +37,7 @@ library(knitr)
 library(tidyr)
 library(htmltools)
 library(ExomeDepth)
+library(kableExtra)
 
 # Helper function to get CNV-specific data for plotting
 get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
@@ -123,8 +123,6 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
   )
 }
 ```
-
-# ECHO CNV Analysis – Global Report
 
 ## Summary
 
@@ -594,52 +592,57 @@ if (isTRUE(params$pdf_output) || identical(params$pdf_output, "true")) {
 ---
 ## Confidence Score Method
 
+<details>
+<summary><strong>&#9432; Click to expand/collapse confidence scoring rules</strong></summary>
+
 ```{r confidence_recap, results='asis'}
 settings <- params$settings
 
-score_table <- data.frame(
-  Criterion = c(
-    "Correlation test/reference",
-    "Number of reference samples",
-    "Fold change outside range"
+# Define the three categories with their criteria
+score_matrix <- data.frame(
+  Category = c("**HIGH**", "**MEDIUM**", "**LOW**"),
+  Correlation = c(
+    sprintf("≥ %.3f", settings$score_high_corr %||% 0.985),
+    sprintf("≥ %.3f", settings$score_med_corr %||% 0.95),
+    "Any"
   ),
-  HIGH = c(
-    paste0("≥ ", settings$score_high_corr %||% 0.985),
-    paste0("≥ ", settings$score_high_refs %||% 3),
-    paste0("≤ ", settings$score_high_ratio_low %||% 0.70,
-           " or ≥ ", settings$score_high_ratio_high %||% 1.30)
+  `# References` = c(
+    sprintf("≥ %d", settings$score_high_refs %||% 3),
+    sprintf("≥ %d", settings$score_med_refs %||% 2),
+    "Any"
   ),
-  MEDIUM = c(
-    paste0("≥ ", settings$score_med_corr %||% 0.95),
-    paste0("≥ ", settings$score_med_refs %||% 2),
-    paste0("≤ ", settings$score_low_ratio_low %||% 0.75,
-           " or ≥ ", settings$score_low_ratio_high %||% 1.25)
+  `Fold change` = c(
+    sprintf("≤ %.2f **or** ≥ %.2f", settings$score_high_ratio_low %||% 0.70, settings$score_high_ratio_high %||% 1.30),
+    sprintf("≤ %.2f **or** ≥ %.2f", settings$score_low_ratio_low %||% 0.75, settings$score_low_ratio_high %||% 1.25),
+    "Intermediate"
   ),
-  check.names = FALSE
+  check.names = FALSE,
+  stringsAsFactors = FALSE
 )
 
-cat('<details>
-')
-cat('<summary><strong>&#9432; How confidence scores are calculated</strong></summary>
+forced_genes <- settings$score_low_confidence_genes
+if (is.null(forced_genes)) forced_genes <- c()
 
-')
-cat('<p>Each CNV call is scored <strong>HIGH</strong>, <strong>MEDIUM</strong>, or <strong>LOW</strong> using the thresholds below.</p>
-')
-cat(knitr::kable(score_table, format = "html", escape = FALSE, row.names = FALSE))
-cat('<p style="margin-top:8px;">A call is <strong>HIGH</strong> only when correlation, number of reference samples, and fold change all meet the HIGH thresholds.</p>
-')
-cat('<p>A call is <strong>MEDIUM</strong> when it does not meet HIGH but still meets the MEDIUM correlation/reference thresholds and its fold change stays outside the low-confidence interval.</p>
-')
-cat('<p>All other calls are labeled <strong>LOW</strong>. Calls involving flagged genes are forced to <strong>LOW</strong> regardless of the numeric thresholds.</p>
-')
-if (!is.null(settings$score_low_confidence_genes) && length(settings$score_low_confidence_genes) > 0) {
-  cat(paste0('<p>Genes always flagged <strong>LOW</strong> regardless of metrics: <em>',
-             paste(settings$score_low_confidence_genes, collapse = ", "), '</em>.</p>
-'))
+cat('<div style="margin: 10px 0 20px 0;">\n')
+cat('<p><strong>Assignment rules:</strong></p>\n')
+cat('<ul>\n')
+cat('<li><strong>HIGH</strong> only if <em>all</em> HIGH criteria are met.</li>\n')
+cat('<li><strong>MEDIUM</strong> if HIGH not met but <em>all</em> MEDIUM criteria are met.</li>\n')
+cat('<li><strong>LOW</strong> otherwise.</li>\n')
+if (length(forced_genes) > 0) {
+  cat(sprintf('<li><strong>Always LOW</strong> (genes with homology issues): <em>%s</em>.</li>\n',
+              paste(forced_genes, collapse = ", ")))
 }
-cat('</details>
-')
+cat('</ul>\n')
+cat('</div>\n')
+
+knitr::kable(score_matrix, format = "html", escape = FALSE, align = c("l", "c", "c", "l")) %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                            full_width = FALSE,
+                            position = "left")
 ```
+
+</details>
 
 ## Pipeline Log
 

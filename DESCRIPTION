@@ -47,7 +47,8 @@ Imports:
     matrixStats,
     org.Hs.eg.db,
     TxDb.Hsapiens.UCSC.hg19.knownGene,
-    TxDb.Hsapiens.UCSC.hg38.knownGene
+    TxDb.Hsapiens.UCSC.hg38.knownGene,
+    kableExtra
 Remotes:
     vplagnol/ExomeDepth
 RoxygenNote: 8.0.0
