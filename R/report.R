@@ -15,7 +15,7 @@
 #' @export
 generate_report <- function(summary_rdata, qc_metrics_file, output_dir, 
                             settings, config = NULL, global = TRUE, sample_name = NULL,
-                            sample_table = NULL, ref_bams = NULL, log_file = NULL) {
+                            sample_table = NULL, ref_bams = NULL, log_file = NULL, pdf_output = FALSE) {
   if (!requireNamespace("rmarkdown", quietly = TRUE))
     stop("Package 'rmarkdown' is required for report generation.")
 
@@ -82,7 +82,8 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                         config = config,
                         sample_table = sample_df,
                         ref_bams = ref_bams_df,
-                        log_file = log_file
+                        log_file = log_file,
+                        pdf_output = pdf_output
                       ),
                       output_file = out_file,
                       quiet = FALSE)
@@ -102,7 +103,9 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     if (template == "") stop("Report template not found. Reinstall package.")
     out_files <- c()
     for (s in samples) {
-      out_file <- file.path(output_dir, paste0("ECHO_report_", s, ".html"))
+      sample_dir <- file.path(output_dir, sanitize_filename(s))
+      dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
+      out_file <- file.path(sample_dir, paste0("ECHO_report_", sanitize_filename(s), ".html"))
       rmarkdown::render(template,
                         params = list(
                           sample = s,
@@ -116,7 +119,8 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                           config = config,
                           sample_table = sample_df,
                           ref_bams = ref_bams_df,
-                          log_file = log_file
+                          log_file = log_file,
+                          pdf_output = pdf_output
                         ),
                         output_file = out_file,
                         quiet = FALSE)

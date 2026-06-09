@@ -410,7 +410,9 @@ generate_plots <- function(rdata_file,
             }
 
             gene_str <- sanitize_filename(as.character(call_row$Gene))
-            file_path <- file.path(output_dir, paste0(prefix_str, ".", plot_data$sample, ".", gene_str, "_", i, ".pdf"))
+            sample_dir <- file.path(output_dir, sanitize_filename(plot_data$sample))
+            dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
+            file_path <- file.path(sample_dir, paste0(prefix_str, ".", plot_data$sample, ".", gene_str, "_", i, ".pdf"))
 
             # Only create PDF if we have data
             p_cov <- create_coverage_plot(plot_data$cov_data, plot_data$pt_data,

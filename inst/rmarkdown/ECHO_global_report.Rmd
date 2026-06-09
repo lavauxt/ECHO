@@ -20,6 +20,7 @@ params:
   sample_table: NA
   ref_bams: NA
   log_file: NA
+  pdf_output: false
 ---
 
 ```{r setup, include=FALSE}
@@ -263,24 +264,35 @@ if (length(samples) == 0) {
 
 if (nrow(cnv_s) > 0) {
 
-      cnv_display <- cnv_s[, c("Chromosome", "Gene", "Start", "End",
+      cnv_display <- cnv_s[, c("Sample", "Chromosome", "Gene", "Start", "End",
                                "Type", "Nexons", "Reads.ratio", "Confidence")]
       cnv_display$Type <- ifelse(cnv_display$Type == "duplication", "DUP",
                            ifelse(cnv_display$Type == "deletion", "DEL",
                                   toupper(cnv_display$Type)))
+      cnv_display$Reads.ratio <- round(cnv_display$Reads.ratio, 2)
+      rownames(cnv_display) <- NULL
 
       w_cnv <- DT::datatable(
         cnv_display,
-        colnames = c("Chr", "Gene", "Start", "End",
-                     "Type", "Number of exons", "Fold change", "Confidence"),
+        rownames = FALSE,
+        colnames = c("Sample", "Chr", "Gene", "Start", "End",
+                     "Type", "Exons", "Fold change", "Confidence"),
         extensions = "Buttons",
         options = list(
           dom = "Bfrtip",
           buttons = c("copy", "csv", "excel"),
-          deferRender = TRUE,
-          scroller = TRUE,
-          scrollY = "400px",
-          autoWidth = TRUE
+          autoWidth = FALSE,
+          columnDefs = list(
+            list(width = "90px",  targets = 0),  # Sample
+            list(width = "55px",  targets = 1),  # Chr
+            list(width = "90px",  targets = 2),  # Gene
+            list(width = "80px",  targets = 3),  # Start
+            list(width = "80px",  targets = 4),  # End
+            list(width = "45px",  targets = 5),  # Type
+            list(width = "50px",  targets = 6),  # Exons
+            list(width = "80px",  targets = 7),  # Fold change
+            list(width = "90px",  className = "dt-center", targets = 8)  # Confidence
+          )
         ),
         caption = paste("Detected CNVs for", s),
         width = "100%"
@@ -415,7 +427,8 @@ if (nrow(cnv_s) > 0) {
               y = Ratio,
               color = "Affected exon(s)",
               text = paste0("Exon: ", ExonLabel,
-                "<br>Observed/Expected: ", round(Ratio, 3)
+                "<br>Observed/Expected: ", round(Ratio, 3),
+                "<br>Confidence: ", call$Confidence
               )
             ),
             size = 3.5
@@ -506,7 +519,8 @@ if (nrow(cnv_s) > 0) {
               y = Count,
               color = Group,
               text = paste0("Exon: ", ExonLabel,
-                "<br>Log coverage: ", round(Count, 3)
+                "<br>Log coverage: ", round(Count, 3),
+                "<br>Confidence: ", call$Confidence
               )
             ),
             size = 3.5
@@ -565,7 +579,56 @@ if (nrow(cnv_s) > 0) {
 }
 ```
 
+```{r pdf_output, include=FALSE}
+if (isTRUE(params$pdf_output) || identical(params$pdf_output, "true")) {
+  if (!requireNamespace("pagedown", quietly = TRUE)) {
+    warning("Package 'pagedown' is needed for PDF output but is not installed.")
+  } else {
+    pdf_out <- sub("\\.html$", ".pdf", knitr::current_input(dir = TRUE))
+    pagedown::chrome_print(knitr::current_input(dir = TRUE), output = pdf_out)
+    message("[INFO] PDF saved to: ", pdf_out)
+  }
+}
+```
+
 ---
+## Confidence Score Method
+
+```{r confidence_recap, results='asis'}
+settings <- params$settings
+
+cat('<details>\n<summary><strong>&#9432; How confidence scores are calculated</strong></summary>\n\n')
+cat('<div style="padding:8px 16px;background:#f9f9f9;border-left:4px solid #4a90d9;">\n')
+cat('<p>Each CNV call is scored <strong>HIGH</strong>, <strong>MEDIUM</strong>, or <strong>LOW</strong> based on three criteria:</p>\n')
+cat('<table style="border-collapse:collapse;width:100%;font-size:0.9em;">\n')
+cat('<thead><tr style="background:#e8f0fe;"><th style="padding:6px 10px;text-align:left;">Criterion</th>
+     <th style="padding:6px 10px;">HIGH</th><th style="padding:6px 10px;">MEDIUM</th></tr></thead>\n')
+cat('<tbody>\n')
+cat(paste0('<tr><td style="padding:5px 10px;">Correlation test/reference</td>',
+           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_high_corr %||% 0.985, '</td>',
+           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_med_corr  %||% 0.95,  '</td></tr>\n'))
+cat(paste0('<tr><td style="padding:5px 10px;">Number of reference samples</td>',
+           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_high_refs %||% 3, '</td>',
+           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_med_refs  %||% 2, '</td></tr>\n'))
+cat(paste0('<tr><td style="padding:5px 10px;">Fold change (outside range)</td>',
+           '<td style="padding:5px 10px;text-align:center;">&le;', settings$score_high_ratio_low %||% 0.70,
+           ' or &ge;', settings$score_high_ratio_high %||% 1.30, '</td>',
+           '<td style="padding:5px 10px;text-align:center;">&le;', settings$score_low_ratio_low  %||% 0.75,
+           ' or &ge;', settings$score_low_ratio_high %||% 1.25, '</td></tr>\n'))
+cat('</tbody></table>\n')
+cat('<p style="margin-top:8px;">A call is <strong>HIGH</strong> only when correlation, number of reference samples, and fold change all meet the HIGH thresholds.</p>
+')
+cat('<p>A call is <strong>MEDIUM</strong> when it does not meet HIGH but still meets the MEDIUM correlation/reference thresholds and its fold change stays outside the low-confidence interval.</p>
+')
+cat('<p>All other calls are labeled <strong>LOW</strong>. Calls involving flagged genes are forced to <strong>LOW</strong> regardless of the numeric thresholds.</p>
+')
+if (!is.null(settings$score_low_confidence_genes) && length(settings$score_low_confidence_genes) > 0) {
+  cat(paste0('<p>Genes always flagged <strong>LOW</strong> regardless of metrics: <em>',
+             paste(settings$score_low_confidence_genes, collapse = ", "), '</em>.</p>\n'))
+}
+cat('</div>\n</details>\n')
+```
+
 
 ## Pipeline Log
 

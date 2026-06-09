@@ -31,6 +31,12 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     input_df$Gene <- NA_character_
   }
 
+  input_df$Chr <- trimws(as.character(input_df$Chr))
+
+  align_to_input_chr <- function(chr_vec) {
+    normalize_chromosome_vec(as.character(chr_vec), input_df$Chr)
+  }
+
   # ----------------------------
   # Helper: largest overlap selection
   # ----------------------------
@@ -115,6 +121,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
 
     # remove missing genes
     ref_df <- ref_df[!is.na(ref_df$Gene), ]
+    ref_df$Chr <- align_to_input_chr(ref_df$Chr)
 
     # -----------------------------
     # RefSeq-like filtering
@@ -161,7 +168,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
                                 end = input_df$End)
     )
 
-    hits <- GenomicRanges::findOverlaps(bed_gr, ref_gr)
+    hits <- suppressWarnings(GenomicRanges::findOverlaps(bed_gr, ref_gr))
 
     if (length(hits) == 0) {
       stop("[ERROR] No overlaps between BED and RefSeq-like transcripts")
@@ -173,7 +180,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     qh <- S4Vectors::queryHits(hits)
     sh <- S4Vectors::subjectHits(hits)
 
-    ov <- GenomicRanges::pintersect(bed_gr[qh], ref_gr[sh])
+    ov <- suppressWarnings(GenomicRanges::pintersect(bed_gr[qh], ref_gr[sh]))
     w <- IRanges::width(ov)
 
     hit_df <- data.frame(q = qh, s = sh, w = w)
@@ -230,6 +237,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       }
 
       all_panels <- unique(all_panels)
+      all_panels$Chr <- align_to_input_chr(all_panels$Chr)
 
       bed_gr <- GenomicRanges::GRanges(
         seqnames = input_df$Chr,
@@ -244,7 +252,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         Gene = all_panels$Gene
       )
 
-      hits <- GenomicRanges::findOverlaps(bed_gr, panel_gr)
+      hits <- suppressWarnings(GenomicRanges::findOverlaps(bed_gr, panel_gr))
 
       sel <- select_best_hits(bed_gr, panel_gr, hits)
       qh <- sel$q
@@ -286,8 +294,9 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
   df <- unique(df)
 
   # genomic sort
-  df$Chr <- factor(df$Chr,
-                   levels = c(paste0("chr", c(1:22, "X", "Y", "M"))))
+  chrom_base <- c(as.character(1:22), "X", "Y", "M")
+  chrom_levels <- if (any(grepl("^chr", df$Chr))) paste0("chr", chrom_base) else chrom_base
+  df$Chr <- factor(df$Chr, levels = chrom_levels)
 
   df <- df[order(df$Chr, df$Start), ]
   df$Chr <- as.character(df$Chr)

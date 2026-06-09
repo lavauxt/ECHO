@@ -288,7 +288,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                                 config = cfg,
                                 sample_table = sample_table,
                                 ref_bams = ref_bams %||% cfg$input$rbams,
-                                log_file = log_file)
+                                log_file = log_file,
+                                pdf_output = cfg$settings$pdf_output %||% FALSE)
                 log_msg("Step 5/6 completed.")
             } else {
                 log_msg("Step 5/6: Report generation skipped (report = FALSE).")
@@ -303,7 +304,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                         env$cnv_calls
                     })
                     if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
-                        export_cnvs_to_vcf(cnv_calls_local, vcf_output)
+                        export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
                         log_msg(paste("VCF written to:", basename(vcf_output)))
                     } else {
                         log_msg("No CNV calls to export to VCF.")
