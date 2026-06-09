@@ -124,9 +124,8 @@ add_within_gene_indices <- function(cnv_calls, bed_file) {
     if (nrow(cnv_calls) == 0) return(cnv_calls)
     cnv_calls$global_start <- as.numeric(cnv_calls$start.p)
     cnv_calls$global_end   <- as.numeric(cnv_calls$end.p)
-    # Order exons by start coordinate within each gene
     exon_in_gene <- ave(seq_len(nrow(bed_file)), bed_file$gene,
-                        FUN = function(idx) order(bed_file$start[idx]))
+                        FUN = function(idx) rank(bed_file$start[idx], ties.method = "first"))
     cnv_calls$start.p <- exon_in_gene[cnv_calls$global_start]
     cnv_calls$end.p   <- exon_in_gene[cnv_calls$global_end]
     cnv_calls
@@ -138,8 +137,17 @@ add_within_gene_indices <- function(cnv_calls, bed_file) {
 #' @return Integer vector of per‑gene exon numbers, one per row.
 #' @export
 compute_exon_index <- function(bed_file) {
+    if ("exon_number" %in% colnames(bed_file) && any(!is.na(bed_file$exon_number))) {
+        return(as.integer(bed_file$exon_number))
+    }
+
+    if ("exon" %in% colnames(bed_file) && any(!is.na(bed_file$exon))) {
+        parsed_exon <- suppressWarnings(as.integer(gsub("[^0-9]", "", bed_file$exon)))
+        if (any(!is.na(parsed_exon))) return(parsed_exon)
+    }
+
     ave(seq_len(nrow(bed_file)), bed_file$gene,
-        FUN = function(idx) order(bed_file$start[idx]))
+        FUN = function(idx) rank(bed_file$start[idx], ties.method = "first"))
 }
 
 #' Load and validate YAML configuration

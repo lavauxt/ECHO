@@ -14,15 +14,16 @@ process_bed_file(
   unknown_gene = FALSE,
   gene_list_restrict = NULL,
   chr_list_restrict = NULL,
-  exon_sep = NULL,
+  exon_sep = "_",
   kmer = NULL,
   customexon = FALSE,
+  auto_exon_number = TRUE,
   list_genes = NULL,
   genes_file = NULL,
   panel_files = NULL,
   genome_version = NULL,
   txdb = NULL,
-  gene_field_index = 1
+  gene_field_index = NULL
 )
 }
 \arguments{
@@ -34,33 +35,23 @@ process_bed_file(
 
 \item{bed_zero_based}{Logical: is the input BED 0‑based? Default TRUE.}
 
-\item{refseqgene}{Not used (legacy).}
-
-\item{transcripts_file}{Not used.}
-
 \item{unknown_gene}{Keep intervals without gene name? Default FALSE.}
 
-\item{gene_list_restrict}{Not used.}
+\item{exon_sep}{Separator for splitting gene names (e.g., "_"). Default "_".}
 
-\item{chr_list_restrict}{Not used.}
+\item{customexon}{Add a Custom.Exon column containing exon numbers. Default FALSE.}
 
-\item{exon_sep}{Not used.}
-
-\item{kmer}{Not used.}
-
-\item{customexon}{Not used.}
-
-\item{list_genes}{Deprecated: use `panel_files` instead.}
-
-\item{genes_file}{Deprecated: use `panel_files` instead.}
+\item{auto_exon_number}{If TRUE, assign sequential exon numbers per gene based on genomic order.
+If FALSE, try to extract from name; if none found, use NA. Default TRUE.}
 
 \item{panel_files}{Character vector of BED file paths (one per line) or a single file containing paths.}
 
 \item{genome_version}{"hg19" or "hg38" (REGEN mode).}
 
-\item{txdb}{Not used.}
+\item{gene_field_index}{1‑based index of the gene name field after splitting.
+If NULL, auto‑detect (3rd for NM‑prefixed, 1st otherwise).}
 
-\item{gene_field_index}{Not used.}
+\item{...}{other parameters for compatibility.}
 }
 \description{
 Process BED File for CNV Analysis

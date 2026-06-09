@@ -100,7 +100,9 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
     ) / expected_safe[i]
   }, numeric(1))
 
-  exon_labels <- if ("exon" %in% colnames(bed_file)) {
+  exon_labels <- if ("exon_number" %in% colnames(bed_file) && any(!is.na(bed_file$exon_number))) {
+    bed_file$exon_number[exon_range]
+  } else if ("exon" %in% colnames(bed_file) && any(!is.na(bed_file$exon))) {
     bed_file$exon[exon_range]
   } else {
     ave(seq_len(nrow(bed_file)),

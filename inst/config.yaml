@@ -5,7 +5,7 @@ input:
   rbams: null
 
 output:
-  dir: "./result_GOMv2_regen"
+  dir: "./result_GOMv2_standard"
   prefix: "GOM"
 
 settings:
@@ -43,8 +43,9 @@ settings:
 # Remove or comment out this entire section if you do not need BED preprocessing.
 bed_preprocess:
   # Processing mode: "NO", "STANDARD", or "REGEN"
-  bed_process: "REGEN"
-  
+  bed_process: "STANDARD"
+       # index of gene column in input BED (0-based)
+
   # For "STANDARD" mode: path to a file listing panel BED files (one per line).
   # If omitted or empty, the input BED is simply cleaned (first 4 columns, exon_sep applied).
   
@@ -56,9 +57,10 @@ bed_preprocess:
   # gene_list_restrict: ["ARID1A", "TP53"]   # restrict to these genes
   # chr_list_restrict: ["chrY", "chrM"]      # exclude these chromosomes
   exon_sep: "_"                 # split gene column and keep first part
-  gene_field_index: 3           # index of gene column name after split
+  gene_field_index: null           # index of gene column name after split
   # customexon: false             # add a Custom.Exon column (5th column)
   customexon: true
   # Coordinate handling (applied after preprocessing)
   bed_zero_based: true          # convert BED start from 0‑based to 1‑based
   skip_invalid_intervals: true  # remove intervals that cannot be extracted from FASTA
+  auto_exon_number: true    # if true, add an Exon.Number column (6th column) with sequential exon numbers per gene
