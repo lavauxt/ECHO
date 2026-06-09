@@ -261,38 +261,29 @@ if (length(samples) == 0) {
 
     cat("\n### CNV calls\n")
 
-    if (nrow(cnv_s) > 0) {
+if (nrow(cnv_s) > 0) {
+
+      cnv_display <- cnv_s[, c("Chromosome", "Gene", "Start", "End",
+                               "Type", "Nexons", "Reads.ratio", "Confidence")]
+      cnv_display$Type <- ifelse(cnv_display$Type == "duplication", "DUP",
+                           ifelse(cnv_display$Type == "deletion", "DEL",
+                                  toupper(cnv_display$Type)))
 
       w_cnv <- DT::datatable(
-        cnv_s[, c(
-          "CNV.ID",
-          "Chromosome",
-          "Start",
-          "End",
-          "Type",
-          "Nexons",
-          "Reads.ratio",
-          "Confidence",
-          "Gene"
-        )],
-
-        extensions = 'Buttons',
-
+        cnv_display,
+        colnames = c("Chr", "Gene", "Start", "End",
+                     "Type", "Number of exons", "Fold change", "Confidence"),
+        extensions = "Buttons",
         options = list(
-          dom = 'Bfrtip',
-          buttons = c(
-            'copy',
-            'csv',
-            'excel'
-          ),
-          scrollX = TRUE
+          dom = "Bfrtip",
+          buttons = c("copy", "csv", "excel"),
+          deferRender = TRUE,
+          scroller = TRUE,
+          scrollY = "400px",
+          autoWidth = TRUE
         ),
-
-        caption = paste(
-          "Detected CNVs for",
-          s
-        )
-
+        caption = paste("Detected CNVs for", s),
+        width = "100%"
       ) %>%
         formatStyle(
           "Confidence",
@@ -366,14 +357,14 @@ if (length(samples) == 0) {
           "\n#### ",
           call$Gene,
           " (",
-          call$Type,
+          ifelse(call$Type == "duplication", "DUP", ifelse(call$Type == "deletion", "DEL", toupper(call$Type))),
           ")\n"
         )
 
         cat(
           "*Confidence: ",
           call$Confidence,
-          " | Reads ratio: ",
+          " | Fold change: ",
           round(call$Reads.ratio, 2),
           "*\n\n"
         )
