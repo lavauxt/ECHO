@@ -9,9 +9,6 @@ sanitize_filename(name)
 \arguments{
 \item{name}{Character string to sanitize.}
 }
-\value{
-Sanitized filename string.
-}
 \description{
 Sanitize a string for use as a filename
 }

@@ -31,7 +31,7 @@ run_cnv_calling(
 
 \item{expected.CNV.length}{Numeric. Expected CNV length in bp (influences Viterbi). Default \code{50000}.}
 
-\item{n.bins.reduced}{Integer. Number of bins to subsample for reference selection (speed/accuracy trade‑off). Default \code{10000}.}
+\item{n.bins.reduced}{Integer. Number of bins to subsample for reference selection. Default \code{10000}.}
 
 \item{phi.bins}{Integer. Number of bins for over‑dispersion parameter. Default \code{1}.}
 
@@ -39,7 +39,7 @@ run_cnv_calling(
 
 \item{data}{Data frame. Optional covariate data for the formula. Default \code{NULL}.}
 
-\item{save_ed_objects}{Logical. If TRUE, save full ExomeDepth objects per sample (can be large). Default FALSE.}
+\item{save_ed_objects}{Logical. If TRUE, save full ExomeDepth objects per sample. Default FALSE.}
 
 \item{modechrom}{Character. Mode for sex chromosome handling: "A" (autosomes only, default),
 "X" (chrX only, split by gender), "Y" (chrY only, males only).}

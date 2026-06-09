@@ -2,12 +2,13 @@
 % Please edit documentation in R/process_bed.R
 \name{process_bed_file}
 \alias{process_bed_file}
-\title{Process BED File for CNV Analysis (RefSeq Select version)}
+\title{Process BED File for CNV Analysis}
 \usage{
 process_bed_file(
   input_bed,
   output_bed,
   bed_process = "STANDARD",
+  bed_zero_based = TRUE,
   refseqgene = NULL,
   transcripts_file = NULL,
   unknown_gene = FALSE,
@@ -18,12 +19,49 @@ process_bed_file(
   customexon = FALSE,
   list_genes = NULL,
   genes_file = NULL,
+  panel_files = NULL,
   genome_version = NULL,
   txdb = NULL,
   gene_field_index = 1
 )
 }
+\arguments{
+\item{input_bed}{Path to input BED file.}
+
+\item{output_bed}{Path to output processed BED file.}
+
+\item{bed_process}{Mode: "STANDARD", "REGEN", or "NO".}
+
+\item{bed_zero_based}{Logical: is the input BED 0‑based? Default TRUE.}
+
+\item{refseqgene}{Not used (legacy).}
+
+\item{transcripts_file}{Not used.}
+
+\item{unknown_gene}{Keep intervals without gene name? Default FALSE.}
+
+\item{gene_list_restrict}{Not used.}
+
+\item{chr_list_restrict}{Not used.}
+
+\item{exon_sep}{Not used.}
+
+\item{kmer}{Not used.}
+
+\item{customexon}{Not used.}
+
+\item{list_genes}{Deprecated: use `panel_files` instead.}
+
+\item{genes_file}{Deprecated: use `panel_files` instead.}
+
+\item{panel_files}{Character vector of BED file paths (one per line) or a single file containing paths.}
+
+\item{genome_version}{"hg19" or "hg38" (REGEN mode).}
+
+\item{txdb}{Not used.}
+
+\item{gene_field_index}{Not used.}
+}
 \description{
-REGEN mode now uses a curated RefSeq Select exon BED/GTF-style file
-instead of TxDb inference (which is not clinically stable).
+Process BED File for CNV Analysis
 }

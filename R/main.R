@@ -13,6 +13,7 @@
 #' @param sample_name_keep Character string. Specifies which parts to keep after splitting.
 #'   Examples: `"1"` (first part), `"1-2"` (first two parts), `"2"` (second part), `"2-3"` (parts 2 and 3).
 #'   Default `"1"` (keep the first part before the first delimiter).
+#' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").
 #' @param custom_sample_names Optional character vector. Custom sample names (must match number of BAMs).
 #' @param log_file Character string. Path to log file. If \code{NULL}, a default log file is created inside the output directory.
 #' @param gene_field_index Integer. Which field to keep after splitting by exon_sep in BED processing.
@@ -21,6 +22,8 @@
 #'   \code{sample_name} and \code{gender} (M/F or male/female). Required for sex chromosome modes.
 #' @param ref_bams Optional character string. Path to a TSV file with a \code{bam} column
 #'   listing external reference BAMs (used for reporting only).
+#' @param panel_files Optional character vector. In STANDARD mode, a vector of BED file paths
+#'   (one per line) or a single file containing paths to panel BEDs used to restrict targets.
 #'
 #' @return Invisibly returns \code{TRUE} on success.
 #' @export
@@ -28,11 +31,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  report = TRUE,
                  sample_name_delim = "\\.",
                  sample_name_keep = "1",
+                 sample_name_collapse = NULL,
                  custom_sample_names = NULL,
                  log_file = NULL,
                  gene_field_index = 1,
                  sample_table = NULL,
                  ref_bams = NULL,
+                 panel_files = NULL,
                  ...) {
     args <- list(...)
 
@@ -98,7 +103,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             genes_file        = args$genes_file,
             genome_version    = args$genome_version %||% "hg19",
             bed_zero_based    = args$bed_zero_based %||% TRUE,
-            skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE
+            skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
+            sample_name_collapse = args$sample_name_collapse %||% sample_name_collapse,
+            panel_files       = args$panel_files %||% panel_files
         )
     } else {
         stop("[ERROR] Either config_path or pipeline parameters must be provided.")
@@ -200,6 +207,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                     input_bed = cfg$input$bed,
                     output_bed = processed_bed,
                     bed_process = cfg$bed_process,
+                    bed_zero_based = cfg$bed_zero_based %||% TRUE,
                     refseqgene = cfg$refseqgene %||% NULL,
                     transcripts_file = cfg$transcripts_file %||% NULL,
                     unknown_gene = cfg$unknown_gene %||% FALSE,
@@ -208,6 +216,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                     customexon = cfg$customexon %||% FALSE,
                     list_genes = cfg$list_genes %||% NULL,
                     genes_file = cfg$genes_file %||% NULL,
+                    panel_files = cfg$panel_files %||% NULL,
                     genome_version = cfg$genome_version %||% "hg19",
                     txdb = NULL,
                     gene_field_index = gene_field_index
@@ -232,6 +241,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 verbose = TRUE,
                 sample_name_delim = sample_name_delim,
                 sample_name_keep = sample_name_keep,
+                sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
                 custom_sample_names = custom_sample_names,
                 bed_zero_based = cfg$bed_zero_based %||% TRUE,
                 skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE

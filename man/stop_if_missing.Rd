@@ -11,9 +11,6 @@ stop_if_missing(val, msg)
 
 \item{msg}{Error message to display if validation fails.}
 }
-\value{
-Invisibly returns \code{NULL}, or stops with an error.
-}
 \description{
 Stop if value is NULL or empty
 }

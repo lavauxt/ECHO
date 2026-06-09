@@ -11,9 +11,6 @@ a \%||\% b
 
 \item{b}{Fallback value.}
 }
-\value{
-Either `a` or `b`.
-}
 \description{
 Returns the first argument if not NULL, otherwise the second.
 }

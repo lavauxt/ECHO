@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils.R
 \name{add_within_gene_indices}
 \alias{add_within_gene_indices}
-\title{Convert global exon indices to within‑gene indices}
+\title{Convert global exon indices to within‑gene indices (using start‑order)}
 \usage{
 add_within_gene_indices(cnv_calls, bed_file)
 }
@@ -18,5 +18,5 @@ The same data frame with updated `start.p` / `end.p` (per‑gene) and
 \description{
 For a set of CNV calls (each with global start.p and end.p), this function
 replaces those columns with per‑gene exon numbers. The original global indices
-are preserved as `global_start` and `global_end`. The input `bed_file` is not modified.
+are preserved as `global_start` and `global_end`.
 }

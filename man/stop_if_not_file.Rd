@@ -11,9 +11,6 @@ stop_if_not_file(path, msg)
 
 \item{msg}{Error message to display if file is missing.}
 }
-\value{
-Invisibly returns \code{NULL}, or stops with an error.
-}
 \description{
 Stop if file does not exist
 }

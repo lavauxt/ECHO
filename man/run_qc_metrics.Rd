@@ -22,8 +22,7 @@ run_qc_metrics(
 
 \item{min_total_reads}{Numeric. Minimum total reads per sample. Default \code{5e6}.}
 
-\item{max_exon_cv}{Numeric. Maximum allowed coefficient of variation per exon.
-Exons with CV > this value are flagged. Default \code{0.5}.}
+\item{max_exon_cv}{Numeric. Maximum allowed coefficient of variation per exon.}
 
 \item{output_file}{Character string. Output path. Default \code{"./QC_metrics.tsv"}.}
 }

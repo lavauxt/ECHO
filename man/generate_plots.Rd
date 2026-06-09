@@ -27,7 +27,5 @@ generate_plots(
 Invisibly returns the number of PDFs written.
 }
 \description{
-Creates PDF plots summarising CNV calls from ExomeDepth‑style workflows.
-Each PDF contains three panels: coverage comparison, gene annotation tiles,
-and observed/expected ratio with beta‑binomial confidence intervals.
+Creates PDF plots summarising CNV calls.
 }

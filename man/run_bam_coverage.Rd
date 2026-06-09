@@ -15,6 +15,7 @@ run_bam_coverage(
   verbose = TRUE,
   sample_name_delim = "\\\\.",
   sample_name_keep = "1",
+  sample_name_collapse = NULL,
   custom_sample_names = NULL,
   bed_zero_based = TRUE,
   skip_invalid_intervals = TRUE
@@ -37,16 +38,17 @@ run_bam_coverage(
 
 \item{verbose}{Logical. Print progress messages.}
 
-\item{sample_name_delim}{Character string. Delimiter to split filenames.}
+\item{sample_name_delim}{Character string. Regex delimiter to split filenames.}
 
-\item{sample_name_keep}{Character string. Which parts to keep.}
+\item{sample_name_keep}{Character string. Which parts to keep (e.g., "1", "1-2").}
+
+\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").}
 
 \item{custom_sample_names}{Optional character vector.}
 
 \item{bed_zero_based}{Logical. If TRUE, BED start coordinates are 0‑based.}
 
-\item{skip_invalid_intervals}{Logical. If TRUE, intervals that cannot be
-extracted from FASTA are silently removed (with a warning). Default TRUE.}
+\item{skip_invalid_intervals}{Logical. If TRUE, intervals that cannot be extracted from FASTA are removed.}
 }
 \value{
 Invisibly \code{NULL}. Coverage object saved to disk.

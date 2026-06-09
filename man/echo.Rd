@@ -11,11 +11,13 @@ echo(
   report = TRUE,
   sample_name_delim = "\\\\.",
   sample_name_keep = "1",
+  sample_name_collapse = NULL,
   custom_sample_names = NULL,
   log_file = NULL,
   gene_field_index = 1,
   sample_table = NULL,
   ref_bams = NULL,
+  panel_files = NULL,
   ...
 )
 }
@@ -36,6 +38,8 @@ Can be a single character (e.g., `"."`, `"_"`) or a regex like `"[._]"`. Default
 Examples: `"1"` (first part), `"1-2"` (first two parts), `"2"` (second part), `"2-3"` (parts 2 and 3).
 Default `"1"` (keep the first part before the first delimiter).}
 
+\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").}
+
 \item{custom_sample_names}{Optional character vector. Custom sample names (must match number of BAMs).}
 
 \item{log_file}{Character string. Path to log file. If \code{NULL}, a default log file is created inside the output directory.}
@@ -48,6 +52,9 @@ Default 1 (first field). Use 3 for BEDs like "NM_006015_ARID1A_ex5...".}
 
 \item{ref_bams}{Optional character string. Path to a TSV file with a \code{bam} column
 listing external reference BAMs (used for reporting only).}
+
+\item{panel_files}{Optional character vector. In STANDARD mode, a vector of BED file paths
+(one per line) or a single file containing paths to panel BEDs used to restrict targets.}
 
 \item{...}{Optional named overrides (see details).}
 }
