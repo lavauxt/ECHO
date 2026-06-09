@@ -320,6 +320,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             log_msg("Pipeline finished successfully!")
 
         }, warning = function(w) {
+            if (grepl("sequence levels not in the other", conditionMessage(w))) {
+                invokeRestart("muffleWarning")
+            }
             log_msg(conditionMessage(w), "WARNING")
             invokeRestart("muffleWarning")
         })

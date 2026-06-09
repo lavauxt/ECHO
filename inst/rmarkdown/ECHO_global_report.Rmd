@@ -276,7 +276,7 @@ if (nrow(cnv_s) > 0) {
         cnv_display,
         rownames = FALSE,
         colnames = c("Sample", "Chr", "Gene", "Start", "End",
-                     "Type", "Exons", "Fold change", "Confidence"),
+                     "Type", "Number of exons", "Fold change", "Confidence"),
         extensions = "Buttons",
         options = list(
           dom = "Bfrtip",
@@ -597,25 +597,35 @@ if (isTRUE(params$pdf_output) || identical(params$pdf_output, "true")) {
 ```{r confidence_recap, results='asis'}
 settings <- params$settings
 
-cat('<details>\n<summary><strong>&#9432; How confidence scores are calculated</strong></summary>\n\n')
-cat('<div style="padding:8px 16px;background:#f9f9f9;border-left:4px solid #4a90d9;">\n')
-cat('<p>Each CNV call is scored <strong>HIGH</strong>, <strong>MEDIUM</strong>, or <strong>LOW</strong> based on three criteria:</p>\n')
-cat('<table style="border-collapse:collapse;width:100%;font-size:0.9em;">\n')
-cat('<thead><tr style="background:#e8f0fe;"><th style="padding:6px 10px;text-align:left;">Criterion</th>
-     <th style="padding:6px 10px;">HIGH</th><th style="padding:6px 10px;">MEDIUM</th></tr></thead>\n')
-cat('<tbody>\n')
-cat(paste0('<tr><td style="padding:5px 10px;">Correlation test/reference</td>',
-           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_high_corr %||% 0.985, '</td>',
-           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_med_corr  %||% 0.95,  '</td></tr>\n'))
-cat(paste0('<tr><td style="padding:5px 10px;">Number of reference samples</td>',
-           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_high_refs %||% 3, '</td>',
-           '<td style="padding:5px 10px;text-align:center;">&ge;', settings$score_med_refs  %||% 2, '</td></tr>\n'))
-cat(paste0('<tr><td style="padding:5px 10px;">Fold change (outside range)</td>',
-           '<td style="padding:5px 10px;text-align:center;">&le;', settings$score_high_ratio_low %||% 0.70,
-           ' or &ge;', settings$score_high_ratio_high %||% 1.30, '</td>',
-           '<td style="padding:5px 10px;text-align:center;">&le;', settings$score_low_ratio_low  %||% 0.75,
-           ' or &ge;', settings$score_low_ratio_high %||% 1.25, '</td></tr>\n'))
-cat('</tbody></table>\n')
+score_table <- data.frame(
+  Criterion = c(
+    "Correlation test/reference",
+    "Number of reference samples",
+    "Fold change outside range"
+  ),
+  HIGH = c(
+    paste0("≥ ", settings$score_high_corr %||% 0.985),
+    paste0("≥ ", settings$score_high_refs %||% 3),
+    paste0("≤ ", settings$score_high_ratio_low %||% 0.70,
+           " or ≥ ", settings$score_high_ratio_high %||% 1.30)
+  ),
+  MEDIUM = c(
+    paste0("≥ ", settings$score_med_corr %||% 0.95),
+    paste0("≥ ", settings$score_med_refs %||% 2),
+    paste0("≤ ", settings$score_low_ratio_low %||% 0.75,
+           " or ≥ ", settings$score_low_ratio_high %||% 1.25)
+  ),
+  check.names = FALSE
+)
+
+cat('<details>
+')
+cat('<summary><strong>&#9432; How confidence scores are calculated</strong></summary>
+
+')
+cat('<p>Each CNV call is scored <strong>HIGH</strong>, <strong>MEDIUM</strong>, or <strong>LOW</strong> using the thresholds below.</p>
+')
+cat(knitr::kable(score_table, format = "html", escape = FALSE, row.names = FALSE))
 cat('<p style="margin-top:8px;">A call is <strong>HIGH</strong> only when correlation, number of reference samples, and fold change all meet the HIGH thresholds.</p>
 ')
 cat('<p>A call is <strong>MEDIUM</strong> when it does not meet HIGH but still meets the MEDIUM correlation/reference thresholds and its fold change stays outside the low-confidence interval.</p>
@@ -624,11 +634,12 @@ cat('<p>All other calls are labeled <strong>LOW</strong>. Calls involving flagge
 ')
 if (!is.null(settings$score_low_confidence_genes) && length(settings$score_low_confidence_genes) > 0) {
   cat(paste0('<p>Genes always flagged <strong>LOW</strong> regardless of metrics: <em>',
-             paste(settings$score_low_confidence_genes, collapse = ", "), '</em>.</p>\n'))
+             paste(settings$score_low_confidence_genes, collapse = ", "), '</em>.</p>
+'))
 }
-cat('</div>\n</details>\n')
+cat('</details>
+')
 ```
-
 
 ## Pipeline Log
 
@@ -636,12 +647,15 @@ cat('</div>\n</details>\n')
 if (!is.null(params$log_file) && !identical(params$log_file, NA) && file.exists(params$log_file)) {
   log_lines <- readLines(params$log_file, warn = FALSE)
 
-  # Split into warnings and non-warning lines
-  warning_lines <- log_lines[grepl("^\\[WARNING\\]", log_lines)]
+  # Split into warnings and non-warning lines. Drop noisy multi-line Bioconductor seqlevel warnings.
+  seqlevel_start <- grepl("sequence levels not in the other", log_lines, fixed = TRUE)
+  seqlevel_cont <- grepl("^  - in ", log_lines) | grepl("^  Make sure", log_lines) | grepl("^  genome ", log_lines)
+  seqlevel_warning <- seqlevel_start | seqlevel_cont
+  warning_lines <- log_lines[startsWith(log_lines, "[WARNING]") & !seqlevel_warning]
   session_lines <- log_lines[grepl("^(R version|Platform|  )", log_lines)]
-  info_lines    <- log_lines[!grepl("^\\[WARNING\\]", log_lines) &
-                              !grepl("^(R version|Platform|  )", log_lines)]
-
+  info_lines    <- log_lines[!startsWith(log_lines, "[WARNING]") &
+                              !grepl("^(R version|Platform|  )", log_lines) &
+                              !seqlevel_warning]
   # --- Warnings block ---
   cat('<details>\n<summary><strong>&#9888; Warnings (', length(warning_lines), ')</strong></summary>\n\n', sep = "")
   if (length(warning_lines) > 0) {

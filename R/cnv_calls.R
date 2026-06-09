@@ -206,25 +206,20 @@ run_cnv_calling <- function(rdata_file,
         test_counts <- counts[, sample, drop = TRUE]
         ref_matrix  <- as.matrix(counts[, ref_samples, drop = FALSE])
 
-        withCallingHandlers({
-            best_refs <- tryCatch({
-                ExomeDepth::select.reference.set(
-                    test.counts = test_counts,
-                    reference.counts = ref_matrix,
-                    bin.length = (counts$end - counts$start),
-                    n.bins.reduced = n.bins.reduced,
-                    phi.bins = phi.bins,
-                    formula = formula,
-                    data = data
-                )$reference.choice
-            }, error = function(e) {
-                message("[WARNING] Reference selection failed for ", sample, ": ", e$message)
-                character(0)
-            })
-        }, warning = function(w) {
-            if (grepl("sequence levels not in the other", conditionMessage(w)))
-                invokeRestart("muffleWarning")
-        })
+        best_refs <- suppressWarnings(tryCatch({
+            ExomeDepth::select.reference.set(
+                test.counts = test_counts,
+                reference.counts = ref_matrix,
+                bin.length = (counts$end - counts$start),
+                n.bins.reduced = n.bins.reduced,
+                phi.bins = phi.bins,
+                formula = formula,
+                data = data
+            )$reference.choice
+        }, error = function(e) {
+            message("[WARNING] Reference selection failed for ", sample, ": ", e$message)
+            character(0)
+        }))
 
         if (length(best_refs) == 0) {
             message("[WARNING] Model optimization selected 0 references for ", sample)
@@ -234,7 +229,7 @@ run_cnv_calling <- function(rdata_file,
 
         ref_counts <- rowSums(counts[, best_refs, drop = FALSE])
 
-        withCallingHandlers({
+        suppressWarnings({
             ed <- methods::new(
                 "ExomeDepth",
                 test = test_counts,
@@ -251,9 +246,6 @@ run_cnv_calling <- function(rdata_file,
                 end = counts$end,
                 name = counts$exon
             )
-        }, warning = function(w) {
-            if (grepl("sequence levels not in the other", conditionMessage(w)))
-                invokeRestart("muffleWarning")
         })
 
         raw_calls <- ed@CNV.calls

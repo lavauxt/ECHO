@@ -45,7 +45,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     qh <- S4Vectors::queryHits(hits)
     sh <- S4Vectors::subjectHits(hits)
 
-    ov <- GenomicRanges::pintersect(gr1[qh], gr2[sh])
+    ov <- suppressWarnings(GenomicRanges::pintersect(gr1[qh], gr2[sh]))
     w <- IRanges::width(ov)
 
     df <- data.frame(q = qh, s = sh, w = w)

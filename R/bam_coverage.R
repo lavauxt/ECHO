@@ -239,11 +239,13 @@ run_bam_coverage <- function(
     # Compute counts
     # -------------------------------------------------------------------------
     counts <- tryCatch({
-        ExomeDepth::getBamCounts(
-            bed.frame = as.data.frame(bed_file),
-            bam.files = bams,
-            include.chr = include.chr,
-            referenceFasta = fasta
+        suppressWarnings(
+            ExomeDepth::getBamCounts(
+                bed.frame = as.data.frame(bed_file),
+                bam.files = bams,
+                include.chr = include.chr,
+                referenceFasta = fasta
+            )
         )
     }, error = function(e) {
         msg <- conditionMessage(e)
