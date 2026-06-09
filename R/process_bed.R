@@ -5,7 +5,8 @@
 #' @param bed_process Mode: "STANDARD", "REGEN", or "NO".
 #' @param bed_zero_based Logical: is the input BED 0‑based? Default TRUE.
 #' @param unknown_gene Keep intervals without gene name? Default FALSE.
-#' @param exon_sep Separator for splitting gene names (e.g., "_"). Default "_".
+#' @param exon_sep Character string or list/vector of characters to split gene names (e.g., "[_()]" or c("_", "(")). Default "_".
+#' @param gene_name_collapse Character token used to rejoin kept parts. Default "_".
 #' @param customexon Add a Custom.Exon column containing exon numbers. Default FALSE.
 #' @param auto_exon_number If TRUE, assign sequential exon numbers per gene based on genomic order.
 #'        If FALSE, check region_numbering_mode configuration. Default TRUE.
@@ -23,7 +24,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
                              refseqgene = NULL, transcripts_file = NULL,
                              unknown_gene = FALSE, gene_list_restrict = NULL,
                              chr_list_restrict = NULL,
-                             exon_sep = "_", kmer = NULL, customexon = FALSE,
+                             exon_sep = "_", gene_name_collapse = "_", kmer = NULL, customexon = FALSE,
                              auto_exon_number = TRUE, region_numbering_mode = "bed_text",
                              gene_name_keep = NULL,
                              list_genes = NULL, genes_file = NULL,
@@ -57,8 +58,27 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
   # ----------------------------
   # Helper: extract gene name and optional exon number
   # ----------------------------
-  parse_bed_name <- function(name_vec, exon_sep = "_", gene_field_index = NULL, gene_name_keep = NULL, auto_exon = TRUE) {
-    if (is.null(exon_sep) || exon_sep == "") exon_sep <- "_"
+  parse_bed_name <- function(name_vec, exon_sep = "_", gene_field_index = NULL, 
+                             gene_name_keep = NULL, auto_exon = TRUE, gene_name_collapse = "_") {
+    if (is.null(exon_sep) || length(exon_sep) == 0 || any(exon_sep == "")) exon_sep <- "_"
+    if (is.null(gene_name_collapse) || gene_name_collapse == "") gene_name_collapse <- "_"
+    
+    # Evaluate if multi-token regex pattern compilation or literal evaluation is needed
+    if (length(exon_sep) > 1) {
+      escaped_seps <- vapply(exon_sep, function(x) {
+        gsub("([\\\\^\\$\\.\\|\\?\\*\\+\\(\\)\\[\\{\\]\\}])", "\\\\\\1", x)
+      }, character(1))
+      split_pat <- paste(escaped_seps, collapse = "|")
+      use_fixed <- FALSE
+    } else {
+      if (grepl("[\\[\\]\\(\\)\\|\\.\\*\\+\\?\\^\\$]", exon_sep, perl = TRUE)) {
+        split_pat <- exon_sep
+        use_fixed <- FALSE
+      } else {
+        split_pat <- exon_sep
+        use_fixed <- TRUE
+      }
+    }
     
     gene_names <- character(length(name_vec))
     exon_numbers <- integer(length(name_vec))
@@ -71,10 +91,9 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         next
       }
       
-      # Remove trailing metadata comma structures
       g <- strsplit(g, ",")[[1]][1]
       
-      # Extract exon text fallback
+      # Extract exon number
       exon_num <- NA_integer_
       m <- regexpr("_ex([0-9]+)", g)
       if (m == -1) m <- regexpr("ex([0-9]+)", g)
@@ -84,8 +103,17 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       }
       exon_numbers[i] <- exon_num
       
-      # Complex Gene Name Parsing
-      parts <- strsplit(g, exon_sep, fixed = TRUE)[[1]]
+      # -----------------------------------------------------------------
+      # GENERALIZED CLEANING (No Hardcoded Genes)
+      # -----------------------------------------------------------------
+      # 1. Strip parenthesis and anything inside them (e.g., "(zerze)")
+      g_clean <- gsub("\\s*\\(.*?\\)", "", g)
+      
+      # 2. Split the string using your defined separators (e.g., "_")
+      parts <- strsplit(g_clean, split = split_pat, fixed = use_fixed)[[1]]
+      parts <- parts[parts != ""]  
+      
+      # 3. Apply the index rule (gene_name_keep)
       keep_idx <- NULL
       if (!is.null(gene_name_keep)) {
         keep_idx <- parse_keep_indices(gene_name_keep, length(parts))
@@ -95,26 +123,39 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       
       if (!is.null(keep_idx)) {
         valid_idx <- keep_idx[keep_idx <= length(parts) & keep_idx >= 1]
+        
         if (length(valid_idx) > 0) {
-          gene <- paste(parts[valid_idx], collapse = exon_sep)
+          # Standard case: NM_000251_MSH2 -> grabs MSH2
+          gene <- paste(parts[valid_idx], collapse = gene_name_collapse)
         } else {
-          gene <- parts[1]
+          # DYNAMIC FALLBACK: If requested index is larger than available parts
+          # grab the LAST part available.
+          gene <- parts[length(parts)]
         }
       } else {
-        if (grepl("^(NM_|NR_|XM_)", g)) {
-          if (length(parts) >= 3) gene <- parts[3] else gene <- parts[1]
+        # Default behavior if no keep index is defined
+        if (grepl("^(NM_|NR_|XM_)", g_clean)) {
+          if (length(parts) >= 3) gene <- parts[3] else gene <- parts[length(parts)]
         } else {
           gene <- parts[1]
         }
       }
-      gene <- gsub("\\(.*$", "", gene)
+      
+      # 4. AUTOMATED COORDINATE SAFEGUARD (No Hardcoding)
+      # If the extracted string consists entirely of digits (e.g., "58149635"),
+      # it represents a structural coordinate position, not a gene descriptor.
+      # Automatically revert to the primary label component.
+      if (!is.na(gene) && grepl("^[0-9]+$", gene)) {
+        gene <- parts[1]
+      }
+      
       gene_names[i] <- gene
     }
     list(gene = gene_names, exon = exon_numbers)
   }
 
   # ----------------------------
-  # Helper: assign sequential exon numbers per gene based on genomic order
+  # Helper: assign sequential exons per gene based on genomic order
   # ----------------------------
   assign_sequential_exons <- function(df, start_col = "Start", gene_col = "Gene") {
     chrom_order <- c(paste0("chr", c(1:22, "X", "Y", "M")))
@@ -139,7 +180,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
   }
 
   # ----------------------------
-  # Helper: assign region index based purely on local file/occurrence order
+  # Helper: assign region index based purely on local file occurrence order
   # ----------------------------
   assign_file_order_exons <- function(df, gene_col = "Gene") {
     df$ExonNum <- NA_integer_
@@ -172,7 +213,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     input_df$OriginalName <- NA_character_
   }
   
-  parsed <- parse_bed_name(input_df$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number)
+  parsed <- parse_bed_name(input_df$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
   input_df$Gene <- parsed$gene
   input_df$ExtractedExon <- parsed$exon
   
@@ -226,7 +267,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       ))
     } else ref_df$Gene <- ref_df$GeneID
     ref_df <- ref_df[!is.na(ref_df$Gene), ]
-    ref_parsed <- parse_bed_name(ref_df$Gene, exon_sep, gene_field_index, gene_name_keep, auto_exon_number)
+    ref_parsed <- parse_bed_name(ref_df$Gene, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
     ref_df$Gene <- ref_parsed$gene
     if (any(grepl("^NM_", ref_df$Transcript))) ref_df <- ref_df[grepl("^NM_", ref_df$Transcript), ]
     
@@ -282,10 +323,9 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         all_panels <- rbind(all_panels, tmp)
       }
       all_panels <- unique(all_panels)
-      panel_parsed <- parse_bed_name(all_panels$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number)
+      panel_parsed <- parse_bed_name(all_panels$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
       all_panels$Gene <- panel_parsed$gene
       all_panels$ExtractedExon <- panel_parsed$exon
-      
       if (!auto_exon_number && region_numbering_mode == "bed_text") {
         all_panels$ExonNum <- all_panels$ExtractedExon
       } else {
@@ -307,7 +347,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         Chr = as.character(GenomicRanges::seqnames(bed_gr[qh])), Start = output_start, End = GenomicRanges::end(bed_gr[qh]),
         Gene = panel_gr$Gene[sh], ExonNum = panel_gr$ExonNum[sh], stringsAsFactors = FALSE
       )
-      
+
       if (auto_exon_number) {
         df <- assign_sequential_exons(df, start_col = "Start", gene_col = "Gene")
       } else if (region_numbering_mode == "file_order") {
@@ -325,6 +365,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         df <- assign_file_order_exons(df, gene_col = "Gene")
       }
       df$Custom.Exon <- df$ExonNum
+
     }
   } else {
     stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")

@@ -1,24 +1,30 @@
+# =============================================================================
+# ECHO Pipeline Configuration File
+# =============================================================================
+
 input:
-  bamdir: "./data/GOM"
-  bed: "./data/GOM/GOM.bed"
-  fasta: "./data/REF/hg19.fa"
-  rbams: null
+  bamdir: "./data/GOM"                    # Path to folder containing BAM and BAI files
+  bed: "./data/GOM/GOM.bed"               # Original input target regions capture file
+  fasta: "./data/REF/hg19.fa"             # Path to Reference Genome sequence file
+  rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_GOMv2_standard"
-  prefix: "GOM"
+  dir: "./result_GOMv2_standard"          # Target directory path for generated assets
+  prefix: "GOM"                           # Output filename base text identification tag
 
 settings:
-  modechrom: "A"
-  min_corr: 0.98
-  min_cov: 100
-  min_total_reads: 300000
-  max_exon_cv: 0.5
-  transition_probability: 0.0001
-  expected_CNV_length: 50000
-  n_bins_reduced: 10000
-  phi_bins: 1
-  formula: "cbind(test, reference) ~ 1"
+  modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
+  min_corr: 0.98                          # Drop reference components with alignment score below this
+  min_cov: 100                            # Minimum read mapping target interval ceiling
+  min_total_reads: 300000                 # Library depth filter criteria rule per sample file
+  max_exon_cv: 0.5                        # Max allowed target variation coefficient metric
+  transition_probability: 0.0001         # HMM state selection shift coefficient value
+  expected_CNV_length: 50000              # Baseline CNV target structural span scaling size
+  n_bins_reduced: 10000                   # Dimensional data optimization normalization size
+  phi_bins: 1                             # Normalization distribution constant scale index
+  formula: "cbind(test, reference) ~ 1"   # ExomeDepth evaluation regression expression frame
+  
+  # QC scoring thresholds for tracking pipeline certainty
   score_high_corr: 0.985
   score_med_corr: 0.95
   score_high_refs: 3
@@ -29,24 +35,29 @@ settings:
   score_high_ratio_high: 1.30
   score_med_ratio_low: 0.60
   score_med_ratio_high: 1.40
-  score_low_confidence_genes: ["PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR"]
+  
+  # List of highly homologous/problematic genes to flag or drop
+  score_low_confidence_genes: 
+    - "PMS2"
+    - "SMN1"
+    - "CYP2D6"
+    - "HBA1"
+    - "HBA2"
+    - "STRC"
+    - "CYP21A2"
+    - "GBA1"
+    - "CFTR"
 
-# -------------------------------
-# BED PREPROCESSING
-# -------------------------------
+# -----------------------------------------------------------------------------
+# Target Name Processing & Cleaning Sub-Section
+# -----------------------------------------------------------------------------
 bed_preprocess:
-  bed_process: "STANDARD"
-  genome_version: "hg19"
-  unknown_gene: false
-  exon_sep: "_"                 # Split token used to break apart complex labels
-  
-  # Configuration for complex gene identifiers (when auto_exon_number is false)
-  gene_name_keep: "2"         # Keeps parts 1 and 2 joined together (e.g., "MUC4_PROT")
-  
-  customexon: true
-  bed_zero_based: true
-  skip_invalid_intervals: true
-  
-  # Region Numbering Controls
-  auto_exon_number: false       # Set to FALSE to switch from global genomic order re-numbering
-  region_numbering_mode: "file_order" # "bed_text" to keep old text digits, or "file_order" for pure per-region sequential indexes
+  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
+  gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
+  gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges
+  auto_exon_number: false                 # Prevent re-sorting coordinate engines from dropping name numbers
+  region_numbering_mode: "file_order"     # Choose naming logic mode: 'file_order' or 'bed_text'
+  customexon: true                        # Generate custom.exon value outputs in standard formats
+  bed_zero_based: true                    # Set true if input BED file indices track from index 0
+  skip_invalid_intervals: true            # Gracefully filter invalid coordinate ranges
