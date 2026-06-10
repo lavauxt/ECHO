@@ -234,7 +234,9 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     list(q = df$q, s = df$s)
   }
 
-  # REGEN MODE
+  # =========================================================================
+  # REGEN MODE (CORRECTED)
+  # =========================================================================
   if (bed_process == "REGEN") {
     message("[INFO] REGEN mode: using internal RefSeq Select-like DB")
     if (is.null(genome_version)) stop("REGEN mode requires genome_version = 'hg19' or 'hg38'")
@@ -261,11 +263,20 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       stringsAsFactors = FALSE
     )
     ref_df <- ref_df[ref_df$GeneID != "", ]
+    
+    # --- FIX: Safely retrieve gene symbols from org.Hs.eg.db ---
     if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+      # Get the database object without attaching the package
+      org_db <- getExportedValue("org.Hs.eg.db", "org.Hs.eg.db")
       ref_df$Gene <- suppressMessages(AnnotationDbi::mapIds(
-        org.Hs.eg.db, keys = ref_df$GeneID, keytype = "ENTREZID", column = "SYMBOL", multiVals = "first"
+        org_db, keys = ref_df$GeneID, keytype = "ENTREZID", column = "SYMBOL", multiVals = "first"
       ))
-    } else ref_df$Gene <- ref_df$GeneID
+    } else {
+      message("[WARNING] Package 'org.Hs.eg.db' not installed. Using Entrez IDs as gene names.")
+      ref_df$Gene <- ref_df$GeneID
+    }
+    # --- End of fix ---
+    
     ref_df <- ref_df[!is.na(ref_df$Gene), ]
     ref_parsed <- parse_bed_name(ref_df$Gene, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
     ref_df$Gene <- ref_parsed$gene
@@ -303,7 +314,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     df$Custom.Exon <- df$Exon
 
   } else if (bed_process == "STANDARD") {
-    # STANDARD MODE
+    # STANDARD MODE (unchanged)
     panel_bed_paths <- NULL
     if (!is.null(list_genes) && file.exists(list_genes)) panel_bed_paths <- readLines(list_genes)
     else if (!is.null(genes_file) && file.exists(genes_file)) panel_bed_paths <- readLines(genes_file)
