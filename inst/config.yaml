@@ -3,14 +3,14 @@
 # =============================================================================
 
 input:
-  bamdir: "./dataTESTM"                    # Path to folder containing BAM and BAI files
-  bed: "./data/TEST/TEST.bed"               # Original input target regions capture file
+  bamdir: "./data/TEST"                   # Path to folder containing BAM and BAI files
+  bed: "./data/TEST/TEST.bed"             # Original input target regions capture file
   fasta: "./data/REF/hg19.fa"             # Path to Reference Genome sequence file
   rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_TEST"          # Target directory path for generated assets
-  prefix: "TEST"                           # Output filename base text identification tag
+  dir: "./result_TEST"                    # Target directory path for generated assets
+  prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
   modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
@@ -18,7 +18,7 @@ settings:
   min_cov: 100                            # Minimum read mapping target interval ceiling
   min_total_reads: 300000                 # Library depth filter criteria rule per sample file
   max_exon_cv: 0.5                        # Max allowed target variation coefficient metric
-  transition_probability: 0.0001         # HMM state selection shift coefficient value
+  transition_probability: 0.0001          # HMM state selection shift coefficient value
   expected_CNV_length: 50000              # Baseline CNV target structural span scaling size
   n_bins_reduced: 10000                   # Dimensional data optimization normalization size
   phi_bins: 1                             # Normalization distribution constant scale index
