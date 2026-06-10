@@ -166,7 +166,7 @@ create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index) {
 #' @param rdata_file Character string. Path to summary RData.
 #' @param output_dir Character string. Output directory for PDF files.
 #' @param modechrom Chromosome filter.
-#' @param prefix Filename prefix.
+#' @param prefix Filename prefix (used to construct PDF names).
 #' @param log_file Optional path to log file.
 #' @return Invisibly returns the number of PDFs written.
 #' @export
@@ -201,21 +201,16 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
     
-    # -------------------------------------------------------------------------
-    # FIX: Extract specific per-gene exon numbering from bed_file if available.
-    # Checks for common column names or falls back safely to the 5th column.
-    # -------------------------------------------------------------------------
+    # Extract exon index for plotting
     exon_col <- grep("^(exon|custom\\.exon|exonnum)$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
     if (length(exon_col) > 0) {
         exon_index <- bed_file[[exon_col[1]]]
     } else if (ncol(bed_file) >= 5) {
         exon_index <- bed_file[[5]]
     } else {
-        exon_index <- compute_exon_index(bed_file) # fallback to unified indexing if column missing
+        exon_index <- compute_exon_index(bed_file)
     }
-    # Clean up NA values to prevent literal "NA" prints on the x-axis
     exon_index <- ifelse(is.na(exon_index), "", as.character(exon_index))
-    # -------------------------------------------------------------------------
 
     n_written <- 0L
 
@@ -239,7 +234,8 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
             gene_str <- sanitize_filename(as.character(call_row$Gene))
             sample_dir <- file.path(output_dir, sanitize_filename(plot_data$sample))
             dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
-            file_path <- file.path(sample_dir, paste0(prefix_str, ".", plot_data$sample, ".", gene_str, "_", i, ".pdf"))
+            # Changed: PDF filename now includes ECHO_ prefix and the user-provided prefix
+            file_path <- file.path(sample_dir, paste0("ECHO_", prefix_str, "_", plot_data$sample, "_", gene_str, "_", i, ".pdf"))
 
             p_cov <- create_coverage_plot(plot_data$cov_data, plot_data$pt_data, plot_data$single_chr, plot_data$prev, plot_data$exon_range, exon_index, sample_name = plot_data$sample)
             p_genes <- create_gene_tile_plot(bed_file, plot_data$exon_range, plot_data$single_chr, plot_data$prev, plot_data$new_chr)

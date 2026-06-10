@@ -15,7 +15,8 @@ generate_report(
   sample_table = NULL,
   ref_bams = NULL,
   log_file = NULL,
-  pdf_output = FALSE
+  pdf_output = FALSE,
+  prefix = NULL
 )
 }
 \arguments{
@@ -37,6 +38,13 @@ If FALSE (default), generate one report per sample (legacy mode).}
 \item{sample_table}{Optional path to sample table (CSV/TSV) to display in report.}
 
 \item{ref_bams}{Optional path to external reference BAM list (TSV with 'bam' column).}
+
+\item{log_file}{Path to log file (optional).}
+
+\item{pdf_output}{Logical. If TRUE, also generate a PDF version using pagedown.}
+
+\item{prefix}{Character string. Prefix to use for output file name (e.g., "GOM").
+When provided, the global report will be named `ECHO_<prefix>_report.html`.}
 }
 \value{
 Invisibly returns the output file path(s).

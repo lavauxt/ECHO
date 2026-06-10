@@ -8,6 +8,8 @@
 #'   Default is \code{NULL} (legacy), but when using a config file it will be set to a default path inside the output directory.
 #' @param save_ed_objects Logical. Save full ExomeDepth objects? Default \code{FALSE}.
 #' @param report Logical. Generate interactive HTML reports? Default \code{TRUE}.
+#' @param plots Logical. Generate per‑CNV PDF plots? Default \code{FALSE}.
+#' @param vcf_per_sample Logical. Write a separate VCF file for each sample? Default \code{FALSE}.
 #' @param sample_name_delim Character string. Delimiter(s) to split the filename.
 #'   Can be a single character (e.g., `"."`, `"_"`) or a regex like `"[._]"`. Default `"\\."` (dot only).
 #' @param sample_name_keep Character string. Specifies which parts to keep after splitting.
@@ -29,6 +31,8 @@
 #' @export
 echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  report = TRUE,
+                 plots = FALSE,
+                 vcf_per_sample = FALSE,
                  sample_name_delim = "\\.",
                  sample_name_keep = "1",
                  sample_name_collapse = NULL,
@@ -127,10 +131,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     }
 
     # -------------------------------------------------------------------------
-    # 2. Setup logging
+    # 2. Setup logging with prefix
     # -------------------------------------------------------------------------
     if (is.null(log_file)) {
-        log_file <- file.path(cfg$output$dir, "pipeline.log")
+        log_file <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_pipeline.log"))
     }
     log_dir <- dirname(log_file)
     if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
@@ -169,13 +173,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             log_msg(paste("Log file:", basename(log_file)))
 
             # -----------------------------------------------------------------
-            # 3. Define output file paths
+            # 3. Define output file paths (with prefix)
             # -----------------------------------------------------------------
             paths <- list(
-                rdata   = file.path(cfg$output$dir, "ECHO_coverage.Rdata"),
-                metrics = file.path(cfg$output$dir, "QC_metrics.tsv"),
-                cnvs    = file.path(cfg$output$dir, "CNV_calls.tsv"),
-                summary = file.path(cfg$output$dir, "ECHO_summary.RData"),
+                rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),
+                metrics = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_QC_metrics.tsv")),
+                cnvs    = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNV_calls.tsv")),
+                summary = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_summary.RData")),
                 plots   = file.path(cfg$output$dir, "Plots")
             )
 
@@ -193,7 +197,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             })
 
             if (is.null(vcf_output)) {
-                vcf_output <- file.path(cfg$output$dir, "CNVs.vcf")
+                vcf_output <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNVs.vcf"))
             }
 
             stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
@@ -204,7 +208,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             # -----------------------------------------------------------------
             if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
                 log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
-                processed_bed <- file.path(cfg$output$dir, paste0(cfg$output$prefix, "_targets.bed"))
+                # CHANGED: processed BED now has ECHO_ prefix
+                processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
                 process_bed_file(
                     input_bed = cfg$input$bed,
                     output_bed = processed_bed,
@@ -285,18 +290,25 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             do.call(run_cnv_calling, cnv_args)
             log_msg("Step 3/6 completed.")
 
-            log_msg("Step 4/6: Generating plots...")
-            generate_plots(
-                rdata_file = paths$summary,
-                output_dir = paths$plots,
-                modechrom  = cfg$settings$modechrom,
-                prefix     = cfg$output$prefix,
-                log_file   = log_file
-            )
-            log_msg("Step 4/6 completed.")
+            # Step 4/6: Plots (off by default)
+            if (plots) {
+                log_msg("Step 4/6: Generating plots...")
+                generate_plots(
+                    rdata_file = paths$summary,
+                    output_dir = paths$plots,
+                    modechrom  = cfg$settings$modechrom,
+                    prefix     = cfg$output$prefix,
+                    log_file   = log_file
+                )
+                log_msg("Step 4/6 completed.")
+            } else {
+                log_msg("Step 4/6: Plot generation skipped (plots = FALSE).")
+            }
 
+            # Step 5/6: HTML report
             if (report) {
                 log_msg("Step 5/6: Generating HTML report...")
+                # CHANGED: pass prefix to generate_report
                 generate_report(summary_rdata = paths$summary,
                                 qc_metrics_file = paths$metrics,
                                 output_dir = cfg$output$dir,
@@ -305,13 +317,15 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                                 sample_table = sample_table,
                                 ref_bams = ref_bams %||% cfg$input$rbams,
                                 log_file = log_file,
-                                pdf_output = cfg$settings$pdf_output %||% FALSE)
+                                pdf_output = cfg$settings$pdf_output %||% FALSE,
+                                prefix = cfg$output$prefix)
                 log_msg("Step 5/6 completed.")
             } else {
                 log_msg("Step 5/6: Report generation skipped (report = FALSE).")
             }
 
-            if (!is.null(vcf_output)) {
+            # Step 6/6: VCF export (combined and per‑sample)
+            if (!is.null(vcf_output) || vcf_per_sample) {
                 log_msg("Step 6/6: Exporting CNVs to VCF...")
                 if (file.exists(paths$summary)) {
                     cnv_calls_local <- local({
@@ -320,8 +334,22 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                         env$cnv_calls
                     })
                     if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
-                        export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
-                        log_msg(paste("VCF written to:", basename(vcf_output)))
+                        # Combined VCF
+                        if (!is.null(vcf_output)) {
+                            export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
+                            log_msg(paste("Combined VCF written to:", basename(vcf_output)))
+                        }
+                        # Per‑sample VCFs
+                        if (vcf_per_sample) {
+                            samples <- unique(cnv_calls_local$Sample)
+                            for (s in samples) {
+                                sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
+                                if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
+                                vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                                export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
+                                log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
+                            }
+                        }
                     } else {
                         log_msg("No CNV calls to export to VCF.")
                     }
@@ -330,7 +358,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 }
                 log_msg("Step 6/6 completed.")
             } else {
-                log_msg("Step 6/6: VCF export skipped (vcf_output = NULL).")
+                log_msg("Step 6/6: VCF export skipped.")
             }
 
             log_msg("Pipeline finished successfully!")

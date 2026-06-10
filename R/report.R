@@ -10,12 +10,17 @@
 #' @param sample_name Optional single sample name (only used when global = FALSE).
 #' @param sample_table Optional path to sample table (CSV/TSV) to display in report.
 #' @param ref_bams Optional path to external reference BAM list (TSV with 'bam' column).
+#' @param log_file Path to log file (optional).
+#' @param pdf_output Logical. If TRUE, also generate a PDF version using pagedown.
+#' @param prefix Character string. Prefix to use for output file name (e.g., "GOM").
+#'   When provided, the global report will be named `ECHO_<prefix>_report.html`.
 #'
 #' @return Invisibly returns the output file path(s).
 #' @export
 generate_report <- function(summary_rdata, qc_metrics_file, output_dir, 
                             settings, config = NULL, global = TRUE, sample_name = NULL,
-                            sample_table = NULL, ref_bams = NULL, log_file = NULL, pdf_output = FALSE) {
+                            sample_table = NULL, ref_bams = NULL, log_file = NULL, 
+                            pdf_output = FALSE, prefix = NULL) {
   if (!requireNamespace("rmarkdown", quietly = TRUE))
     stop("Package 'rmarkdown' is required for report generation.")
 
@@ -69,7 +74,14 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   if (global) {
     template <- system.file("rmarkdown/ECHO_global_report.Rmd", package = "ECHO")
     if (template == "") stop("Global report template not found. Reinstall package.")
-    out_file <- file.path(output_dir, "ECHO_global_report.html")
+    
+    # Determine output file name
+    if (!is.null(prefix) && nzchar(prefix)) {
+      out_file <- file.path(output_dir, paste0("ECHO_", prefix, "_report.html"))
+    } else {
+      out_file <- file.path(output_dir, "ECHO_global_report.html")
+    }
+    
     rmarkdown::render(template,
                       params = list(
                         cnv_calls = cnv_calls,

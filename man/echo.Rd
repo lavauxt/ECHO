@@ -9,6 +9,8 @@ echo(
   vcf_output = NULL,
   save_ed_objects = FALSE,
   report = TRUE,
+  plots = FALSE,
+  vcf_per_sample = FALSE,
   sample_name_delim = "\\\\.",
   sample_name_keep = "1",
   sample_name_collapse = NULL,
@@ -30,6 +32,10 @@ Default is \code{NULL} (legacy), but when using a config file it will be set to 
 \item{save_ed_objects}{Logical. Save full ExomeDepth objects? Default \code{FALSE}.}
 
 \item{report}{Logical. Generate interactive HTML reports? Default \code{TRUE}.}
+
+\item{plots}{Logical. Generate per‑CNV PDF plots? Default \code{FALSE}.}
+
+\item{vcf_per_sample}{Logical. Write a separate VCF file for each sample? Default \code{FALSE}.}
 
 \item{sample_name_delim}{Character string. Delimiter(s) to split the filename.
 Can be a single character (e.g., `"."`, `"_"`) or a regex like `"[._]"`. Default `"\\."` (dot only).}

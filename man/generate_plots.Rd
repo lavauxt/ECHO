@@ -19,7 +19,7 @@ generate_plots(
 
 \item{modechrom}{Chromosome filter.}
 
-\item{prefix}{Filename prefix.}
+\item{prefix}{Filename prefix (used to construct PDF names).}
 
 \item{log_file}{Optional path to log file.}
 }

@@ -15,9 +15,12 @@ process_bed_file(
   gene_list_restrict = NULL,
   chr_list_restrict = NULL,
   exon_sep = "_",
+  gene_name_collapse = "_",
   kmer = NULL,
   customexon = FALSE,
   auto_exon_number = TRUE,
+  region_numbering_mode = "bed_text",
+  gene_name_keep = NULL,
   list_genes = NULL,
   genes_file = NULL,
   panel_files = NULL,
@@ -37,19 +40,25 @@ process_bed_file(
 
 \item{unknown_gene}{Keep intervals without gene name? Default FALSE.}
 
-\item{exon_sep}{Separator for splitting gene names (e.g., "_"). Default "_".}
+\item{exon_sep}{Character string or list/vector of characters to split gene names (e.g., "[_()]" or c("_", "(")). Default "_".}
+
+\item{gene_name_collapse}{Character token used to rejoin kept parts. Default "_".}
 
 \item{customexon}{Add a Custom.Exon column containing exon numbers. Default FALSE.}
 
 \item{auto_exon_number}{If TRUE, assign sequential exon numbers per gene based on genomic order.
-If FALSE, try to extract from name; if none found, use NA. Default TRUE.}
+If FALSE, check region_numbering_mode configuration. Default TRUE.}
+
+\item{region_numbering_mode}{If auto_exon_number is FALSE, specifies numbering type:
+"bed_text" (extract from string pattern) or "file_order" (sequential per gene based on local file occurrence).}
+
+\item{gene_name_keep}{Specifies parts to keep after splitting by exon_sep (e.g., "1", "1-2", "1,3").}
 
 \item{panel_files}{Character vector of BED file paths (one per line) or a single file containing paths.}
 
 \item{genome_version}{"hg19" or "hg38" (REGEN mode).}
 
-\item{gene_field_index}{1‑based index of the gene name field after splitting.
-If NULL, auto‑detect (3rd for NM‑prefixed, 1st otherwise).}
+\item{gene_field_index}{1‑based index of the gene name field after splitting (legacy fallback for gene_name_keep).}
 
 \item{...}{other parameters for compatibility.}
 }
