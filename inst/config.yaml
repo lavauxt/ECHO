@@ -3,14 +3,14 @@
 # =============================================================================
 
 input:
-  bamdir: "./data/GOM"                    # Path to folder containing BAM and BAI files
-  bed: "./data/GOM/GOM.bed"               # Original input target regions capture file
+  bamdir: "./dataTESTM"                    # Path to folder containing BAM and BAI files
+  bed: "./data/TEST/TEST.bed"               # Original input target regions capture file
   fasta: "./data/REF/hg19.fa"             # Path to Reference Genome sequence file
   rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_GOMv2_regen"          # Target directory path for generated assets
-  prefix: "GOM"                           # Output filename base text identification tag
+  dir: "./result_TEST"          # Target directory path for generated assets
+  prefix: "TEST"                           # Output filename base text identification tag
 
 settings:
   modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
@@ -52,7 +52,7 @@ settings:
 # Target Name Processing & Cleaning Sub-Section
 # -----------------------------------------------------------------------------
 bed_preprocess:
-  bed_process: "REGEN"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
   exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
   gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
   gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges

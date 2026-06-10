@@ -608,7 +608,7 @@ score_matrix <- data.frame(
     sprintf("≥ %.3f", settings$score_med_corr %||% 0.95),
     "Any"
   ),
-  `# References` = c(
+  `References` = c(
     sprintf("≥ %d", settings$score_high_refs %||% 3),
     sprintf("≥ %d", settings$score_med_refs %||% 2),
     "Any"
