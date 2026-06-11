@@ -23,7 +23,6 @@ Collate:
     'vcf_export.R'
 Imports:
     ExomeDepth,
-    dplyr,
     utils,
     tools,
     stats,
@@ -38,17 +37,19 @@ Imports:
     plotly,
     htmltools,
     tidyr,
-    megadepth,
     GenomicRanges,
     GenomicFeatures,
     IRanges,
     S4Vectors,
     AnnotationDbi,
-    matrixStats,
-    org.Hs.eg.db,
+    matrixStats
+Suggests:
     TxDb.Hsapiens.UCSC.hg19.knownGene,
     TxDb.Hsapiens.UCSC.hg38.knownGene,
-    kableExtra
+    org.Hs.eg.db,
+    kableExtra,
+    pagedown
 Remotes:
     vplagnol/ExomeDepth
 RoxygenNote: 8.0.0
+

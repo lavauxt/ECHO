@@ -9,7 +9,7 @@ input:
   rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_TEST"                    # Target directory path for generated assets
+  dir: "./result_TEST_regen"                    # Target directory path for generated assets
   prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
@@ -52,7 +52,7 @@ settings:
 # Target Name Processing & Cleaning Sub-Section
 # -----------------------------------------------------------------------------
 bed_preprocess:
-  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  bed_process: "REGEN"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
   exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
   gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
   gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges

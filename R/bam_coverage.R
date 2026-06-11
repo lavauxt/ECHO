@@ -16,7 +16,7 @@
 #' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").
 #' @param custom_sample_names Optional character vector.
 #' @param bed_zero_based Logical. If TRUE, BED start coordinates are 0‑based.
-#' @param skip_invalid_intervals Logical. If TRUE, intervals that cannot be extracted from FASTA are removed.
+#' @param skip_invalid_intervals Logical. If TRUE, intervals that cannot be extracted from FASTA are removed. Default FALSE (performance).
 #' @return Invisibly \code{NULL}. Coverage object saved to disk.
 #' @export
 run_bam_coverage <- function(
@@ -33,7 +33,7 @@ run_bam_coverage <- function(
     sample_name_collapse = NULL,
     custom_sample_names = NULL,
     bed_zero_based = TRUE,
-    skip_invalid_intervals = TRUE
+    skip_invalid_intervals = FALSE
 ) {
     if (verbose) message("[INFO] ", Sys.time(), " BEGIN bam coverage calculation")
     if (is.null(bamfiles) && is.null(bamdir)) stop("[ERROR] Either bamfiles or bamdir must be provided")
@@ -62,6 +62,7 @@ run_bam_coverage <- function(
     bams <- character()
     if (!is.null(bamfiles) && file.exists(bamfiles)) bams <- c(bams, readLines(bamfiles))
     if (!is.null(bamdir) && dir.exists(bamdir)) bams <- c(bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
+    # External reference BAMs are prepended (they will be used as reference pool)
     if (!is.null(rbams) && file.exists(rbams)) bams <- c(utils::read.csv(rbams, header = TRUE, sep = "\t")$bam, bams)
     bams <- unique(bams[nzchar(bams)])
     if (!length(bams)) stop("[ERROR] No BAM files found")
@@ -105,6 +106,7 @@ run_bam_coverage <- function(
 
     # Read and process BED
     bed_file <- data.table::fread(bed, header = FALSE)
+    if (ncol(bed_file) < 4) stop("[ERROR] BED file must have at least 4 columns (chr, start, end, name)")
     colnames(bed_file) <- if (ncol(bed_file) == 5) c("chromosome", "start", "end", "gene", "exon_number") else c("chromosome", "start", "end", "gene")
     bed_file$chromosome <- trimws(as.character(bed_file$chromosome))
 
@@ -143,11 +145,11 @@ run_bam_coverage <- function(
         bed_file <- bed_file[-out_of_bounds, ]
     }
 
-    # Pre‑validation (optional batching)
+    # Pre‑validation (optional batching – slow, disabled by default)
     if (skip_invalid_intervals && nrow(bed_file) > 0) {
-        if (verbose) message("[INFO] Testing FASTA extraction for ", nrow(bed_file), " intervals...")
+        if (verbose) message("[INFO] Testing FASTA extraction for ", nrow(bed_file), " intervals (this may be slow)...")
         keep <- logical(nrow(bed_file))
-        # Optional: process in chunks to reduce overhead
+        # Process in chunks to reduce overhead
         chunk_size <- 5000
         for (chunk_start in seq(1, nrow(bed_file), chunk_size)) {
             chunk_end <- min(chunk_start + chunk_size - 1, nrow(bed_file))
@@ -209,6 +211,7 @@ run_bam_coverage <- function(
     sample_cols <- intersect(colnames(counts), normalised_bams)
     if (length(sample_cols) != length(bams)) sample_cols <- intersect(colnames(counts), paste0("X", normalised_bams))
     if (length(sample_cols) != length(bams)) {
+        warning("[WARNING] Sample name matching failed; falling back to column order. Verify sample names.")
         metadata_cols <- c("chromosome", "start", "end", "exon", "GC", "exon_number")
         sample_cols <- setdiff(colnames(counts), metadata_cols)
         sample_cols <- sample_cols[order(match(normalised_bams, sample_cols))]

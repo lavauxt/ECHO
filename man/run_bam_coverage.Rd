@@ -18,7 +18,7 @@ run_bam_coverage(
   sample_name_collapse = NULL,
   custom_sample_names = NULL,
   bed_zero_based = TRUE,
-  skip_invalid_intervals = TRUE
+  skip_invalid_intervals = FALSE
 )
 }
 \arguments{
@@ -48,7 +48,7 @@ run_bam_coverage(
 
 \item{bed_zero_based}{Logical. If TRUE, BED start coordinates are 0‑based.}
 
-\item{skip_invalid_intervals}{Logical. If TRUE, intervals that cannot be extracted from FASTA are removed.}
+\item{skip_invalid_intervals}{Logical. If TRUE, intervals that cannot be extracted from FASTA are removed. Default FALSE (performance).}
 }
 \value{
 Invisibly \code{NULL}. Coverage object saved to disk.

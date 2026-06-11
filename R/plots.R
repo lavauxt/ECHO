@@ -1,4 +1,4 @@
-# Local copy of qbetabinom (from ExomeDepth, with permission)
+# Local copy of qbetabinom (from ExomeDepth v1.1.15, with permission)
 qbetabinom <- function(p, size, rho, prob) {
     a <- prob * (1 - rho) / rho
     b <- (1 - prob) * (1 - rho) / rho
@@ -125,7 +125,9 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
     if (length(exon_range) == 0) return(ggplot2::ggplot())
     temp <- cbind(row = seq_len(nrow(bed_file)), bed_file)[exon_range, ]
     gene_names <- unique(bed_file$gene[exon_range])
+    gene_names <- gene_names[!is.na(gene_names) & gene_names != ""]
     n_genes <- length(gene_names)
+    if (n_genes == 0) return(ggplot2::ggplot())
     if (n_genes == 1) pal <- c("darkblue")
     else if (n_genes == 2) pal <- c("steelblue", "purple4")
     else {
@@ -191,7 +193,8 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
     prefix_str <- if (is.null(prefix) || prefix == "") format(Sys.time(), "%Y%m%d-%H%M%S") else prefix
     dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
-    inc <- if (modechrom %in% c("XX", "XY")) "chrX" else NULL
+    # Fix chromosome filtering for modes X and Y
+    inc <- switch(modechrom, X = "chrX", Y = "chrY", NULL)
     exc <- if (modechrom == "A") c("chrX", "chrY") else NULL
     cnv_plot <- filter_chromosomes(cnv_calls, include = inc, exclude = exc)
     if (nrow(cnv_plot) == 0) {
@@ -234,7 +237,6 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
             gene_str <- sanitize_filename(as.character(call_row$Gene))
             sample_dir <- file.path(output_dir, sanitize_filename(plot_data$sample))
             dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
-            # Changed: PDF filename now includes ECHO_ prefix and the user-provided prefix
             file_path <- file.path(sample_dir, paste0("ECHO_", prefix_str, "_", plot_data$sample, "_", gene_str, "_", i, ".pdf"))
 
             p_cov <- create_coverage_plot(plot_data$cov_data, plot_data$pt_data, plot_data$single_chr, plot_data$prev, plot_data$exon_range, exon_index, sample_name = plot_data$sample)

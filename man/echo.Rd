@@ -26,8 +26,8 @@ echo(
 \arguments{
 \item{config_path}{Optional character string. Path to a \code{config.yaml} file.}
 
-\item{vcf_output}{Character string. If \code{NULL}, no VCF is written. Otherwise, path to output VCF file.
-Default is \code{NULL} (legacy), but when using a config file it will be set to a default path inside the output directory.}
+\item{vcf_output}{Character string. If \code{NULL}, a default VCF path inside the output directory is used.
+Set to \code{FALSE} to skip VCF export. Default \code{NULL}.}
 
 \item{save_ed_objects}{Logical. Save full ExomeDepth objects? Default \code{FALSE}.}
 

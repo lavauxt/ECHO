@@ -127,8 +127,7 @@ run_cnv_calling <- function(rdata_file,
         gender_df <- utils::read.table(sample_table, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
         if (!all(c("sample_name", "gender") %in% colnames(gender_df))) stop("[ERROR] sample_table must have 'sample_name' and 'gender'")
         gender_df$gender <- toupper(substr(gender_df$gender, 1, 1))
-        gender_df$gender[gender_df$gender %in% c("M", "MALE")] <- "M"
-        gender_df$gender[gender_df$gender %in% c("F", "FEMALE")] <- "F"
+        # No further mapping needed: "M" and "F" are already correct
         gender_map <- setNames(gender_df$gender, gender_df$sample_name)
         missing <- setdiff(sample_names, names(gender_map))
         if (length(missing) > 0) stop("[ERROR] Missing gender for samples: ", paste(missing, collapse = ", "))
@@ -184,7 +183,8 @@ run_cnv_calling <- function(rdata_file,
         }
         ref_counts <- rowSums(counts[, best_refs, drop = FALSE])
         suppressWarnings({
-            ed <- methods::new("ExomeDepth", test = test_counts, reference = ref_counts, formula = "cbind(test, reference) ~ 1")
+            # Use user-supplied formula (fixed bug)
+            ed <- methods::new("ExomeDepth", test = test_counts, reference = ref_counts, formula = formula)
             ed <- ExomeDepth::CallCNVs(
                 x = ed, transition.probability = transition.probability,
                 expected.CNV.length = expected.CNV.length, chromosome = clean_chroms,
@@ -215,7 +215,8 @@ run_cnv_calling <- function(rdata_file,
             names(processed_calls)[names(processed_calls) == "reads.ratio"] <- "Reads.ratio"
             processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":", processed_calls$Start, "-", processed_calls$End)
         }
-        results[[sample]] <- list(calls = processed_calls, model = if (exists("ed")) c(ed@phi, sum(counts[, sample])/(sum(counts[, sample])+sum(ref_counts))) else NULL, refs = best_refs)
+        # model: first element is rho/phi, second is test/(test+ref) proportion
+        results[[sample]] <- list(calls = processed_calls, model = c(ed@phi, sum(counts[, sample])/(sum(counts[, sample])+sum(ref_counts))), refs = best_refs)
         if (save_ed_objects) ed_objects[[sample]] <- ed
     }
 

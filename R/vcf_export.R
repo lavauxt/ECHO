@@ -35,10 +35,12 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL, source
         "##INFO=<ID=REFS,Number=.,Type=String,Description=\"Reference samples used\">", "##INFO=<ID=CORR,Number=1,Type=Float,Description=\"Correlation with reference\">",
         "##INFO=<ID=NCOMP,Number=1,Type=Integer,Description=\"Number of reference samples\">", "##INFO=<ID=BF,Number=1,Type=Float,Description=\"Bayes factor\">",
         "##INFO=<ID=READS_RATIO,Number=1,Type=Float,Description=\"Observed/expected read ratio\">",
-        "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">", "##FORMAT=<ID=CN,Number=1,Type=Integer,Description=\"Copy number state estimate\">",
+        "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">", "##FORMAT=<ID=CN,Number=1,Type=Integer,Description=\"Estimated copy number state (1=DEL,2=normal,3=DUP)\">",
         "##FORMAT=<ID=FR,Number=1,Type=Float,Description=\"Observed/expected fold change\">", "##ALT=<ID=DUP,Description=\"Duplication\">", "##ALT=<ID=DEL,Description=\"Deletion\">",
         paste0("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t", paste(samples, collapse = "\t"))
     )
+    
+    # Build unique key for each CNV event (chrom, start, end, type)
     key_df <- unique(data.frame(Chromosome = as.character(cnv_calls$Chromosome), Start = as.integer(cnv_calls$Start), End = as.integer(cnv_calls$End), Type = as.character(cnv_calls$Type), stringsAsFactors = FALSE))
     key_df <- key_df[order(key_df$Chromosome, key_df$Start, key_df$End, key_df$Type), , drop = FALSE]
 
@@ -46,12 +48,15 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL, source
         if (nrow(row_df) == 0) return("0/0:2:1.00")
         ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
         if (is.na(ratio)) ratio <- 1
+        # CN is approximated: DEL -> 1, DUP -> 3, normal -> 2
         cn <- if (sv_type == "DEL") 1L else 3L
         gt <- "0/1"
         paste0(gt, ":", cn, ":", format(round(ratio, 2), nsmall = 2, trim = TRUE))
     }
 
-    records <- apply(key_df, 1, function(key_row) {
+    records <- character(nrow(key_df))
+    for (i in seq_len(nrow(key_df))) {
+        key_row <- key_df[i, ]
         chrom <- as.character(key_row[["Chromosome"]])
         start <- as.integer(key_row[["Start"]])
         end <- as.integer(key_row[["End"]])
@@ -91,8 +96,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL, source
             sample_row <- row_hits[row_hits$Sample == s, , drop = FALSE]
             make_sample_field(sample_row, sv_type)
         }, character(1))
-        paste(chrom, start, id, "N", alt, ".", "PASS", paste(info_items, collapse = ";"), format_field, paste(sample_fields, collapse = "\t"), sep = "\t")
-    })
+        records[i] <- paste(chrom, start, id, "N", alt, ".", "PASS", paste(info_items, collapse = ";"), format_field, paste(sample_fields, collapse = "\t"), sep = "\t")
+    }
     con <- file(output_vcf, "w")
     on.exit(close(con), add = TRUE)
     writeLines(header, con)

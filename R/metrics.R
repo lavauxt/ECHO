@@ -7,13 +7,13 @@
 #' @param rdata_file  Character string. Path to the coverage RData.
 #' @param min_corr    Numeric. Minimum correlation. Default \code{0.98}.
 #' @param min_cov     Numeric. Minimum median read depth. Default \code{100}.
-#' @param min_total_reads Numeric. Minimum total reads per sample. Default \code{5e6}.
+#' @param min_total_reads Numeric. Minimum total reads per sample. Default \code{300000}.
 #' @param max_exon_cv Numeric. Maximum allowed coefficient of variation per exon.
 #' @param output_file Character string. Output path. Default \code{"./QC_metrics.tsv"}.
 #'
 #' @return Invisibly returns the metrics data frame.
 #' @export
-run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100, min_total_reads = 5e6, max_exon_cv = 0.5, output_file = "./QC_metrics.tsv") {
+run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100, min_total_reads = 300000, max_exon_cv = 0.5, output_file = "./QC_metrics.tsv") {
     message("[INFO] BEGIN QC Metrics")
     objs <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
     counts <- objs$counts
@@ -31,7 +31,13 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100, min_total
         message("[WARNING] Correlation QC skipped: fewer than 2 samples")
     } else {
         corr_matrix <- stats::cor(dt_counts, use = "pairwise.complete.obs")
-        max_corr <- apply(corr_matrix, 1, function(x) { others <- x[x != 1]; if (!length(others)) NA_real_ else max(others, na.rm = TRUE) })
+        # Use rownames to guarantee correct sample ordering
+        max_corr <- apply(corr_matrix, 1, function(x) {
+            others <- x[x != 1]
+            if (!length(others)) NA_real_ else max(others, na.rm = TRUE)
+        })
+        # Ensure names match sample_names
+        names(max_corr) <- rownames(corr_matrix)
     }
 
     m <- list(Sample = character(), Exon = character(), Type = character(), Details = character(), Gene = character())

@@ -4,8 +4,8 @@
 #'
 #' @param config_path Optional character string. Path to a \code{config.yaml} file.
 #' @param ... Optional named overrides (see details).
-#' @param vcf_output Character string. If \code{NULL}, no VCF is written. Otherwise, path to output VCF file.
-#'   Default is \code{NULL} (legacy), but when using a config file it will be set to a default path inside the output directory.
+#' @param vcf_output Character string. If \code{NULL}, a default VCF path inside the output directory is used.
+#'   Set to \code{FALSE} to skip VCF export. Default \code{NULL}.
 #' @param save_ed_objects Logical. Save full ExomeDepth objects? Default \code{FALSE}.
 #' @param report Logical. Generate interactive HTML reports? Default \code{TRUE}.
 #' @param plots Logical. Generate per‑CNV PDF plots? Default \code{FALSE}.
@@ -196,8 +196,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 }
             })
 
-            if (is.null(vcf_output)) {
+            # VCF output handling: default path if NULL, skip if FALSE
+            if (is.null(vcf_output) && !identical(vcf_output, FALSE)) {
                 vcf_output <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNVs.vcf"))
+            } else if (identical(vcf_output, FALSE)) {
+                vcf_output <- NULL
             }
 
             stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
@@ -239,126 +242,133 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             }
 
             # -----------------------------------------------------------------
-            # 5. Run pipeline steps with warning capture
+            # 5. Run pipeline steps with warning capture and dynamic step counting
             # -----------------------------------------------------------------
-            log_msg("Step 1/6: Extracting BAM coverage...")
-            run_bam_coverage(
-                bamfiles = cfg$input$bamfiles,
-                bamdir   = cfg$input$bamdir,
-                bed      = cfg$input$bed,
-                fasta    = cfg$input$fasta,
-                rbams    = cfg$input$rbams,
-                data_out = paths$rdata,
-                verbose = TRUE,
-                sample_name_delim = sample_name_delim,
-                sample_name_keep = sample_name_keep,
-                sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
-                custom_sample_names = custom_sample_names,
-                bed_zero_based = cfg$bed_zero_based %||% TRUE,
-                skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
-            )
-            log_msg("Step 1/6 completed.")
+            steps_total <- 6
+            step_current <- 0
+            run_step <- function(step_name, expr) {
+                step_current <<- step_current + 1
+                log_msg(paste0("Step ", step_current, "/", steps_total, ": ", step_name, "..."))
+                result <- expr
+                log_msg(paste0("Step ", step_current, "/", steps_total, " completed."))
+                invisible(result)
+            }
 
-            log_msg("Step 2/6: Running QC metrics...")
-            run_qc_metrics(
-                rdata_file      = paths$rdata,
-                output_file     = paths$metrics,
-                min_corr        = cfg$settings$min_corr,
-                min_cov         = cfg$settings$min_cov,
-                min_total_reads = cfg$settings$min_total_reads,
-                max_exon_cv     = cfg$settings$max_exon_cv
-            )
-            log_msg("Step 2/6 completed.")
-
-            log_msg("Step 3/6: Calling CNVs...")
-            cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
-            cnv_args <- c(list(
-                rdata_file            = paths$rdata,
-                output_file           = paths$cnvs,
-                out_rdata             = paths$summary,
-                transition.probability = cfg$settings$transition_probability,
-                expected.CNV.length   = cfg$settings$expected_CNV_length,
-                n.bins.reduced        = cfg$settings$n_bins_reduced,
-                phi.bins              = cfg$settings$phi_bins,
-                formula               = cfg$settings$formula,
-                data                  = NULL,
-                save_ed_objects       = save_ed_objects,
-                modechrom             = cfg$settings$modechrom,
-                sample_table          = sample_table
-            ), cnv_args)
-
-            do.call(run_cnv_calling, cnv_args)
-            log_msg("Step 3/6 completed.")
-
-            # Step 4/6: Plots (off by default)
-            if (plots) {
-                log_msg("Step 4/6: Generating plots...")
-                generate_plots(
-                    rdata_file = paths$summary,
-                    output_dir = paths$plots,
-                    modechrom  = cfg$settings$modechrom,
-                    prefix     = cfg$output$prefix,
-                    log_file   = log_file
+            run_step("Extracting BAM coverage", {
+                run_bam_coverage(
+                    bamfiles = cfg$input$bamfiles,
+                    bamdir   = cfg$input$bamdir,
+                    bed      = cfg$input$bed,
+                    fasta    = cfg$input$fasta,
+                    rbams    = cfg$input$rbams,
+                    data_out = paths$rdata,
+                    verbose = TRUE,
+                    sample_name_delim = sample_name_delim,
+                    sample_name_keep = sample_name_keep,
+                    sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
+                    custom_sample_names = custom_sample_names,
+                    bed_zero_based = cfg$bed_zero_based %||% TRUE,
+                    skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
                 )
-                log_msg("Step 4/6 completed.")
+            })
+
+            run_step("Running QC metrics", {
+                run_qc_metrics(
+                    rdata_file      = paths$rdata,
+                    output_file     = paths$metrics,
+                    min_corr        = cfg$settings$min_corr,
+                    min_cov         = cfg$settings$min_cov,
+                    min_total_reads = cfg$settings$min_total_reads,
+                    max_exon_cv     = cfg$settings$max_exon_cv
+                )
+            })
+
+            run_step("Calling CNVs", {
+                cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
+                cnv_args <- c(list(
+                    rdata_file            = paths$rdata,
+                    output_file           = paths$cnvs,
+                    out_rdata             = paths$summary,
+                    transition.probability = cfg$settings$transition_probability,
+                    expected.CNV.length   = cfg$settings$expected_CNV_length,
+                    n.bins.reduced        = cfg$settings$n_bins_reduced,
+                    phi.bins              = cfg$settings$phi_bins,
+                    formula               = cfg$settings$formula,
+                    data                  = NULL,
+                    save_ed_objects       = save_ed_objects,
+                    modechrom             = cfg$settings$modechrom,
+                    sample_table          = sample_table
+                ), cnv_args)
+
+                do.call(run_cnv_calling, cnv_args)
+            })
+
+            if (plots) {
+                run_step("Generating plots", {
+                    generate_plots(
+                        rdata_file = paths$summary,
+                        output_dir = paths$plots,
+                        modechrom  = cfg$settings$modechrom,
+                        prefix     = cfg$output$prefix,
+                        log_file   = log_file
+                    )
+                })
             } else {
-                log_msg("Step 4/6: Plot generation skipped (plots = FALSE).")
+                log_msg("Plot generation skipped (plots = FALSE).")
+                steps_total <- steps_total - 1
             }
 
-            # Step 5/6: HTML report
             if (report) {
-                log_msg("Step 5/6: Generating HTML report...")
-                # CHANGED: pass prefix to generate_report
-                generate_report(summary_rdata = paths$summary,
-                                qc_metrics_file = paths$metrics,
-                                output_dir = cfg$output$dir,
-                                settings = cfg$settings,
-                                config = cfg,
-                                sample_table = sample_table,
-                                ref_bams = ref_bams %||% cfg$input$rbams,
-                                log_file = log_file,
-                                pdf_output = cfg$settings$pdf_output %||% FALSE,
-                                prefix = cfg$output$prefix)
-                log_msg("Step 5/6 completed.")
+                run_step("Generating HTML report", {
+                    generate_report(summary_rdata = paths$summary,
+                                    qc_metrics_file = paths$metrics,
+                                    output_dir = cfg$output$dir,
+                                    settings = cfg$settings,
+                                    config = cfg,
+                                    sample_table = sample_table,
+                                    ref_bams = ref_bams %||% cfg$input$rbams,
+                                    log_file = log_file,
+                                    pdf_output = cfg$settings$pdf_output %||% FALSE,
+                                    prefix = cfg$output$prefix)
+                })
             } else {
-                log_msg("Step 5/6: Report generation skipped (report = FALSE).")
+                log_msg("Report generation skipped (report = FALSE).")
+                steps_total <- steps_total - 1
             }
 
-            # Step 6/6: VCF export (combined and per‑sample)
             if (!is.null(vcf_output) || vcf_per_sample) {
-                log_msg("Step 6/6: Exporting CNVs to VCF...")
-                if (file.exists(paths$summary)) {
-                    cnv_calls_local <- local({
-                        env <- new.env()
-                        load(paths$summary, envir = env)
-                        env$cnv_calls
-                    })
-                    if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
-                        # Combined VCF
-                        if (!is.null(vcf_output)) {
-                            export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
-                            log_msg(paste("Combined VCF written to:", basename(vcf_output)))
-                        }
-                        # Per‑sample VCFs
-                        if (vcf_per_sample) {
-                            samples <- unique(cnv_calls_local$Sample)
-                            for (s in samples) {
-                                sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
-                                if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
-                                vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                                export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
-                                log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
+                run_step("Exporting CNVs to VCF", {
+                    if (file.exists(paths$summary)) {
+                        cnv_calls_local <- local({
+                            env <- new.env()
+                            load(paths$summary, envir = env)
+                            env$cnv_calls
+                        })
+                        if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
+                            if (!is.null(vcf_output)) {
+                                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
+                                log_msg(paste("Combined VCF written to:", basename(vcf_output)))
                             }
+                            if (vcf_per_sample) {
+                                samples <- unique(cnv_calls_local$Sample)
+                                for (s in samples) {
+                                    sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
+                                    if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
+                                    vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                                    export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
+                                    log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
+                                }
+                            }
+                        } else {
+                            log_msg("No CNV calls to export to VCF.")
                         }
                     } else {
-                        log_msg("No CNV calls to export to VCF.")
+                        log_msg("Summary RData not found – cannot export VCF.", "WARNING")
                     }
-                } else {
-                    log_msg("Summary RData not found – cannot export VCF.", "WARNING")
-                }
-                log_msg("Step 6/6 completed.")
+                })
             } else {
-                log_msg("Step 6/6: VCF export skipped.")
+                log_msg("VCF export skipped.")
+                steps_total <- steps_total - 1
             }
 
             log_msg("Pipeline finished successfully!")

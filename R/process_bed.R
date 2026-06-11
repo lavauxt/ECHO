@@ -57,13 +57,14 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
 
   # ----------------------------
   # Helper: extract gene name and optional exon number
+  # NOTE: This function is currently not vectorised; for large BED files (>100k rows)
+  # performance may be suboptimal. Future optimisation can use stringi or data.table.
   # ----------------------------
   parse_bed_name <- function(name_vec, exon_sep = "_", gene_field_index = NULL, 
                              gene_name_keep = NULL, auto_exon = TRUE, gene_name_collapse = "_") {
     if (is.null(exon_sep) || length(exon_sep) == 0 || any(exon_sep == "")) exon_sep <- "_"
     if (is.null(gene_name_collapse) || gene_name_collapse == "") gene_name_collapse <- "_"
     
-    # Evaluate if multi-token regex pattern compilation or literal evaluation is needed
     if (length(exon_sep) > 1) {
       escaped_seps <- vapply(exon_sep, function(x) {
         gsub("([\\\\^\\$\\.\\|\\?\\*\\+\\(\\)\\[\\{\\]\\}])", "\\\\\\1", x)
@@ -103,17 +104,12 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       }
       exon_numbers[i] <- exon_num
       
-      # -----------------------------------------------------------------
       # GENERALIZED CLEANING (No Hardcoded Genes)
-      # -----------------------------------------------------------------
-      # 1. Strip parenthesis and anything inside them (e.g., "(zerze)")
       g_clean <- gsub("\\s*\\(.*?\\)", "", g)
       
-      # 2. Split the string using your defined separators (e.g., "_")
       parts <- strsplit(g_clean, split = split_pat, fixed = use_fixed)[[1]]
       parts <- parts[parts != ""]  
       
-      # 3. Apply the index rule (gene_name_keep)
       keep_idx <- NULL
       if (!is.null(gene_name_keep)) {
         keep_idx <- parse_keep_indices(gene_name_keep, length(parts))
@@ -123,17 +119,12 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       
       if (!is.null(keep_idx)) {
         valid_idx <- keep_idx[keep_idx <= length(parts) & keep_idx >= 1]
-        
         if (length(valid_idx) > 0) {
-          # Standard case: NM_000251_MSH2 -> grabs MSH2
           gene <- paste(parts[valid_idx], collapse = gene_name_collapse)
         } else {
-          # DYNAMIC FALLBACK: If requested index is larger than available parts
-          # grab the LAST part available.
           gene <- parts[length(parts)]
         }
       } else {
-        # Default behavior if no keep index is defined
         if (grepl("^(NM_|NR_|XM_)", g_clean)) {
           if (length(parts) >= 3) gene <- parts[3] else gene <- parts[length(parts)]
         } else {
@@ -141,10 +132,6 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         }
       }
       
-      # 4. AUTOMATED COORDINATE SAFEGUARD (No Hardcoding)
-      # If the extracted string consists entirely of digits (e.g., "58149635"),
-      # it represents a structural coordinate position, not a gene descriptor.
-      # Automatically revert to the primary label component.
       if (!is.na(gene) && grepl("^[0-9]+$", gene)) {
         gene <- parts[1]
       }
@@ -235,7 +222,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
   }
 
   # =========================================================================
-  # REGEN MODE (CORRECTED)
+  # REGEN MODE (uses RefSeq-like transcripts)
   # =========================================================================
   if (bed_process == "REGEN") {
     message("[INFO] REGEN mode: using internal RefSeq Select-like DB")
@@ -264,9 +251,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     )
     ref_df <- ref_df[ref_df$GeneID != "", ]
     
-    # --- FIX: Safely retrieve gene symbols from org.Hs.eg.db ---
     if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-      # Get the database object without attaching the package
       org_db <- getExportedValue("org.Hs.eg.db", "org.Hs.eg.db")
       ref_df$Gene <- suppressMessages(AnnotationDbi::mapIds(
         org_db, keys = ref_df$GeneID, keytype = "ENTREZID", column = "SYMBOL", multiVals = "first"
@@ -275,11 +260,11 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       message("[WARNING] Package 'org.Hs.eg.db' not installed. Using Entrez IDs as gene names.")
       ref_df$Gene <- ref_df$GeneID
     }
-    # --- End of fix ---
     
     ref_df <- ref_df[!is.na(ref_df$Gene), ]
     ref_parsed <- parse_bed_name(ref_df$Gene, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
     ref_df$Gene <- ref_parsed$gene
+    # Keep only protein-coding transcripts (NM_)
     if (any(grepl("^NM_", ref_df$Transcript))) ref_df <- ref_df[grepl("^NM_", ref_df$Transcript), ]
     
     split_ref <- split(ref_df, ref_df$Transcript)
@@ -366,6 +351,8 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       }
       df$Custom.Exon <- df$ExonNum
     } else {
+      # No panel files: use original BED annotation
+      # Note: output coordinates are always 0‑based for consistency with BED standard
       df <- data.frame(
         Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
         Gene = input_df$Gene, ExonNum = input_df$ExonNum, stringsAsFactors = FALSE
@@ -376,7 +363,6 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         df <- assign_file_order_exons(df, gene_col = "Gene")
       }
       df$Custom.Exon <- df$ExonNum
-
     }
   } else {
     stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")

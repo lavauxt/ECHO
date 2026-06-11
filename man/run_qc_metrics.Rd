@@ -8,7 +8,7 @@ run_qc_metrics(
   rdata_file,
   min_corr = 0.98,
   min_cov = 100,
-  min_total_reads = 5e+06,
+  min_total_reads = 3e+05,
   max_exon_cv = 0.5,
   output_file = "./QC_metrics.tsv"
 )
@@ -20,7 +20,7 @@ run_qc_metrics(
 
 \item{min_cov}{Numeric. Minimum median read depth. Default \code{100}.}
 
-\item{min_total_reads}{Numeric. Minimum total reads per sample. Default \code{5e6}.}
+\item{min_total_reads}{Numeric. Minimum total reads per sample. Default \code{300000}.}
 
 \item{max_exon_cv}{Numeric. Maximum allowed coefficient of variation per exon.}
 

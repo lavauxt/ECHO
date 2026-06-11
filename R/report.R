@@ -41,8 +41,8 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   refs      <- local_env$refs
   gender_map <- local_env$gender_map  # may be NULL
 
-  qc_metrics <- read.table(qc_metrics_file, header = TRUE, sep = "\t", 
-                           stringsAsFactors = FALSE)
+  # Use fread to handle missing fields gracefully
+  qc_metrics <- data.table::fread(qc_metrics_file, header = TRUE, fill = TRUE, data.table = FALSE)
 
   # Load sample table if provided and not already in RData
   sample_df <- NULL
