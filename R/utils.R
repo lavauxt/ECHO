@@ -375,3 +375,78 @@ compute_exon_index <- function(bed_file) {
   bed_numbered <- assign_exon_numbers_per_gene(bed_file)
   bed_numbered$exon_number
 }
+
+#' Plot PCA of Sample Coverage Profiles
+#'
+#' @param counts Data frame of read counts (rows = exons, columns = samples).
+#' @param sample_names Character vector of sample names.
+#' @param output_pdf Path to save the PCA plot (or NULL for direct display).
+#' @param color_by Optional vector of sample groups (e.g., gender, batch).
+#' @param scale Logical, whether to scale the data (recommended).
+#' @return Invisibly returns a list with PCA object and variance explained.
+#' @export
+plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
+                              color_by = NULL, scale = TRUE) {
+  # Extract only count columns
+  count_mat <- as.matrix(counts[, sample_names, drop = FALSE])
+  # Log transform and remove zero-variance rows
+  log_mat <- log2(count_mat + 1)
+  row_var <- apply(log_mat, 1, var, na.rm = TRUE)
+  keep <- row_var > 0 & !is.na(row_var)
+  if (sum(keep) < 2) {
+    warning("Insufficient variation for PCA (fewer than 2 informative rows).")
+    return(invisible(NULL))
+  }
+  log_mat <- log_mat[keep, ]
+  
+  pca <- prcomp(t(log_mat), scale. = scale, center = TRUE)
+  var_exp <- summary(pca)$importance[2, ] * 100
+  pca_df <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2], Sample = sample_names)
+  
+  # Base plot
+  p <- ggplot2::ggplot(pca_df, ggplot2::aes(x = PC1, y = PC2, label = Sample))
+  
+  if (!is.null(color_by) && length(color_by) == nrow(pca_df)) {
+    pca_df$Group <- as.factor(color_by)
+    p <- p + ggplot2::aes(colour = Group)
+    # Add dashed ellipses (always drawn when grouping exists)
+    if (length(unique(color_by)) >= 2) {
+      p <- p + ggplot2::stat_ellipse(ggplot2::aes(colour = Group), 
+                                     type = "norm", linetype = "dashed")
+    }
+  } else {
+    p <- p + ggplot2::aes(colour = "Sample")
+  }
+  
+  p <- p + 
+    ggplot2::geom_point(size = 3) +
+    ggplot2::labs(x = paste0("PC1 (", round(var_exp[1], 1), "%)"),
+                  y = paste0("PC2 (", round(var_exp[2], 1), "%)"),
+                  title = "PCA of Sample Coverage Profiles") +
+    ggplot2::theme_bw() +
+    # Set legend text (title and labels) to dark blue
+    ggplot2::theme(legend.text = ggplot2::element_text(color = "darkblue"),
+                   legend.title = ggplot2::element_text(color = "darkblue"))
+  
+  # Handle labels without overlapping
+  if (requireNamespace("ggrepel", quietly = TRUE)) {
+    p <- p + ggrepel::geom_text_repel(size = 3, max.overlaps = 15)
+  } else {
+    p <- p + ggplot2::geom_text(check_overlap = TRUE, size = 3, hjust = -0.2, vjust = 0.5)
+  }
+  
+  # Remove colour legend if no grouping was provided
+  if (is.null(color_by)) {
+    p <- p + ggplot2::theme(legend.position = "none")
+  } else {
+    p <- p + ggplot2::guides(colour = ggplot2::guide_legend(title = "Group"))
+  }
+  
+  if (!is.null(output_pdf)) {
+    ggplot2::ggsave(output_pdf, p, width = 8, height = 6)
+    message("[INFO] PCA plot saved: ", output_pdf)
+  } else {
+    print(p)
+  }
+  invisible(list(pca = pca, var_exp = var_exp))
+}

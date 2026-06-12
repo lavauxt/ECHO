@@ -23,6 +23,8 @@ settings:
   n_bins_reduced: 10000                   # Dimensional data optimization normalization size
   phi_bins: 1                             # Normalization distribution constant scale index
   formula: "cbind(test, reference) ~ 1"   # ExomeDepth evaluation regression expression frame
+
+  pca_plot: true
   
   # QC scoring thresholds for tracking pipeline certainty
   score_high_corr: 0.985

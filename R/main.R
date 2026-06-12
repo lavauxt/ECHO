@@ -249,6 +249,20 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         )
       })
 
+      if (cfg$settings$pca_plot %||% TRUE) {
+        objs <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
+        counts <- objs$counts
+        sample_names <- objs$sample_names
+        
+        pca_file <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
+        group_info <- NULL
+        if (!is.null(sample_table) && file.exists(sample_table)) {
+          sample_df <- read.table(sample_table, header = TRUE, sep = "\t")
+          group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
+        }
+        plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
+      }
+
       run_step("Running QC metrics", {
         run_qc_metrics(
           rdata_file      = paths$rdata,
