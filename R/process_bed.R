@@ -126,43 +126,16 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     list(gene = gene_names, exon = exon_numbers)
   }
 
-  assign_sequential_exons <- function(df, start_col = "Start", gene_col = "Gene") {
-    chrom_base <- c(as.character(1:22), "X", "Y", "M")
-    chrom_order <- if (any(grepl("^chr", df$Chr))) paste0("chr", chrom_base) else chrom_base
-    df$.orig_order <- seq_len(nrow(df))
-    df$.chr_order <- factor(df$Chr, levels = chrom_order)
-    df$ExonNum <- NA_integer_
-    
-    valid_gene <- !is.na(df[[gene_col]]) & df[[gene_col]] != "" & df[[gene_col]] != "."
-    gene_groups <- split(which(valid_gene), df[[gene_col]][valid_gene])
-    
-    for (idx in gene_groups) {
-      idx_ordered <- idx[order(df$.chr_order[idx], df[[start_col]][idx], df$End[idx], na.last = TRUE)]
-      df$ExonNum[idx_ordered] <- seq_along(idx_ordered)
-    }
-    
-    df <- df[order(df$.chr_order, df[[start_col]], df$End, na.last = TRUE), ]
-    df$.orig_order <- NULL
-    df$.chr_order <- NULL
-    df
-  }
-
-  assign_file_order_exons <- function(df, gene_col = "Gene") {
-    df$ExonNum <- NA_integer_
-    valid_gene <- !is.na(df[[gene_col]]) & df[[gene_col]] != "" & df[[gene_col]] != "."
-    gene_counts <- list()
-    for (i in seq_len(nrow(df))) {
-      if (valid_gene[i]) {
-        g <- df[[gene_col]][i]
-        if (is.null(gene_counts[[g]])) {
-          gene_counts[[g]] <- 1
-        } else {
-          gene_counts[[g]] <- gene_counts[[g]] + 1
-        }
-        df$ExonNum[i] <- gene_counts[[g]]
-      }
-    }
-    df
+  # Helper to select best overlapping transcript/exon (used in REGEN/STANDARD)
+  select_best_hits <- function(gr1, gr2, hits) {
+    qh <- S4Vectors::queryHits(hits)
+    sh <- S4Vectors::subjectHits(hits)
+    ov <- GenomicRanges::pintersect(gr1[qh], gr2[sh])
+    w <- IRanges::width(ov)
+    df_hits <- data.frame(q = qh, s = sh, w = w)
+    df_hits <- df_hits[order(df_hits$q, -df_hits$w), ]
+    df_hits <- df_hits[!duplicated(df_hits$q), ]
+    list(q = df_hits$q, s = df_hits$s)
   }
 
   input_df <- utils::read.table(input_bed, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
@@ -181,17 +154,6 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     input_df$ExonNum <- input_df$ExtractedExon
   } else {
     input_df$ExonNum <- NA_integer_
-  }
-
-  select_best_hits <- function(gr1, gr2, hits) {
-    qh <- S4Vectors::queryHits(hits)
-    sh <- S4Vectors::subjectHits(hits)
-    ov <- GenomicRanges::pintersect(gr1[qh], gr2[sh])
-    w <- IRanges::width(ov)
-    df_hits <- data.frame(q = qh, s = sh, w = w)
-    df_hits <- df_hits[order(df_hits$q, -df_hits$w), ]
-    df_hits <- df_hits[!duplicated(df_hits$q), ]
-    list(q = df_hits$q, s = df_hits$s)
   }
 
   if (bed_process == "REGEN") {
@@ -268,7 +230,19 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       Chr = as.character(GenomicRanges::seqnames(bed_gr[qh])), Start = output_start, End = GenomicRanges::end(bed_gr[qh]),
       Gene = ref_gr$Gene[sh], Transcript = ref_gr$Transcript[sh], Exon = ref_gr$Exon[sh], stringsAsFactors = FALSE
     )
-    df$Custom.Exon <- df$Exon
+    
+    # Use unified exon numbering (assign_exon_numbers_per_gene)
+    names(df)[names(df) == "Chr"] <- "chromosome"
+    names(df)[names(df) == "Start"] <- "start"
+    names(df)[names(df) == "End"] <- "end"
+    names(df)[names(df) == "Gene"] <- "gene"
+    df <- assign_exon_numbers_per_gene(df)
+    names(df)[names(df) == "chromosome"] <- "Chr"
+    names(df)[names(df) == "start"] <- "Start"
+    names(df)[names(df) == "end"] <- "End"
+    names(df)[names(df) == "gene"] <- "Gene"
+    df$Custom.Exon <- df$exon_number
+    df$exon_number <- NULL
     
   } else if (bed_process == "STANDARD") {
     panel_bed_paths <- NULL
@@ -318,22 +292,36 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
           Gene = panel_gr$Gene[sh], ExonNum = panel_gr$ExonNum[sh], stringsAsFactors = FALSE
         )
         
-        if (auto_exon_number) {
-          df <- assign_sequential_exons(df, start_col = "Start", gene_col = "Gene")
-        } else if (region_numbering_mode == "file_order") {
-          df <- assign_file_order_exons(df, gene_col = "Gene")
-        }
+        # Use unified exon numbering
+        names(df)[names(df) == "Chr"] <- "chromosome"
+        names(df)[names(df) == "Start"] <- "start"
+        names(df)[names(df) == "End"] <- "end"
+        names(df)[names(df) == "Gene"] <- "gene"
+        df <- assign_exon_numbers_per_gene(df)
+        names(df)[names(df) == "chromosome"] <- "Chr"
+        names(df)[names(df) == "start"] <- "Start"
+        names(df)[names(df) == "end"] <- "End"
+        names(df)[names(df) == "gene"] <- "Gene"
+        df$ExonNum <- df$exon_number
+        df$exon_number <- NULL
         df$Custom.Exon <- df$ExonNum
       } else {
         df <- data.frame(
           Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
           Gene = input_df$Gene, ExonNum = input_df$ExonNum, stringsAsFactors = FALSE
         )
-        if (auto_exon_number) {
-          df <- assign_sequential_exons(df, start_col = "Start", gene_col = "Gene")
-        } else if (region_numbering_mode == "file_order") {
-          df <- assign_file_order_exons(df, gene_col = "Gene")
-        }
+        # Unified numbering
+        names(df)[names(df) == "Chr"] <- "chromosome"
+        names(df)[names(df) == "Start"] <- "start"
+        names(df)[names(df) == "End"] <- "end"
+        names(df)[names(df) == "Gene"] <- "gene"
+        df <- assign_exon_numbers_per_gene(df)
+        names(df)[names(df) == "chromosome"] <- "Chr"
+        names(df)[names(df) == "start"] <- "Start"
+        names(df)[names(df) == "end"] <- "End"
+        names(df)[names(df) == "gene"] <- "Gene"
+        df$ExonNum <- df$exon_number
+        df$exon_number <- NULL
         df$Custom.Exon <- df$ExonNum
       }
     } else {
@@ -341,11 +329,18 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
         Gene = input_df$Gene, ExonNum = input_df$ExonNum, stringsAsFactors = FALSE
       )
-      if (auto_exon_number) {
-        df <- assign_sequential_exons(df, start_col = "Start", gene_col = "Gene")
-      } else if (region_numbering_mode == "file_order") {
-        df <- assign_file_order_exons(df, gene_col = "Gene")
-      }
+      # Unified numbering
+      names(df)[names(df) == "Chr"] <- "chromosome"
+      names(df)[names(df) == "Start"] <- "start"
+      names(df)[names(df) == "End"] <- "end"
+      names(df)[names(df) == "Gene"] <- "gene"
+      df <- assign_exon_numbers_per_gene(df)
+      names(df)[names(df) == "chromosome"] <- "Chr"
+      names(df)[names(df) == "start"] <- "Start"
+      names(df)[names(df) == "end"] <- "End"
+      names(df)[names(df) == "gene"] <- "Gene"
+      df$ExonNum <- df$exon_number
+      df$exon_number <- NULL
       df$Custom.Exon <- df$ExonNum
     }
   } else {

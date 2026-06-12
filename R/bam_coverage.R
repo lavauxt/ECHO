@@ -226,6 +226,12 @@ run_bam_coverage <- function(
   bed_file <- as.data.frame(bed_file)
   counts <- as.data.frame(counts)
 
+  # Assign consistent exon numbers
+  bed_file <- assign_exon_numbers_per_gene(bed_file)
+  # Ensure counts gets the same order (already aligned)
+  counts$exon_number <- bed_file$exon_number
+
+
   save(counts, bams, bed_file, sample_names, fasta, name_mapping, file = data_out)
   if (verbose) message("[INFO] ", Sys.time(), " END bam coverage calculation")
   invisible(NULL)
