@@ -43,348 +43,321 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  ref_bams = NULL,
                  panel_files = NULL,
                  ...) {
-    args <- list(...)
+  args <- list(...)
+  
+  if (!is.null(config_path)) {
+    cfg <- load_config(config_path)
+    if (!is.null(cfg$bed_preprocess)) {
+      safe_keys <- setdiff(names(cfg$bed_preprocess), c("input", "output", "settings"))
+      for (name in safe_keys) {
+        cfg[[name]] <- cfg$bed_preprocess[[name]]
+      }
+    }
+  } else if (length(args) > 0) {
+    cfg <- list(
+      input = list(
+        bamdir   = args$bamdir %||% "./data",
+        bamfiles = args$bamfiles,
+        bed      = args$bed,
+        fasta    = args$fasta,
+        rbams    = args$rbams
+      ),
+      output = list(
+        dir    = args$outdir %||% "./result",
+        prefix = args$prefix %||% "ECHO"
+      ),
+      settings = list(
+        modechrom                  = args$modechrom %||% "A",
+        min_corr                   = args$min_corr %||% 0.98,
+        min_cov                    = args$min_cov %||% 100,
+        min_total_reads            = args$min_total_reads %||% 5e6,
+        max_exon_cv                = args$max_exon_cv %||% 0.5,
+        transition_probability     = args$transition_prob %||% args$transition_probability %||% 1e-4,
+        expected_CNV_length        = args$expected_CNV_length %||% 50000,
+        n_bins_reduced             = args$n_bins_reduced %||% 10000,
+        phi_bins                   = args$phi_bins %||% 1,
+        formula                    = args$formula %||% "cbind(test, reference) ~ 1",
+        score_high_corr            = args$score_high_corr %||% 0.985,
+        score_med_corr             = args$score_med_corr %||% 0.95,
+        score_high_refs            = args$score_high_refs %||% 3,
+        score_med_refs             = args$score_med_refs %||% 2,
+        score_low_ratio_low        = args$score_low_ratio_low %||% 0.75,
+        score_low_ratio_high       = args$score_low_ratio_high %||% 1.25,
+        score_high_ratio_low       = args$score_high_ratio_low %||% 0.70,
+        score_high_ratio_high      = args$score_high_ratio_high %||% 1.30,
+        score_med_ratio_low        = args$score_med_ratio_low %||% 0.60,
+        score_med_ratio_high       = args$score_med_ratio_high %||% 1.40,
+        score_low_confidence_genes = args$score_low_confidence_genes %||% c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR")
+      ),
+      bed_process            = args$bed_process %||% "NO",
+      refseqgene             = args$refseqgene,
+      transcripts_file       = args$transcripts_file,
+      unknown_gene           = args$unknown_gene %||% FALSE,
+      gene_list_restrict     = args$gene_list_restrict,
+      chr_list_restrict      = args$chr_list_restrict,
+      exon_sep               = args$exon_sep,
+      gene_name_keep         = args$gene_name_keep,               
+      region_numbering_mode  = args$region_numbering_mode %||% "bed_text", 
+      customexon             = args$customexon %||% FALSE,
+      list_genes             = args$list_genes,
+      genes_file             = args$genes_file,
+      genome_version         = args$genome_version %||% "hg19",
+      bed_zero_based         = args$bed_zero_based %||% TRUE,
+      skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
+      sample_name_collapse   = args$sample_name_collapse %||% sample_name_collapse,
+      panel_files            = args$panel_files %||% panel_files
+    )
+  } else {
+    stop("[ERROR] Either config_path or pipeline parameters must be provided.")
+  }
 
-    # -------------------------------------------------------------------------
-    # 1. Load configuration
-    # -------------------------------------------------------------------------
-    if (!is.null(config_path)) {
-        cfg <- load_config(config_path)
-        
-        # Merge BED preprocessing parameters from YAML if present
-        if (!is.null(cfg$bed_preprocess)) {
-            for (name in names(cfg$bed_preprocess)) {
-                cfg[[name]] <- cfg$bed_preprocess[[name]]
-            }
+  if (!is.null(cfg$gene_field_index)) {
+    gene_field_index <- cfg$gene_field_index
+  } else if (!is.null(cfg$bed_preprocess$gene_field_index)) {
+    gene_field_index <- cfg$bed_preprocess$gene_field_index
+  }
+
+  cfg$output$dir <- normalizePath(file.path(getwd(), cfg$output$dir), mustWork = FALSE)
+  if (!dir.exists(cfg$output$dir)) {
+    dir.create(cfg$output$dir, recursive = TRUE, showWarnings = FALSE)
+  }
+
+  if (is.null(log_file)) {
+    log_file <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_pipeline.log"))
+  }
+  log_dir <- dirname(log_file)
+  if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+
+  log_con <- file(log_file, open = "wt")
+  writeLines(paste0("# ECHO Pipeline Log - ", Sys.time()), log_con)
+  writeLines(paste0("# Output directory: ", basename(cfg$output$dir)), log_con)
+  writeLines("# ", log_con)
+  writeLines("## Session Info", log_con)
+  si <- utils::sessionInfo()
+  writeLines(paste0("R version: ", si$R.version$version.string), log_con)
+  writeLines(paste0("Platform: ", si$platform), log_con)
+  writeLines("Packages:", log_con)
+  for (pkg in names(si$otherPkgs)) {
+    writeLines(paste0("   ", pkg, ": ", si$otherPkgs[[pkg]]$Version), log_con)
+  }
+  writeLines(" ", log_con)
+  close(log_con)
+
+  log_msg <- function(msg, type = "INFO") {
+    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    formatted <- paste0("[", type, "] ", timestamp, " ", msg)
+    message(formatted)
+    cat(formatted, "\n", file = log_file, append = TRUE)
+  }
+
+  old_warn <- options(warn = 1)
+  on.exit(options(warn = old_warn$warn), add = TRUE)
+
+  tryCatch({
+    withCallingHandlers({
+      log_msg("ECHO pipeline started")
+      log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
+      log_msg(paste("Output directory:", basename(cfg$output$dir)))
+      log_msg(paste("Log file:", basename(log_file)))
+
+      paths <- list(
+        rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),
+        metrics = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_QC_metrics.tsv")),
+        cnvs    = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNV_calls.tsv")),
+        summary = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_summary.RData")),
+        plots   = file.path(cfg$output$dir, "Plots")
+      )
+
+      if (!is.null(args$rdata))   paths$rdata    <- args$rdata
+      if (!is.null(args$metrics)) paths$metrics  <- args$metrics
+      if (!is.null(args$cnvs))    paths$cnvs     <- args$cnvs
+      if (!is.null(args$summary)) paths$summary  <- args$summary
+
+      lapply(paths[!names(paths) %in% "plots"], function(p) {
+        if (grepl("\\.[a-zA-Z]+$", p)) {
+          dir.create(dirname(p), showWarnings = FALSE, recursive = TRUE)
+        } else {
+          dir.create(p, showWarnings = FALSE, recursive = TRUE)
         }
-        
-    } else if (length(args) > 0) {
-        cfg <- list(
-            input = list(
-                bamdir   = args$bamdir %||% "./data",
-                bamfiles = args$bamfiles,
-                bed      = args$bed,
-                fasta    = args$fasta,
-                rbams    = args$rbams
-            ),
-            output = list(
-                dir    = args$outdir %||% "./result",
-                prefix = args$prefix %||% "ECHO"
-            ),
-            settings = list(
-                modechrom                  = args$modechrom %||% "A",
-                min_corr                   = args$min_corr %||% 0.98,
-                min_cov                    = args$min_cov %||% 100,
-                min_total_reads            = args$min_total_reads %||% 5e6,
-                max_exon_cv                = args$max_exon_cv %||% 0.5,
-                transition_probability     = args$transition_prob %||% args$transition_probability %||% 1e-4,
-                expected_CNV_length        = args$expected_CNV_length %||% 50000,
-                n_bins_reduced             = args$n_bins_reduced %||% 10000,
-                phi_bins                   = args$phi_bins %||% 1,
-                formula                    = args$formula %||% "cbind(test, reference) ~ 1",
-                score_high_corr            = args$score_high_corr %||% 0.985,
-                score_med_corr             = args$score_med_corr %||% 0.95,
-                score_high_refs            = args$score_high_refs %||% 3,
-                score_med_refs             = args$score_med_refs %||% 2,
-                score_low_ratio_low        = args$score_low_ratio_low %||% 0.75,
-                score_low_ratio_high       = args$score_low_ratio_high %||% 1.25,
-                score_high_ratio_low       = args$score_high_ratio_low %||% 0.70,
-                score_high_ratio_high      = args$score_high_ratio_high %||% 1.30,
-                score_med_ratio_low        = args$score_med_ratio_low %||% 0.60,
-                score_med_ratio_high       = args$score_med_ratio_high %||% 1.40,
-                score_low_confidence_genes = args$score_low_confidence_genes %||% c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR")
-            ),
-            # Added BED preprocessing parameters (optional)
-            bed_process       = args$bed_process %||% "NO",
-            refseqgene        = args$refseqgene,
-            transcripts_file  = args$transcripts_file,
-            unknown_gene      = args$unknown_gene %||% FALSE,
-            gene_list_restrict = args$gene_list_restrict,
-            chr_list_restrict = args$chr_list_restrict,
-            exon_sep          = args$exon_sep,
-            gene_name_keep    = args$gene_name_keep,              
-            region_numbering_mode = args$region_numbering_mode %||% "bed_text", 
-            customexon        = args$customexon %||% FALSE,
-            list_genes        = args$list_genes,
-            genes_file        = args$genes_file,
-            genome_version    = args$genome_version %||% "hg19",
-            bed_zero_based    = args$bed_zero_based %||% TRUE,
-            skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
-            sample_name_collapse = args$sample_name_collapse %||% sample_name_collapse,
-            panel_files       = args$panel_files %||% panel_files
+      })
+
+      if (is.null(vcf_output)) {
+        vcf_output <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNVs.vcf"))
+      } else if (identical(vcf_output, FALSE)) {
+        vcf_output <- NULL
+      }
+
+      stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
+      stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
+
+      if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
+        log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
+        processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
+        process_bed_file(
+          input_bed = cfg$input$bed,
+          output_bed = processed_bed,
+          bed_process = cfg$bed_process,
+          bed_zero_based = cfg$bed_zero_based %||% TRUE,
+          refseqgene = cfg$refseqgene %||% NULL,
+          transcripts_file = cfg$transcripts_file %||% NULL,
+          unknown_gene = cfg$unknown_gene %||% FALSE,
+          gene_list_restrict = cfg$gene_list_restrict %||% NULL,
+          exon_sep = cfg$exon_sep %||% NULL,
+          gene_name_collapse = cfg$gene_name_collapse %||% "_",
+          customexon = cfg$customexon %||% FALSE,
+          auto_exon_number = cfg$auto_exon_number %||% TRUE,
+          region_numbering_mode = cfg$region_numbering_mode %||% "bed_text",
+          gene_name_keep = cfg$gene_name_keep %||% NULL,
+          list_genes = cfg$list_genes %||% NULL,
+          genes_file = cfg$genes_file %||% NULL,
+          panel_files = cfg$panel_files %||% NULL,
+          genome_version = cfg$genome_version %||% "hg19",
+          txdb = NULL,
+          gene_field_index = gene_field_index
         )
-    } else {
-        stop("[ERROR] Either config_path or pipeline parameters must be provided.")
-    }
+        cfg$input$bed <- processed_bed
+        log_msg("Processed BED saved to: ", processed_bed)
+      } else {
+        log_msg("BED preprocessing skipped (bed_process = 'NO').")
+      }
 
-    # Allow gene_field_index from config
-    if (!is.null(cfg$gene_field_index)) {
-        gene_field_index <- cfg$gene_field_index
-    } else if (!is.null(cfg$bed_preprocess$gene_field_index)) {
-        gene_field_index <- cfg$bed_preprocess$gene_field_index
-    }
+      steps_total <- 6
+      step_current <- 0
+      run_step <- function(step_name, expr) {
+        step_current <<- step_current + 1
+        log_msg(paste0("Step ", step_current, "/", steps_total, ": ", step_name, "..."))
+        result <- expr
+        log_msg(paste0("Step ", step_current, "/", steps_total, " completed."))
+        invisible(result)
+      }
 
-    # Convert output directory to absolute path and create it
-    cfg$output$dir <- normalizePath(file.path(getwd(), cfg$output$dir), mustWork = FALSE)
-    if (!dir.exists(cfg$output$dir)) {
-        dir.create(cfg$output$dir, recursive = TRUE, showWarnings = FALSE)
-    }
+      run_step("Extracting BAM coverage", {
+        run_bam_coverage(
+          bamfiles = cfg$input$bamfiles,
+          bamdir   = cfg$input$bamdir,
+          bed      = cfg$input$bed,
+          fasta    = cfg$input$fasta,
+          rbams    = cfg$input$rbams,
+          data_out = paths$rdata,
+          verbose = TRUE,
+          sample_name_delim = sample_name_delim,
+          sample_name_keep = sample_name_keep,
+          sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
+          custom_sample_names = custom_sample_names,
+          bed_zero_based = cfg$bed_zero_based %||% TRUE,
+          skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
+        )
+      })
 
-    # -------------------------------------------------------------------------
-    # 2. Setup logging with prefix
-    # -------------------------------------------------------------------------
-    if (is.null(log_file)) {
-        log_file <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_pipeline.log"))
-    }
-    log_dir <- dirname(log_file)
-    if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+      run_step("Running QC metrics", {
+        run_qc_metrics(
+          rdata_file      = paths$rdata,
+          output_file     = paths$metrics,
+          min_corr        = cfg$settings$min_corr,
+          min_cov         = cfg$settings$min_cov,
+          min_total_reads = cfg$settings$min_total_reads,
+          max_exon_cv     = cfg$settings$max_exon_cv
+        )
+      })
 
-    log_con <- file(log_file, open = "wt")
-    writeLines(paste0("# ECHO Pipeline Log - ", Sys.time()), log_con)
-    writeLines(paste0("# Output directory: ", basename(cfg$output$dir)), log_con)
-    writeLines("#", log_con)
-    writeLines("## Session Info", log_con)
-    si <- utils::sessionInfo()
-    writeLines(paste0("R version: ", si$R.version$version.string), log_con)
-    writeLines(paste0("Platform: ", si$platform), log_con)
-    writeLines("Packages:", log_con)
-    for (pkg in names(si$otherPkgs)) {
-        writeLines(paste0("  ", pkg, ": ", si$otherPkgs[[pkg]]$Version), log_con)
-    }
-    writeLines("", log_con)
-    close(log_con)
+      run_step("Calling CNVs", {
+        cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
+        cnv_args <- c(list(
+          rdata_file            = paths$rdata,
+          output_file           = paths$cnvs,
+          out_rdata             = paths$summary,
+          transition.probability = cfg$settings$transition_probability,
+          expected.CNV.length   = cfg$settings$expected_CNV_length,
+          n.bins.reduced        = cfg$settings$n_bins_reduced,
+          phi.bins              = cfg$settings$phi_bins,
+          formula               = cfg$settings$formula,
+          data                  = NULL,
+          save_ed_objects       = save_ed_objects,
+          modechrom             = cfg$settings$modechrom,
+          sample_table          = sample_table
+        ), cnv_args)
+        do.call(run_cnv_calling, cnv_args)
+      })
 
-    log_msg <- function(msg, type = "INFO") {
-        timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-        formatted <- paste0("[", type, "] ", timestamp, " ", msg)
-        message(formatted)
-        cat(formatted, "\n", file = log_file, append = TRUE)
-    }
-
-    old_warn <- options(warn = 1)
-    on.exit(options(warn = old_warn$warn), add = TRUE)
-
-    tryCatch({
-        withCallingHandlers({
-
-            log_msg("ECHO pipeline started")
-            log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
-            log_msg(paste("Output directory:", basename(cfg$output$dir)))
-            log_msg(paste("Log file:", basename(log_file)))
-
-            # -----------------------------------------------------------------
-            # 3. Define output file paths (with prefix)
-            # -----------------------------------------------------------------
-            paths <- list(
-                rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),
-                metrics = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_QC_metrics.tsv")),
-                cnvs    = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNV_calls.tsv")),
-                summary = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_summary.RData")),
-                plots   = file.path(cfg$output$dir, "Plots")
-            )
-
-            if (!is.null(args$rdata))   paths$rdata   <- args$rdata
-            if (!is.null(args$metrics)) paths$metrics <- args$metrics
-            if (!is.null(args$cnvs))    paths$cnvs    <- args$cnvs
-            if (!is.null(args$summary)) paths$summary <- args$summary
-
-            lapply(paths[!names(paths) %in% "plots"], function(p) {
-                if (grepl("\\.[a-zA-Z]+$", p)) {
-                    dir.create(dirname(p), showWarnings = FALSE, recursive = TRUE)
-                } else {
-                    dir.create(p, showWarnings = FALSE, recursive = TRUE)
-                }
-            })
-
-            # VCF output handling: default path if NULL, skip if FALSE
-            if (is.null(vcf_output) && !identical(vcf_output, FALSE)) {
-                vcf_output <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNVs.vcf"))
-            } else if (identical(vcf_output, FALSE)) {
-                vcf_output <- NULL
-            }
-
-            stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
-            stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
-
-            # -----------------------------------------------------------------
-            # 4. Optional BED preprocessing
-            # -----------------------------------------------------------------
-            if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
-                log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
-                # CHANGED: processed BED now has ECHO_ prefix
-                processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
-                process_bed_file(
-                    input_bed = cfg$input$bed,
-                    output_bed = processed_bed,
-                    bed_process = cfg$bed_process,
-                    bed_zero_based = cfg$bed_zero_based %||% TRUE,
-                    refseqgene = cfg$refseqgene %||% NULL,
-                    transcripts_file = cfg$transcripts_file %||% NULL,
-                    unknown_gene = cfg$unknown_gene %||% FALSE,
-                    gene_list_restrict = cfg$gene_list_restrict %||% NULL,
-                    exon_sep = cfg$exon_sep %||% NULL,
-                    gene_name_collapse = cfg$gene_name_collapse %||% "_",
-                    customexon = cfg$customexon %||% FALSE,
-                    auto_exon_number = cfg$auto_exon_number %||% TRUE,
-                    region_numbering_mode = cfg$region_numbering_mode %||% "bed_text",
-                    gene_name_keep = cfg$gene_name_keep %||% NULL,
-                    list_genes = cfg$list_genes %||% NULL,
-                    genes_file = cfg$genes_file %||% NULL,
-                    panel_files = cfg$panel_files %||% NULL,
-                    genome_version = cfg$genome_version %||% "hg19",
-                    txdb = NULL,
-                    gene_field_index = gene_field_index
-                )
-                cfg$input$bed <- processed_bed
-                log_msg("Processed BED saved to: ", processed_bed)
-            } else {
-                log_msg("BED preprocessing skipped (bed_process = 'NO').")
-            }
-
-            # -----------------------------------------------------------------
-            # 5. Run pipeline steps with warning capture and dynamic step counting
-            # -----------------------------------------------------------------
-            steps_total <- 6
-            step_current <- 0
-            run_step <- function(step_name, expr) {
-                step_current <<- step_current + 1
-                log_msg(paste0("Step ", step_current, "/", steps_total, ": ", step_name, "..."))
-                result <- expr
-                log_msg(paste0("Step ", step_current, "/", steps_total, " completed."))
-                invisible(result)
-            }
-
-            run_step("Extracting BAM coverage", {
-                run_bam_coverage(
-                    bamfiles = cfg$input$bamfiles,
-                    bamdir   = cfg$input$bamdir,
-                    bed      = cfg$input$bed,
-                    fasta    = cfg$input$fasta,
-                    rbams    = cfg$input$rbams,
-                    data_out = paths$rdata,
-                    verbose = TRUE,
-                    sample_name_delim = sample_name_delim,
-                    sample_name_keep = sample_name_keep,
-                    sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
-                    custom_sample_names = custom_sample_names,
-                    bed_zero_based = cfg$bed_zero_based %||% TRUE,
-                    skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
-                )
-            })
-
-            run_step("Running QC metrics", {
-                run_qc_metrics(
-                    rdata_file      = paths$rdata,
-                    output_file     = paths$metrics,
-                    min_corr        = cfg$settings$min_corr,
-                    min_cov         = cfg$settings$min_cov,
-                    min_total_reads = cfg$settings$min_total_reads,
-                    max_exon_cv     = cfg$settings$max_exon_cv
-                )
-            })
-
-            run_step("Calling CNVs", {
-                cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
-                cnv_args <- c(list(
-                    rdata_file            = paths$rdata,
-                    output_file           = paths$cnvs,
-                    out_rdata             = paths$summary,
-                    transition.probability = cfg$settings$transition_probability,
-                    expected.CNV.length   = cfg$settings$expected_CNV_length,
-                    n.bins.reduced        = cfg$settings$n_bins_reduced,
-                    phi.bins              = cfg$settings$phi_bins,
-                    formula               = cfg$settings$formula,
-                    data                  = NULL,
-                    save_ed_objects       = save_ed_objects,
-                    modechrom             = cfg$settings$modechrom,
-                    sample_table          = sample_table
-                ), cnv_args)
-
-                do.call(run_cnv_calling, cnv_args)
-            })
-
-            if (plots) {
-                run_step("Generating plots", {
-                    generate_plots(
-                        rdata_file = paths$summary,
-                        output_dir = paths$plots,
-                        modechrom  = cfg$settings$modechrom,
-                        prefix     = cfg$output$prefix,
-                        log_file   = log_file
-                    )
-                })
-            } else {
-                log_msg("Plot generation skipped (plots = FALSE).")
-                steps_total <- steps_total - 1
-            }
-
-            if (report) {
-                run_step("Generating HTML report", {
-                    generate_report(summary_rdata = paths$summary,
-                                    qc_metrics_file = paths$metrics,
-                                    output_dir = cfg$output$dir,
-                                    settings = cfg$settings,
-                                    config = cfg,
-                                    sample_table = sample_table,
-                                    ref_bams = ref_bams %||% cfg$input$rbams,
-                                    log_file = log_file,
-                                    pdf_output = cfg$settings$pdf_output %||% FALSE,
-                                    prefix = cfg$output$prefix)
-                })
-            } else {
-                log_msg("Report generation skipped (report = FALSE).")
-                steps_total <- steps_total - 1
-            }
-
-            if (!is.null(vcf_output) || vcf_per_sample) {
-                run_step("Exporting CNVs to VCF", {
-                    if (file.exists(paths$summary)) {
-                        cnv_calls_local <- local({
-                            env <- new.env()
-                            load(paths$summary, envir = env)
-                            env$cnv_calls
-                        })
-                        if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
-                            if (!is.null(vcf_output)) {
-                                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
-                                log_msg(paste("Combined VCF written to:", basename(vcf_output)))
-                            }
-                            if (vcf_per_sample) {
-                                samples <- unique(cnv_calls_local$Sample)
-                                for (s in samples) {
-                                    sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
-                                    if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
-                                    vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                                    export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
-                                    log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
-                                }
-                            }
-                        } else {
-                            log_msg("No CNV calls to export to VCF.")
-                        }
-                    } else {
-                        log_msg("Summary RData not found – cannot export VCF.", "WARNING")
-                    }
-                })
-            } else {
-                log_msg("VCF export skipped.")
-                steps_total <- steps_total - 1
-            }
-
-            log_msg("Pipeline finished successfully!")
-
-        }, warning = function(w) {
-            if (grepl("sequence levels not in the other", conditionMessage(w))) {
-                invokeRestart("muffleWarning")
-            }
-            log_msg(conditionMessage(w), "WARNING")
-            invokeRestart("muffleWarning")
+      if (plots) {
+        run_step("Generating plots", {
+          generate_plots(
+            rdata_file = paths$summary,
+            output_dir = paths$plots,
+            modechrom  = cfg$settings$modechrom,
+            prefix     = cfg$output$prefix,
+            log_file   = log_file
+          )
         })
+      } else {
+        log_msg("Plot generation skipped (plots = FALSE).")
+        steps_total <- steps_total - 1
+      }
 
-        invisible(TRUE)
+      if (report) {
+        run_step("Generating HTML report", {
+          generate_report(summary_rdata = paths$summary,
+                          qc_metrics_file = paths$metrics,
+                          output_dir = cfg$output$dir,
+                          settings = cfg$settings,
+                          config = cfg,
+                          sample_table = sample_table,
+                          ref_bams = ref_bams %||% cfg$input$rbams,
+                          log_file = log_file,
+                          pdf_output = cfg$settings$pdf_output %||% FALSE,
+                          prefix = cfg$output$prefix)
+        })
+      } else {
+        log_msg("Report generation skipped (report = FALSE).")
+        steps_total <- steps_total - 1
+      }
 
-    }, error = function(e) {
-        log_msg(paste("FATAL:", e$message), "ERROR")
-        stop(e)
+      if (!is.null(vcf_output) || vcf_per_sample) {
+        run_step("Exporting CNVs to VCF", {
+          if (file.exists(paths$summary)) {
+            cnv_calls_local <- local({
+              env <- new.env()
+              load(paths$summary, envir = env)
+              env$cnv_calls
+            })
+            if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
+              if (!is.null(vcf_output)) {
+                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
+                log_msg(paste("Combined VCF written to:", basename(vcf_output)))
+              }
+              if (vcf_per_sample) {
+                samples <- unique(cnv_calls_local$Sample)
+                for (s in samples) {
+                  sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
+                  if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
+                  vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                  export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
+                  log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
+                }
+              }
+            } else {
+              log_msg("No CNV calls to export to VCF.")
+            }
+          } else {
+            log_msg("Summary RData not found – cannot export VCF.", "WARNING")
+          }
+        })
+      } else {
+        log_msg("VCF export skipped.")
+        steps_total <- steps_total - 1
+      }
+
+      log_msg("Pipeline finished successfully!")
+    }, warning = function(w) {
+      if (grepl("sequence levels not in the other", conditionMessage(w))) {
+        invokeRestart("muffleWarning")
+      }
+      log_msg(conditionMessage(w), "WARNING")
+      invokeRestart("muffleWarning")
     })
+    invisible(TRUE)
+  }, error = function(e) {
+    log_msg(paste("FATAL:", e$message), "ERROR")
+    stop(e)
+  })
 }
