@@ -160,6 +160,70 @@ if (!is.null(params$qc_metrics) &&
 
 ---
 
+## Principal Component Analysis (PCA) of Coverage Profiles
+
+```{r pca_coverage}
+counts <- params$counts
+if (!is.null(counts) && is.data.frame(counts) && ncol(counts) >= 3) {
+  # Identify sample columns (exclude metadata)
+  metadata_cols <- c("chromosome", "start", "end", "exon", "exon_number", "GC", "gene")
+  sample_cols <- setdiff(colnames(counts), metadata_cols)
+  
+  if (length(sample_cols) >= 3) {
+    count_mat <- as.matrix(counts[, sample_cols, drop = FALSE])
+    # Log2 transform and remove zero-variance rows
+    log_mat <- log2(count_mat + 1)
+    row_var <- apply(log_mat, 1, var, na.rm = TRUE)
+    keep <- row_var > 0 & !is.na(row_var)
+    if (sum(keep) >= 2) {
+      log_mat <- log_mat[keep, ]
+      pca <- prcomp(t(log_mat), scale. = TRUE, center = TRUE)
+      var_exp <- summary(pca)$importance[2, ] * 100
+      pca_df <- data.frame(PC1 = pca$x[,1], PC2 = pca$x[,2], Sample = sample_cols)
+      
+      # Add gender information if sample_table is provided
+      sample_table <- params$sample_table
+      if (!is.null(sample_table) && is.data.frame(sample_table) && 
+          "gender" %in% colnames(sample_table)) {
+        # Ensure column name matches (sample_name or sample)
+        if ("sample_name" %in% colnames(sample_table)) {
+          pca_df <- merge(pca_df, sample_table[, c("sample_name", "gender")], 
+                          by.x = "Sample", by.y = "sample_name", all.x = TRUE)
+        } else if ("Sample" %in% colnames(sample_table)) {
+          pca_df <- merge(pca_df, sample_table[, c("Sample", "gender")], 
+                          by = "Sample", all.x = TRUE)
+        } else {
+          pca_df$Group <- "All samples"
+        }
+        color_by <- if ("gender" %in% colnames(pca_df)) "gender" else "Group"
+      } else {
+        pca_df$Group <- "All samples"
+        color_by <- "Group"
+      }
+      
+      # Interactive plotly scatter plot
+      p <- plot_ly(pca_df, x = ~PC1, y = ~PC2, text = ~Sample,
+                   color = as.formula(paste0("~", color_by)),
+                   type = 'scatter', mode = 'markers+text',
+                   textposition = 'top right',
+                   marker = list(size = 10),
+                   hovertemplate = paste('<b>%{text}</b><br>PC1: %{x:.2f}<br>PC2: %{y:.2f}<extra></extra>')) %>%
+        layout(title = paste("PCA of Coverage Profiles (", ncol(count_mat), " samples, ", nrow(log_mat), " exons)"),
+               xaxis = list(title = paste0("PC1 (", round(var_exp[1], 1), "%)")),
+               yaxis = list(title = paste0("PC2 (", round(var_exp[2], 1), "%)")),
+               legend = list(title = list(text = ifelse(color_by == "gender", "Gender", "Group"))))
+      p
+    } else {
+      cat("Insufficient variation for PCA after filtering (less than 2 variable exons).")
+    }
+  } else {
+    cat("Not enough samples (≥3 required) for PCA.")
+  }
+} else {
+  cat("Counts data not available or insufficient dimensions for PCA.")
+}
+```
+
 # Per-sample Reports
 
 ```{r per_sample_loop, results='asis'}
