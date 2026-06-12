@@ -424,9 +424,19 @@ plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
                   y = paste0("PC2 (", round(var_exp[2], 1), "%)"),
                   title = "PCA of Sample Coverage Profiles") +
     ggplot2::theme_bw() +
-    # Set legend text (title and labels) to dark blue
-    ggplot2::theme(legend.text = ggplot2::element_text(color = "darkblue"),
-                   legend.title = ggplot2::element_text(color = "darkblue"))
+    ggplot2::theme(
+      # Axis titles in blue
+      axis.title.x = ggplot2::element_text(color = "blue", face = "bold"),
+      axis.title.y = ggplot2::element_text(color = "blue", face = "bold"),
+      # Axis tick labels (numbers) in blue
+      axis.text.x = ggplot2::element_text(color = "blue"),
+      axis.text.y = ggplot2::element_text(color = "blue"),
+      # Plot title in blue
+      plot.title = ggplot2::element_text(color = "blue", face = "bold", hjust = 0.5),
+      # Legend text (if present) in dark blue
+      legend.text = ggplot2::element_text(color = "darkblue"),
+      legend.title = ggplot2::element_text(color = "darkblue")
+    )
   
   # Handle labels without overlapping
   if (requireNamespace("ggrepel", quietly = TRUE)) {

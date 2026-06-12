@@ -39,7 +39,8 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   bed_file  <- local_env$bed_file
   models    <- local_env$models
   refs      <- local_env$refs
-  gender_map <- local_env$gender_map  # may be NULL
+  gender_map <- local_env$gender_map
+  sample_names <- local_env$sample_names   
 
   # Use fread to handle missing fields gracefully
   qc_metrics <- data.table::fread(qc_metrics_file, header = TRUE, fill = TRUE, data.table = FALSE)
@@ -132,7 +133,9 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                           sample_table = sample_df,
                           ref_bams = ref_bams_df,
                           log_file = log_file,
-                          pdf_output = pdf_output
+                          pdf_output = pdf_output,
+                          sample_names = sample_names,
+                          gender_map = gender_map     
                         ),
                         output_file = out_file,
                         quiet = FALSE)
