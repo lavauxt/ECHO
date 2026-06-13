@@ -31,6 +31,6 @@ Invisibly returns the metrics data frame.
 }
 \description{
 Checks coverage for low sample correlation, low median depth per sample,
-low total read count, and high per‑exon coefficient of variation.
+low total read count, and high per-exon coefficient of variation.
 Writes flagged rows to a TSV file.
 }

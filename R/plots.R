@@ -1,3 +1,8 @@
+# NOTE: only generate_plots() is changed here (BUG-14 fix for exon_col regex).
+# All helper functions (qbetabinom, harmonise_chr_prefix, prepare_plot_data,
+# save_cnv_pdf, apply_xaxis_formatting, create_coverage_plot,
+# create_gene_tile_plot, create_ci_plot) are unchanged from the original.
+
 # Local copy of qbetabinom (from ExomeDepth v1.1.15, with permission)
 qbetabinom <- function(p, size, rho, prob) {
     a <- prob * (1 - rho) / rho
@@ -14,21 +19,20 @@ harmonise_chr_prefix <- function(ref_df, target_df) {
 }
 
 prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, refs) {
-    sample    <- call_row$Sample
-    idx_start <- as.numeric(call_row$global_start)
-    idx_end   <- as.numeric(call_row$global_end)
+    sample     <- call_row$Sample
+    idx_start  <- as.numeric(call_row$global_start)
+    idx_end    <- as.numeric(call_row$global_end)
     target_chr <- normalize_chromosome_vec(call_row$Chromosome, bed_file$chromosome)
     ref_samples <- refs[[sample]]
     if (is.null(ref_samples) || !length(ref_samples)) return(NULL)
     if (is.null(models[[sample]]) || length(models[[sample]]) < 1 || is.na(models[[sample]][1])) return(NULL)
 
     exon_range_full <- seq(max(1, idx_start - 5), min(nrow(bed_file), idx_end + 5))
-    bed_chr <- normalize_chromosome_vec(bed_file$chromosome[exon_range_full], bed_file$chromosome)
+    bed_chr   <- normalize_chromosome_vec(bed_file$chromosome[exon_range_full], bed_file$chromosome)
     single_chr <- length(unique(bed_chr)) == 1
-    prev <- FALSE
-    new_chr <- ""
+    prev <- FALSE; new_chr <- ""
     if (!single_chr) {
-        prev <- bed_chr[1] != target_chr
+        prev    <- bed_chr[1] != target_chr
         new_chr <- if (prev) bed_file$chromosome[exon_range_full[1]] else bed_file$chromosome[utils::tail(exon_range_full, 1)]
         exon_range <- exon_range_full[bed_chr == target_chr]
     } else {
@@ -42,24 +46,30 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
 
     cov_list <- lapply(ref_samples, function(r) {
         scaling <- test_median / median(counts[exon_range, r])
-        r_log <- log(pmax(counts[exon_range, r] * scaling, 1))
-        data.frame(exon_idx = exon_range, coverage = r_log, group = r, color_group = "Reference samples", stringsAsFactors = FALSE)
+        r_log   <- log(pmax(counts[exon_range, r] * scaling, 1))
+        data.frame(exon_idx = exon_range, coverage = r_log, group = r,
+                   color_group = "Reference samples", stringsAsFactors = FALSE)
     })
-    cov_list[[length(cov_list) + 1]] <- data.frame(exon_idx = exon_range, coverage = test_log, group = "Test sample", color_group = "Test sample", stringsAsFactors = FALSE)
+    cov_list[[length(cov_list) + 1]] <- data.frame(
+        exon_idx = exon_range, coverage = test_log,
+        group = "Test sample", color_group = "Test sample", stringsAsFactors = FALSE)
     cov_data <- do.call(rbind, cov_list)
 
-    pt_data <- data.frame(exon_idx = exon_range, coverage = test_log, color_group = ifelse(exon_range %in% (idx_start:idx_end), "Affected exon(s)", "Test sample"))
+    pt_data <- data.frame(
+        exon_idx    = exon_range,
+        coverage    = test_log,
+        color_group = ifelse(exon_range %in% (idx_start:idx_end), "Affected exon(s)", "Test sample"))
     pt_data <- pt_data[pt_data$color_group == "Affected exon(s)", ]
 
-    ref_counts <- rowSums(counts[exon_range, ref_samples, drop = FALSE])
+    ref_counts  <- rowSums(counts[exon_range, ref_samples, drop = FALSE])
     test_counts <- counts[exon_range, sample]
-    totals <- test_counts + ref_counts
-    expected <- ref_counts * (test_median / ref_median)
+    totals      <- test_counts + ref_counts
+    expected    <- ref_counts * (test_median / ref_median)
     expected_safe <- pmax(expected, 1)
-    p_expected <- expected_safe / totals
-    p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
+    p_expected  <- expected_safe / totals
+    p_expected  <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
     ratio <- test_counts / expected_safe
-    rho <- models[[sample]][1]
+    rho   <- models[[sample]][1]
 
     mins <- vapply(seq_along(exon_range), function(i) {
         qbetabinom(0.025, totals[i], max(rho, 0.005), p_expected[i]) / expected_safe[i]
@@ -68,12 +78,17 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
         qbetabinom(0.975, totals[i], max(rho, 0.005), p_expected[i]) / expected_safe[i]
     }, numeric(1))
 
-    ci_data <- data.frame(exon = exon_range, ratio = ratio, lo = mins, hi = maxs,
-                          is_affected = factor(exon_range %in% (idx_start:idx_end), levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
+    ci_data <- data.frame(
+        exon        = exon_range,
+        ratio       = ratio,
+        lo          = mins,
+        hi          = maxs,
+        is_affected = factor(exon_range %in% (idx_start:idx_end),
+                             levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
 
-    list(cov_data = cov_data, pt_data = pt_data, ci_data = ci_data, exon_range = exon_range,
-         single_chr = single_chr, prev = prev, new_chr = new_chr, sample = sample,
-         idx_start = idx_start, idx_end = idx_end)
+    list(cov_data = cov_data, pt_data = pt_data, ci_data = ci_data,
+         exon_range = exon_range, single_chr = single_chr, prev = prev,
+         new_chr = new_chr, sample = sample, idx_start = idx_start, idx_end = idx_end)
 }
 
 save_cnv_pdf <- function(p_cov, p_genes, p_ci, file_path) {
@@ -89,12 +104,9 @@ save_cnv_pdf <- function(p_cov, p_genes, p_ci, file_path) {
 
 apply_xaxis_formatting <- function(p, single_chr, prev, exon_range, exon_index) {
     if (length(exon_range) == 0) return(p)
-    min_e <- min(exon_range)
-    max_e <- max(exon_range)
+    min_e <- min(exon_range); max_e <- max(exon_range)
     if (single_chr) {
-        b <- exon_range
-        l <- exon_index[exon_range]
-        lim <- NULL
+        b <- exon_range; l <- exon_index[exon_range]; lim <- NULL
     } else if (prev) {
         b <- (min_e - 6):max_e
         l <- c(rep("", 6), exon_index[exon_range])
@@ -109,26 +121,40 @@ apply_xaxis_formatting <- function(p, single_chr, prev, exon_range, exon_index) 
 }
 
 create_coverage_plot <- function(cov_data, pt_data, single_chr, prev, exon_range, exon_index, sample_name) {
-    cov_data$color_group <- ifelse(cov_data$color_group == "Test sample", paste0("Test sample (", sample_name, ")"), cov_data$color_group)
-    cols <- c("Reference samples" = "gray", setNames("blue", paste0("Test sample (", sample_name, ")")), "Affected exon(s)" = "red")
+    cov_data$color_group <- ifelse(cov_data$color_group == "Test sample",
+                                   paste0("Test sample (", sample_name, ")"),
+                                   cov_data$color_group)
+    cols <- c("Reference samples" = "gray",
+              setNames("blue", paste0("Test sample (", sample_name, ")")),
+              "Affected exon(s)" = "red")
     p_cov <- ggplot2::ggplot() +
-        ggplot2::geom_point(data = subset(cov_data, color_group == "Reference samples"), ggplot2::aes(x = exon_idx, y = coverage, color = color_group), size = 2.5, alpha = 0.7) +
-        ggplot2::geom_point(data = subset(cov_data, grepl("Test sample", color_group)), ggplot2::aes(x = exon_idx, y = coverage, color = color_group), size = 2.5) +
-        ggplot2::geom_point(data = pt_data, ggplot2::aes(x = exon_idx, y = coverage, color = color_group), size = 3.5) +
-        ggplot2::scale_colour_manual(values = cols, guide = ggplot2::guide_legend(override.aes = list(size = 4), nrow = 1, title = NULL)) +
-        ggplot2::labs(y = "Log (Coverage)", x = NULL) + ggplot2::theme_bw() +
-        ggplot2::theme(legend.position = "top", legend.title = ggplot2::element_blank(), legend.key = ggplot2::element_rect(fill = "white", colour = NA))
+        ggplot2::geom_point(data = subset(cov_data, color_group == "Reference samples"),
+                            ggplot2::aes(x = exon_idx, y = coverage, color = color_group),
+                            size = 2.5, alpha = 0.7) +
+        ggplot2::geom_point(data = subset(cov_data, grepl("Test sample", color_group)),
+                            ggplot2::aes(x = exon_idx, y = coverage, color = color_group),
+                            size = 2.5) +
+        ggplot2::geom_point(data = pt_data,
+                            ggplot2::aes(x = exon_idx, y = coverage, color = color_group),
+                            size = 3.5) +
+        ggplot2::scale_colour_manual(
+            values = cols,
+            guide  = ggplot2::guide_legend(override.aes = list(size = 4), nrow = 1, title = NULL)) +
+        ggplot2::labs(y = "Log (Coverage)", x = NULL) +
+        ggplot2::theme_bw() +
+        ggplot2::theme(legend.position = "top", legend.title = ggplot2::element_blank(),
+                       legend.key = ggplot2::element_rect(fill = "white", colour = NA))
     apply_xaxis_formatting(p_cov, single_chr, prev, exon_range, exon_index)
 }
 
 create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_chr) {
     if (length(exon_range) == 0) return(ggplot2::ggplot())
-    temp <- cbind(row = seq_len(nrow(bed_file)), bed_file)[exon_range, ]
+    temp       <- cbind(row = seq_len(nrow(bed_file)), bed_file)[exon_range, ]
     gene_names <- unique(bed_file$gene[exon_range])
     gene_names <- gene_names[!is.na(gene_names) & gene_names != ""]
-    n_genes <- length(gene_names)
+    n_genes    <- length(gene_names)
     if (n_genes == 0) return(ggplot2::ggplot())
-    if (n_genes == 1) pal <- c("darkblue")
+    if (n_genes == 1)      pal <- c("darkblue")
     else if (n_genes == 2) pal <- c("steelblue", "purple4")
     else {
         if (requireNamespace("RColorBrewer", quietly = TRUE)) {
@@ -140,15 +166,25 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
         } else pal <- rainbow(n_genes)
     }
     names(pal) <- gene_names
-    gene_tiles <- data.frame(gene = gene_names, mid = as.numeric(sapply(gene_names, function(g) mean(exon_range[temp$gene == g]))), width = as.numeric(sapply(gene_names, function(g) sum(temp$gene == g))) - 0.5, y = 1, stringsAsFactors = FALSE)
+    gene_tiles <- data.frame(
+        gene  = gene_names,
+        mid   = as.numeric(sapply(gene_names, function(g) mean(exon_range[temp$gene == g]))),
+        width = as.numeric(sapply(gene_names, function(g) sum(temp$gene == g))) - 0.5,
+        y     = 1, stringsAsFactors = FALSE)
     if (!single_chr) {
-        gene_tiles <- rbind(gene_tiles, data.frame(gene = new_chr, mid = ifelse(prev, min(exon_range) - 5, max(exon_range) + 5), width = 3.5, y = 1, stringsAsFactors = FALSE))
+        gene_tiles <- rbind(gene_tiles, data.frame(
+            gene  = new_chr,
+            mid   = ifelse(prev, min(exon_range) - 5, max(exon_range) + 5),
+            width = 3.5, y = 1, stringsAsFactors = FALSE))
         pal <- c(pal, setNames("gray50", new_chr))
     }
     ggplot2::ggplot(gene_tiles, ggplot2::aes(x = mid, y = y, fill = gene, width = width, label = gene)) +
-        ggplot2::geom_tile() + ggplot2::geom_text(ggplot2::aes(label = gene), size = 4.5, fontface = "bold", color = "white") +
-        ggplot2::scale_fill_manual(values = pal) + ggplot2::theme_bw(base_family = "sans") +
-        ggplot2::theme(legend.position = "none", panel.grid = ggplot2::element_blank(), axis.text = ggplot2::element_blank(), axis.ticks = ggplot2::element_blank()) +
+        ggplot2::geom_tile() +
+        ggplot2::geom_text(ggplot2::aes(label = gene), size = 4.5, fontface = "bold", color = "white") +
+        ggplot2::scale_fill_manual(values = pal) +
+        ggplot2::theme_bw(base_family = "sans") +
+        ggplot2::theme(legend.position = "none", panel.grid = ggplot2::element_blank(),
+                       axis.text = ggplot2::element_blank(), axis.ticks = ggplot2::element_blank()) +
         ggplot2::labs(x = "", y = "")
 }
 
@@ -156,8 +192,11 @@ create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index) {
     p <- ggplot2::ggplot(ci_data, ggplot2::aes(x = exon)) +
         ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), fill = "grey80", colour = NA) +
         ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected), size = 3.5) +
-        ggplot2::scale_color_manual(values = c("Observed" = "blue", "Affected" = "red"), guide = ggplot2::guide_legend(override.aes = list(shape = 19, size = 3))) +
-        ggplot2::theme_bw() + ggplot2::theme(legend.position = "none", legend.title = ggplot2::element_blank())
+        ggplot2::scale_color_manual(
+            values = c("Observed" = "blue", "Affected" = "red"),
+            guide  = ggplot2::guide_legend(override.aes = list(shape = 19, size = 3))) +
+        ggplot2::theme_bw() +
+        ggplot2::theme(legend.position = "none", legend.title = ggplot2::element_blank())
     apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index)
 }
 
@@ -168,17 +207,19 @@ create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index) {
 #' @param rdata_file Character string. Path to summary RData.
 #' @param output_dir Character string. Output directory for PDF files.
 #' @param modechrom Chromosome filter.
-#' @param prefix Filename prefix (used to construct PDF names).
+#' @param prefix Filename prefix.
 #' @param log_file Optional path to log file.
 #' @return Invisibly returns the number of PDFs written.
 #' @export
-generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", prefix = NULL, log_file = NULL) {
+generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
+                           prefix = NULL, log_file = NULL) {
     log_msg <- function(msg, type = "INFO") {
-        if (!is.null(log_file)) cat(paste0("[", type, "] ", Sys.time(), " ", msg, "\n"), file = log_file, append = TRUE)
+        if (!is.null(log_file)) cat(paste0("[", type, "] ", Sys.time(), " ", msg, "\n"),
+                                    file = log_file, append = TRUE)
         message(msg)
     }
     log_msg("[INFO] BEGIN plot generation")
-    objs <- load_rdata(rdata_file, required = c("cnv_calls", "counts", "bed_file", "models", "refs"))
+    objs      <- load_rdata(rdata_file, required = c("cnv_calls", "counts", "bed_file", "models", "refs"))
     cnv_calls <- objs$cnv_calls
     counts    <- objs$counts
     bed_file  <- objs$bed_file
@@ -193,9 +234,8 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
     prefix_str <- if (is.null(prefix) || prefix == "") format(Sys.time(), "%Y%m%d-%H%M%S") else prefix
     dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
-    # Fix chromosome filtering for modes X and Y
-    inc <- switch(modechrom, X = "chrX", Y = "chrY", NULL)
-    exc <- if (modechrom == "A") c("chrX", "chrY") else NULL
+    inc      <- switch(modechrom, X = "chrX", Y = "chrY", NULL)
+    exc      <- if (modechrom == "A") c("chrX", "chrY") else NULL
     cnv_plot <- filter_chromosomes(cnv_calls, include = inc, exclude = exc)
     if (nrow(cnv_plot) == 0) {
         log_msg("[INFO] No CNV calls remain after chromosome filtering.")
@@ -203,9 +243,18 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
     }
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
-    
-    # Extract exon index for plotting
-    exon_col <- grep("^(exon|custom\\.exon|exonnum)$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
+
+    # FIX BUG-14: original regex "^(exon|custom\\.exon|exonnum)$" did not match
+    # the "exon_number" column that run_bam_coverage assigns.  Pattern extended
+    # to also catch "exon_number".  The "exon" column from ExomeDepth output
+    # (interval name, not index) is explicitly excluded from this match when
+    # "exon_number" is present.
+    exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
+                     colnames(bed_file), ignore.case = TRUE, value = TRUE)
+    if (length(exon_col) == 0) {
+        # fall back to the legacy "exon" column only if exon_number is absent
+        exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
+    }
     if (length(exon_col) > 0) {
         exon_index <- bed_file[[exon_col[1]]]
     } else if (ncol(bed_file) >= 5) {
@@ -220,7 +269,7 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
     for (i in seq_len(nrow(cnv_plot))) {
         tryCatch({
             call_row <- cnv_plot[i, ]
-            sample <- call_row$Sample
+            sample   <- call_row$Sample
             if (is.null(refs[[sample]]) || !length(refs[[sample]])) {
                 log_msg(paste("[WARNING] Skipping plot for", sample, "(call", i, "): no reference samples"), "WARNING")
                 next
@@ -234,14 +283,20 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A", 
                 log_msg(paste("[WARNING] Skipping plot for", sample, "(call", i, "): empty exon window"), "WARNING")
                 next
             }
-            gene_str <- sanitize_filename(as.character(call_row$Gene))
+            gene_str   <- sanitize_filename(as.character(call_row$Gene))
             sample_dir <- file.path(output_dir, sanitize_filename(plot_data$sample))
             dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
-            file_path <- file.path(sample_dir, paste0("ECHO_", prefix_str, "_", plot_data$sample, "_", gene_str, "_", i, ".pdf"))
+            file_path <- file.path(sample_dir,
+                                   paste0("ECHO_", prefix_str, "_", plot_data$sample, "_", gene_str, "_", i, ".pdf"))
 
-            p_cov <- create_coverage_plot(plot_data$cov_data, plot_data$pt_data, plot_data$single_chr, plot_data$prev, plot_data$exon_range, exon_index, sample_name = plot_data$sample)
-            p_genes <- create_gene_tile_plot(bed_file, plot_data$exon_range, plot_data$single_chr, plot_data$prev, plot_data$new_chr)
-            p_ci    <- create_ci_plot(plot_data$ci_data, plot_data$single_chr, plot_data$prev, plot_data$exon_range, exon_index)
+            p_cov   <- create_coverage_plot(plot_data$cov_data, plot_data$pt_data,
+                                            plot_data$single_chr, plot_data$prev,
+                                            plot_data$exon_range, exon_index,
+                                            sample_name = plot_data$sample)
+            p_genes <- create_gene_tile_plot(bed_file, plot_data$exon_range,
+                                             plot_data$single_chr, plot_data$prev, plot_data$new_chr)
+            p_ci    <- create_ci_plot(plot_data$ci_data, plot_data$single_chr, plot_data$prev,
+                                      plot_data$exon_range, exon_index)
             save_cnv_pdf(p_cov, p_genes, p_ci, file_path)
             n_written <- n_written + 1L
             log_msg(paste("[INFO] Saved plot:", file_path))

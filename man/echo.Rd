@@ -26,41 +26,34 @@ echo(
 \arguments{
 \item{config_path}{Optional character string. Path to a \code{config.yaml} file.}
 
-\item{vcf_output}{Character string. If \code{NULL}, a default VCF path inside the output directory is used.
-Set to \code{FALSE} to skip VCF export. Default \code{NULL}.}
+\item{vcf_output}{Character string. If \code{NULL}, a default VCF path inside the output
+directory is used.  Set to \code{FALSE} to skip VCF export. Default \code{NULL}.}
 
 \item{save_ed_objects}{Logical. Save full ExomeDepth objects? Default \code{FALSE}.}
 
 \item{report}{Logical. Generate interactive HTML reports? Default \code{TRUE}.}
 
-\item{plots}{Logical. Generate per‑CNV PDF plots? Default \code{FALSE}.}
+\item{plots}{Logical. Generate per-CNV PDF plots? Default \code{FALSE}.}
 
 \item{vcf_per_sample}{Logical. Write a separate VCF file for each sample? Default \code{FALSE}.}
 
-\item{sample_name_delim}{Character string. Delimiter(s) to split the filename.
-Can be a single character (e.g., `"."`, `"_"`) or a regex like `"[._]"`. Default `"\\."` (dot only).}
+\item{sample_name_delim}{Character string. Delimiter(s) to split the filename.}
 
-\item{sample_name_keep}{Character string. Specifies which parts to keep after splitting.
-Examples: `"1"` (first part), `"1-2"` (first two parts), `"2"` (second part), `"2-3"` (parts 2 and 3).
-Default `"1"` (keep the first part before the first delimiter).}
+\item{sample_name_keep}{Character string. Specifies which parts to keep after splitting.}
 
-\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").}
+\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL.}
 
-\item{custom_sample_names}{Optional character vector. Custom sample names (must match number of BAMs).}
+\item{custom_sample_names}{Optional character vector. Custom sample names.}
 
-\item{log_file}{Character string. Path to log file. If \code{NULL}, a default log file is created inside the output directory.}
+\item{log_file}{Character string. Path to log file.}
 
-\item{gene_field_index}{Integer. Which field to keep after splitting by exon_sep in BED processing.
-Default 1 (first field). Use 3 for BEDs like "NM_006015_ARID1A_ex5...".}
+\item{gene_field_index}{Integer. Which field to keep after splitting by exon_sep.}
 
-\item{sample_table}{Optional character string. Path to a CSV/TSV file with columns
-\code{sample_name} and \code{gender} (M/F or male/female). Required for sex chromosome modes.}
+\item{sample_table}{Optional character string. Path to a CSV/TSV with sample_name / gender.}
 
-\item{ref_bams}{Optional character string. Path to a TSV file with a \code{bam} column
-listing external reference BAMs (used for reporting only).}
+\item{ref_bams}{Optional character string. Path to TSV with external reference BAM list.}
 
-\item{panel_files}{Optional character vector. In STANDARD mode, a vector of BED file paths
-(one per line) or a single file containing paths to panel BEDs used to restrict targets.}
+\item{panel_files}{Optional character vector. BED file paths for target restriction.}
 
 \item{...}{Optional named overrides (see details).}
 }

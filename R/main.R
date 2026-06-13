@@ -4,28 +4,21 @@
 #'
 #' @param config_path Optional character string. Path to a \code{config.yaml} file.
 #' @param ... Optional named overrides (see details).
-#' @param vcf_output Character string. If \code{NULL}, a default VCF path inside the output directory is used.
-#'   Set to \code{FALSE} to skip VCF export. Default \code{NULL}.
+#' @param vcf_output Character string. If \code{NULL}, a default VCF path inside the output
+#'   directory is used.  Set to \code{FALSE} to skip VCF export. Default \code{NULL}.
 #' @param save_ed_objects Logical. Save full ExomeDepth objects? Default \code{FALSE}.
 #' @param report Logical. Generate interactive HTML reports? Default \code{TRUE}.
-#' @param plots Logical. Generate per‑CNV PDF plots? Default \code{FALSE}.
+#' @param plots Logical. Generate per-CNV PDF plots? Default \code{FALSE}.
 #' @param vcf_per_sample Logical. Write a separate VCF file for each sample? Default \code{FALSE}.
 #' @param sample_name_delim Character string. Delimiter(s) to split the filename.
-#'   Can be a single character (e.g., `"."`, `"_"`) or a regex like `"[._]"`. Default `"\\."` (dot only).
 #' @param sample_name_keep Character string. Specifies which parts to keep after splitting.
-#'   Examples: `"1"` (first part), `"1-2"` (first two parts), `"2"` (second part), `"2-3"` (parts 2 and 3).
-#'   Default `"1"` (keep the first part before the first delimiter).
-#' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").
-#' @param custom_sample_names Optional character vector. Custom sample names (must match number of BAMs).
-#' @param log_file Character string. Path to log file. If \code{NULL}, a default log file is created inside the output directory.
-#' @param gene_field_index Integer. Which field to keep after splitting by exon_sep in BED processing.
-#'   Default 1 (first field). Use 3 for BEDs like "NM_006015_ARID1A_ex5...".
-#' @param sample_table Optional character string. Path to a CSV/TSV file with columns
-#'   \code{sample_name} and \code{gender} (M/F or male/female). Required for sex chromosome modes.
-#' @param ref_bams Optional character string. Path to a TSV file with a \code{bam} column
-#'   listing external reference BAMs (used for reporting only).
-#' @param panel_files Optional character vector. In STANDARD mode, a vector of BED file paths
-#'   (one per line) or a single file containing paths to panel BEDs used to restrict targets.
+#' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL.
+#' @param custom_sample_names Optional character vector. Custom sample names.
+#' @param log_file Character string. Path to log file.
+#' @param gene_field_index Integer. Which field to keep after splitting by exon_sep.
+#' @param sample_table Optional character string. Path to a CSV/TSV with sample_name / gender.
+#' @param ref_bams Optional character string. Path to TSV with external reference BAM list.
+#' @param panel_files Optional character vector. BED file paths for target restriction.
 #'
 #' @return Invisibly returns \code{TRUE} on success.
 #' @export
@@ -44,7 +37,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  panel_files = NULL,
                  ...) {
   args <- list(...)
-  
+
   if (!is.null(config_path)) {
     cfg <- load_config(config_path)
     if (!is.null(cfg$bed_preprocess)) {
@@ -87,7 +80,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         score_high_ratio_high      = args$score_high_ratio_high %||% 1.30,
         score_med_ratio_low        = args$score_med_ratio_low %||% 0.60,
         score_med_ratio_high       = args$score_med_ratio_high %||% 1.40,
-        score_low_confidence_genes = args$score_low_confidence_genes %||% c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR")
+        score_low_confidence_genes = args$score_low_confidence_genes %||%
+          c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR")
       ),
       bed_process            = args$bed_process %||% "NO",
       refseqgene             = args$refseqgene,
@@ -96,8 +90,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       gene_list_restrict     = args$gene_list_restrict,
       chr_list_restrict      = args$chr_list_restrict,
       exon_sep               = args$exon_sep,
-      gene_name_keep         = args$gene_name_keep,               
-      region_numbering_mode  = args$region_numbering_mode %||% "bed_text", 
+      gene_name_keep         = args$gene_name_keep,
+      region_numbering_mode  = args$region_numbering_mode %||% "bed_text",
       customexon             = args$customexon %||% FALSE,
       list_genes             = args$list_genes,
       genes_file             = args$genes_file,
@@ -168,10 +162,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         plots   = file.path(cfg$output$dir, "Plots")
       )
 
-      if (!is.null(args$rdata))   paths$rdata    <- args$rdata
-      if (!is.null(args$metrics)) paths$metrics  <- args$metrics
-      if (!is.null(args$cnvs))    paths$cnvs     <- args$cnvs
-      if (!is.null(args$summary)) paths$summary  <- args$summary
+      if (!is.null(args$rdata))   paths$rdata   <- args$rdata
+      if (!is.null(args$metrics)) paths$metrics <- args$metrics
+      if (!is.null(args$cnvs))    paths$cnvs    <- args$cnvs
+      if (!is.null(args$summary)) paths$summary <- args$summary
 
       lapply(paths[!names(paths) %in% "plots"], function(p) {
         if (grepl("\\.[a-zA-Z]+$", p)) {
@@ -187,44 +181,52 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         vcf_output <- NULL
       }
 
-      stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
+      stop_if_not_file(cfg$input$bed,   "[ERROR] BED file missing")
       stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
 
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
-        log_msg("Preprocessing BED file using mode: ", cfg$bed_process)
+        # FIX BUG-2: original code passed cfg$bed_process as the `type` arg of
+        # log_msg instead of concatenating it into the message string.
+        log_msg(paste("Preprocessing BED file using mode:", cfg$bed_process))
         processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
         process_bed_file(
-          input_bed = cfg$input$bed,
-          output_bed = processed_bed,
-          bed_process = cfg$bed_process,
-          bed_zero_based = cfg$bed_zero_based %||% TRUE,
-          refseqgene = cfg$refseqgene %||% NULL,
-          transcripts_file = cfg$transcripts_file %||% NULL,
-          unknown_gene = cfg$unknown_gene %||% FALSE,
-          gene_list_restrict = cfg$gene_list_restrict %||% NULL,
-          exon_sep = cfg$exon_sep %||% NULL,
-          gene_name_collapse = cfg$gene_name_collapse %||% "_",
-          customexon = cfg$customexon %||% FALSE,
-          auto_exon_number = cfg$auto_exon_number %||% TRUE,
+          input_bed             = cfg$input$bed,
+          output_bed            = processed_bed,
+          bed_process           = cfg$bed_process,
+          bed_zero_based        = cfg$bed_zero_based %||% TRUE,
+          refseqgene            = cfg$refseqgene %||% NULL,
+          transcripts_file      = cfg$transcripts_file %||% NULL,
+          unknown_gene          = cfg$unknown_gene %||% FALSE,
+          gene_list_restrict    = cfg$gene_list_restrict %||% NULL,
+          exon_sep              = cfg$exon_sep %||% NULL,
+          gene_name_collapse    = cfg$gene_name_collapse %||% "_",
+          customexon            = cfg$customexon %||% FALSE,
+          auto_exon_number      = cfg$auto_exon_number %||% TRUE,
           region_numbering_mode = cfg$region_numbering_mode %||% "bed_text",
-          gene_name_keep = cfg$gene_name_keep %||% NULL,
-          list_genes = cfg$list_genes %||% NULL,
-          genes_file = cfg$genes_file %||% NULL,
-          panel_files = cfg$panel_files %||% NULL,
-          genome_version = cfg$genome_version %||% "hg19",
-          txdb = NULL,
-          gene_field_index = gene_field_index
+          gene_name_keep        = cfg$gene_name_keep %||% NULL,
+          list_genes            = cfg$list_genes %||% NULL,
+          genes_file            = cfg$genes_file %||% NULL,
+          panel_files           = cfg$panel_files %||% NULL,
+          genome_version        = cfg$genome_version %||% "hg19",
+          txdb                  = NULL,
+          gene_field_index      = gene_field_index
         )
         cfg$input$bed <- processed_bed
-        log_msg("Processed BED saved to: ", processed_bed)
+        # FIX BUG-2: same issue — processed_bed was being passed as `type`.
+        log_msg(paste("Processed BED saved to:", processed_bed))
       } else {
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
       }
 
-      steps_total <- 6
-      step_current <- 0
+      # FIX BUG-11: initialise steps_total based on which optional steps are
+      # actually enabled, so the N/M counter stays consistent throughout.
+      steps_total   <- 3L +   # coverage + QC + CNV calling are always run
+                       as.integer(plots) +
+                       as.integer(report) +
+                       as.integer(!is.null(vcf_output) || vcf_per_sample)
+      step_current  <- 0L
       run_step <- function(step_name, expr) {
-        step_current <<- step_current + 1
+        step_current <<- step_current + 1L
         log_msg(paste0("Step ", step_current, "/", steps_total, ": ", step_name, "..."))
         result <- expr
         log_msg(paste0("Step ", step_current, "/", steps_total, " completed."))
@@ -233,31 +235,30 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
 
       run_step("Extracting BAM coverage", {
         run_bam_coverage(
-          bamfiles = cfg$input$bamfiles,
-          bamdir   = cfg$input$bamdir,
-          bed      = cfg$input$bed,
-          fasta    = cfg$input$fasta,
-          rbams    = cfg$input$rbams,
-          data_out = paths$rdata,
-          verbose = TRUE,
-          sample_name_delim = sample_name_delim,
-          sample_name_keep = sample_name_keep,
+          bamfiles             = cfg$input$bamfiles,
+          bamdir               = cfg$input$bamdir,
+          bed                  = cfg$input$bed,
+          fasta                = cfg$input$fasta,
+          rbams                = cfg$input$rbams,
+          data_out             = paths$rdata,
+          verbose              = TRUE,
+          sample_name_delim    = sample_name_delim,
+          sample_name_keep     = sample_name_keep,
           sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
-          custom_sample_names = custom_sample_names,
-          bed_zero_based = cfg$bed_zero_based %||% TRUE,
+          custom_sample_names  = custom_sample_names,
+          bed_zero_based       = cfg$bed_zero_based %||% TRUE,
           skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
         )
       })
 
       if (cfg$settings$pca_plot %||% TRUE) {
-        objs <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
-        counts <- objs$counts
+        objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
+        counts       <- objs$counts
         sample_names <- objs$sample_names
-        
-        pca_file <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
-        group_info <- NULL
+        pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
+        group_info   <- NULL
         if (!is.null(sample_table) && file.exists(sample_table)) {
-          sample_df <- read.table(sample_table, header = TRUE, sep = "\t")
+          sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
           group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
         }
         plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
@@ -277,18 +278,18 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       run_step("Calling CNVs", {
         cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
         cnv_args <- c(list(
-          rdata_file            = paths$rdata,
-          output_file           = paths$cnvs,
-          out_rdata             = paths$summary,
+          rdata_file             = paths$rdata,
+          output_file            = paths$cnvs,
+          out_rdata              = paths$summary,
           transition.probability = cfg$settings$transition_probability,
-          expected.CNV.length   = cfg$settings$expected_CNV_length,
-          n.bins.reduced        = cfg$settings$n_bins_reduced,
-          phi.bins              = cfg$settings$phi_bins,
-          formula               = cfg$settings$formula,
-          data                  = NULL,
-          save_ed_objects       = save_ed_objects,
-          modechrom             = cfg$settings$modechrom,
-          sample_table          = sample_table
+          expected.CNV.length    = cfg$settings$expected_CNV_length,
+          n.bins.reduced         = cfg$settings$n_bins_reduced,
+          phi.bins               = cfg$settings$phi_bins,
+          formula                = cfg$settings$formula,
+          data                   = NULL,
+          save_ed_objects        = save_ed_objects,
+          modechrom              = cfg$settings$modechrom,
+          sample_table           = sample_table
         ), cnv_args)
         do.call(run_cnv_calling, cnv_args)
       })
@@ -305,36 +306,38 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         })
       } else {
         log_msg("Plot generation skipped (plots = FALSE).")
-        steps_total <- steps_total - 1
       }
 
       if (report) {
         run_step("Generating HTML report", {
-          generate_report(summary_rdata = paths$summary,
-                          qc_metrics_file = paths$metrics,
-                          output_dir = cfg$output$dir,
-                          settings = cfg$settings,
-                          config = cfg,
-                          sample_table = sample_table,
-                          ref_bams = ref_bams %||% cfg$input$rbams,
-                          log_file = log_file,
-                          pdf_output = cfg$settings$pdf_output %||% FALSE,
-                          prefix = cfg$output$prefix)
+          generate_report(
+            summary_rdata   = paths$summary,
+            qc_metrics_file = paths$metrics,
+            output_dir      = cfg$output$dir,
+            settings        = cfg$settings,
+            config          = cfg,
+            sample_table    = sample_table,
+            ref_bams        = ref_bams %||% cfg$input$rbams,
+            log_file        = log_file,
+            pdf_output      = cfg$settings$pdf_output %||% FALSE,
+            prefix          = cfg$output$prefix
+          )
         })
       } else {
         log_msg("Report generation skipped (report = FALSE).")
-        steps_total <- steps_total - 1
       }
 
       if (!is.null(vcf_output) || vcf_per_sample) {
         run_step("Exporting CNVs to VCF", {
           if (file.exists(paths$summary)) {
+            # FIX BUG-4: exists("cnv_calls_local") was always TRUE immediately
+            # after the assignment.  Check nrow() directly instead.
             cnv_calls_local <- local({
               env <- new.env()
               load(paths$summary, envir = env)
               env$cnv_calls
             })
-            if (exists("cnv_calls_local") && !is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
+            if (!is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
               if (!is.null(vcf_output)) {
                 export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
                 log_msg(paste("Combined VCF written to:", basename(vcf_output)))
@@ -343,10 +346,12 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 samples <- unique(cnv_calls_local$Sample)
                 for (s in samples) {
                   sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
-                  if (!dir.exists(sample_folder)) dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
-                  vcf_file <- file.path(sample_folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                  if (!dir.exists(sample_folder))
+                    dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
+                  vcf_file <- file.path(sample_folder,
+                                        paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
                   export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
-                  log_msg(paste("Per‑sample VCF written to:", basename(vcf_file)))
+                  log_msg(paste("Per-sample VCF written to:", basename(vcf_file)))
                 }
               }
             } else {
@@ -358,13 +363,12 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         })
       } else {
         log_msg("VCF export skipped.")
-        steps_total <- steps_total - 1
       }
 
       log_msg("Pipeline finished successfully!")
     }, warning = function(w) {
       if (grepl("sequence levels not in the other", conditionMessage(w))) {
-        invokeRestart("muffleWarning")
+        invokeRestart("muffleWarning")   # silently suppress GenomicRanges noise
       }
       log_msg(conditionMessage(w), "WARNING")
       invokeRestart("muffleWarning")

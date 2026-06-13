@@ -7,12 +7,11 @@
 load_config(yaml_path)
 }
 \arguments{
-\item{yaml_path}{Character string. Path to a YAML file, or a filename resolved
-via \code{system.file()} when not found locally.}
+\item{yaml_path}{Character string. Path to a YAML file, or a filename
+resolved via system.file() when not found locally.}
 }
 \value{
-Named list with \code{input}, \code{output}, and optional \code{settings}
-  sections from the YAML file.
+Named list with input, output, and optional settings sections.
 }
 \description{
 Load and validate YAML configuration

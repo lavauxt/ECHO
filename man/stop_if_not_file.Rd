@@ -9,7 +9,7 @@ stop_if_not_file(path, msg)
 \arguments{
 \item{path}{Path to the file.}
 
-\item{msg}{Error message to display if file is missing.}
+\item{msg}{Error message if file is missing.}
 }
 \description{
 Stop if file does not exist

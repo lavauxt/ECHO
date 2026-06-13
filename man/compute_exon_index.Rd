@@ -10,7 +10,7 @@ compute_exon_index(bed_file)
 \item{bed_file}{BED annotation data frame.}
 }
 \value{
-Integer vector of per‑gene exon numbers, one per row.
+Integer vector of per-gene exon numbers, one per row.
 }
 \description{
 Compute exon index for plotting (consistent with add_within_gene_indices)

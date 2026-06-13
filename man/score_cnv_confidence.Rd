@@ -57,6 +57,5 @@ score_cnv_confidence(
 The input \code{cnv_calls} data frame with confidence column added.
 }
 \description{
-Evaluates the reliability of copy number variant calls based on coverage, ratio,
-and genomic region criteria.
+Score CNV Confidence (HIGH/MEDIUM/LOW)
 }

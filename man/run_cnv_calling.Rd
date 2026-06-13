@@ -23,29 +23,27 @@ run_cnv_calling(
 \arguments{
 \item{rdata_file}{Character string. Output from \code{\link{run_bam_coverage}}.}
 
-\item{output_file}{Character string. TSV output for CNV calls. Default \code{"./CNV_calls.tsv"}.}
+\item{output_file}{Character string. TSV output for CNV calls.}
 
-\item{out_rdata}{Character string. RData output for plotting. Default \code{"./ECHO_summary.RData"}.}
+\item{out_rdata}{Character string. RData output for plotting.}
 
-\item{transition.probability}{Numeric. HMM transition probability. Default \code{1e-4}.}
+\item{transition.probability}{Numeric. HMM transition probability.}
 
-\item{expected.CNV.length}{Numeric. Expected CNV length in bp (influences Viterbi). Default \code{50000}.}
+\item{expected.CNV.length}{Numeric. Expected CNV length in bp.}
 
-\item{n.bins.reduced}{Integer. Number of bins to subsample for reference selection. Default \code{10000}.}
+\item{n.bins.reduced}{Integer. Number of bins to subsample for reference selection.}
 
-\item{phi.bins}{Integer. Number of bins for over‑dispersion parameter. Default \code{1}.}
+\item{phi.bins}{Integer. Number of bins for over-dispersion parameter.}
 
-\item{formula}{Character. Formula for the model. Default \code{"cbind(test, reference) ~ 1"}.}
+\item{formula}{Character. Formula for the model.}
 
-\item{data}{Data frame. Optional covariate data for the formula. Default \code{NULL}.}
+\item{data}{Data frame. Optional covariate data for the formula.}
 
-\item{save_ed_objects}{Logical. If TRUE, save full ExomeDepth objects per sample. Default FALSE.}
+\item{save_ed_objects}{Logical. If TRUE, save full ExomeDepth objects per sample.}
 
-\item{modechrom}{Character. Mode for sex chromosome handling: "A" (autosomes only, default),
-"X" (chrX only, split by gender), "Y" (chrY only, males only).}
+\item{modechrom}{Character. Mode for sex chromosome handling.}
 
-\item{sample_table}{Optional character string. Path to sample table (CSV/TSV) with columns
-\code{sample_name} and \code{gender} (M/F or male/female). Required for "X" or "Y" modes.}
+\item{sample_table}{Optional character string. Path to sample table.}
 
 \item{...}{Additional parameters passed to \code{score_cnv_confidence}.}
 }
@@ -53,5 +51,5 @@ run_cnv_calling(
 Invisibly returns \code{NULL}. Writes TSV and RData outputs to disk.
 }
 \description{
-Processes BAM count coverage sets to detect copy number variants (CNVs) per sample.
+Run CNV Calling using ExomeDepth
 }

@@ -14,8 +14,8 @@ process_bed_file(
   unknown_gene = FALSE,
   gene_list_restrict = NULL,
   chr_list_restrict = NULL,
-  exon_sep = "_",
-  gene_name_collapse = "_",
+  exon_sep = " ",
+  gene_name_collapse = " ",
   kmer = NULL,
   customexon = FALSE,
   auto_exon_number = TRUE,
@@ -40,9 +40,9 @@ process_bed_file(
 
 \item{unknown_gene}{Keep intervals without gene name? Default FALSE.}
 
-\item{exon_sep}{Character string or list/vector of characters to split gene names (e.g., "[_()]" or c("_", "(")). Default "_".}
+\item{exon_sep}{Character string or list/vector of characters to split gene names (e.g., "[ ()]" or c(" ", "(")). Default " ".}
 
-\item{gene_name_collapse}{Character token used to rejoin kept parts. Default "_".}
+\item{gene_name_collapse}{Character token used to rejoin kept parts. Default " ".}
 
 \item{customexon}{Add a Custom.Exon column containing exon numbers. Default FALSE.}
 

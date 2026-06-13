@@ -42,13 +42,13 @@ run_bam_coverage(
 
 \item{sample_name_keep}{Character string. Which parts to keep (e.g., "1", "1-2").}
 
-\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL (uses first character of delim if single char else ".").}
+\item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL.}
 
 \item{custom_sample_names}{Optional character vector.}
 
-\item{bed_zero_based}{Logical. If TRUE, BED start coordinates are 0‑based.}
+\item{bed_zero_based}{Logical. If TRUE, BED start coordinates are 0-based.}
 
-\item{skip_invalid_intervals}{Logical. If TRUE, intervals that cannot be extracted from FASTA are removed. Default FALSE (performance).}
+\item{skip_invalid_intervals}{Logical. If TRUE, validate each interval against FASTA.}
 }
 \value{
 Invisibly \code{NULL}. Coverage object saved to disk.

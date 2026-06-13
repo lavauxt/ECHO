@@ -12,5 +12,5 @@ a \%||\% b
 \item{b}{Fallback value.}
 }
 \description{
-Returns the first argument if not NULL, otherwise the second.
+Null coalescing operator
 }

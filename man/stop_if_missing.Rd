@@ -9,7 +9,7 @@ stop_if_missing(val, msg)
 \arguments{
 \item{val}{Object to validate.}
 
-\item{msg}{Error message to display if validation fails.}
+\item{msg}{Error message if validation fails.}
 }
 \description{
 Stop if value is NULL or empty
