@@ -126,6 +126,13 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
 }
 ```
 
+<style>
+  .alert-warning { border-left: 5px solid #f0ad4e; margin-bottom: 20px; background-color: #fcf8e3; color: #8a6d3b; padding: 15px; border-radius: 4px; }
+  .dt-buttons { margin-bottom: 15px; }
+  .btn-default { background-color: #34495e !important; color: white !important; border: none !important; }
+  .btn-default:hover { background-color: #2c3e50 !important; }
+</style>
+
 ## Summary
 
 - **Number of samples with CNV calls**:
@@ -139,21 +146,51 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
 
 ## QC Metrics Overview (all samples)
 
-```{r qc_overview}
-if (!is.null(params$qc_metrics) &&
-    nrow(params$qc_metrics) > 0) {
+```{r qc_overview, results='asis'}
+# 1. Output Pipeline Alerts for missing chromosomes if present
+if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(params$qc_metrics) > 0) {
+  missing_chrs <- params$qc_metrics[params$qc_metrics$Type == "Missing Chromosome", ]
+  if (nrow(missing_chrs) > 0) {
+    for (i in seq_len(nrow(missing_chrs))) {
+      cat(sprintf('
+      <div class="alert alert-warning" role="alert">
+          <h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>
+          <p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>
+      </div>
+      ', htmltools::htmlEscape(missing_chrs$Details[i])))
+    }
+    cat("<br>")
+  }
+}
 
-  DT::datatable(
-    params$qc_metrics,
-    options = list(
-      pageLength = 15,
-      scrollX = TRUE
-    ),
-    caption = "QC flags across all samples"
-  )
-
+# 2. Render main table excluding technical missing chromosome warnings
+if (!is.null(params$qc_metrics) && nrow(params$qc_metrics) > 0) {
+  display_qc <- params$qc_metrics[params$qc_metrics$Type != "Missing Chromosome", ]
+  
+  if (nrow(display_qc) > 0) {
+    DT::datatable(
+      display_qc,
+      extensions = 'Buttons',
+      options = list(
+        pageLength = 15,
+        scrollX = TRUE,
+        dom = 'Bfrtip',
+        buttons = list(
+          list(
+            extend = 'colvis',
+            text = '<i class="fa fa-eye"></i> Show/Hide Columns',
+            collectionLayout = 'fixed columns',
+            fade = 100
+          ),
+          'copy', 'csv'
+        )
+      ),
+      caption = "QC flags across all samples"
+    )
+  } else {
+    cat("<p>No sample-specific QC warnings or issues recorded.</p>\n")
+  }
 } else {
-
   cat("No QC issues detected.\n")
 }
 ```
@@ -242,8 +279,8 @@ if (length(samples) == 0) {
 
     # QC metrics for this sample
     qc_s <- params$qc_metrics[
-      params$qc_metrics$Sample == s |
-        params$qc_metrics$Sample == "All",
+      (params$qc_metrics$Sample == s | params$qc_metrics$Sample == "All") & 
+       params$qc_metrics$Type != "Missing Chromosome",
     ]
 
     if (nrow(qc_s) > 0) {
@@ -326,7 +363,7 @@ if (length(samples) == 0) {
 
     cat("\n### CNV calls\n")
 
-if (nrow(cnv_s) > 0) {
+    if (nrow(cnv_s) > 0) {
 
       cnv_display <- cnv_s[, c("Sample", "Chromosome", "Gene", "Start", "End",
                                "Type", "Nexons", "Reads.ratio", "Confidence")]
@@ -344,7 +381,15 @@ if (nrow(cnv_s) > 0) {
         extensions = "Buttons",
         options = list(
           dom = "Bfrtip",
-          buttons = c("copy", "csv", "excel"),
+          buttons = list(
+            list(
+              extend = 'colvis',
+              text = '<i class="fa fa-eye"></i> Show/Hide Columns',
+              collectionLayout = 'fixed columns',
+              fade = 100
+            ),
+            "copy", "csv", "excel"
+          ),
           autoWidth = FALSE,
           columnDefs = list(
             list(width = "90px",  targets = 0),  # Sample
@@ -363,19 +408,9 @@ if (nrow(cnv_s) > 0) {
       ) %>%
         formatStyle(
           "Confidence",
-
           backgroundColor = styleEqual(
-            c(
-              "HIGH",
-              "MEDIUM",
-              "LOW"
-            ),
-
-            c(
-              "lightgreen",
-              "yellow",
-              "salmon"
-            )
+            c("HIGH", "MEDIUM", "LOW"),
+            c("lightgreen", "yellow", "salmon")
           )
         )
 
@@ -524,9 +559,8 @@ if (nrow(cnv_s) > 0) {
           )  
 
         # Coverage plot aligned with plots.R lower panel
-        # Build per-reference-sample rows (mirrors plots.R cov_list logic)
         ref_samples_s <- params$refs[[s]]
-        exon_range_s  <- plot_data$Exon
+        exon_range_s  = plot_data$Exon
         test_median_s <- median(params$counts[exon_range_s, s])
 
         ref_rows <- lapply(ref_samples_s, function(r) {
@@ -616,7 +650,6 @@ if (nrow(cnv_s) > 0) {
           ) 
 
         # Convert to interactive and adjust layout to prevent truncation
-        # Use ggplotly with fixed height and margin
         w_ratio <- ggplotly(p_ratio, tooltip = "text", height = 400) %>%
           layout(
                 margin = list(t = 60, b = 80),
@@ -637,7 +670,7 @@ if (nrow(cnv_s) > 0) {
         knitr::knit_meta_add(rendered_cov$dependencies)
         cat(rendered_cov$html)
         cat("\n")
-              }
+      }
     }
   }
 }

@@ -1,8 +1,3 @@
-# NOTE: only generate_plots() is changed here (BUG-14 fix for exon_col regex).
-# All helper functions (qbetabinom, harmonise_chr_prefix, prepare_plot_data,
-# save_cnv_pdf, apply_xaxis_formatting, create_coverage_plot,
-# create_gene_tile_plot, create_ci_plot) are unchanged from the original.
-
 # Local copy of qbetabinom (from ExomeDepth v1.1.15, with permission)
 qbetabinom <- function(p, size, rho, prob) {
     a <- prob * (1 - rho) / rho
@@ -244,11 +239,6 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
 
-    # FIX BUG-14: original regex "^(exon|custom\\.exon|exonnum)$" did not match
-    # the "exon_number" column that run_bam_coverage assigns.  Pattern extended
-    # to also catch "exon_number".  The "exon" column from ExomeDepth output
-    # (interval name, not index) is explicitly excluded from this match when
-    # "exon_number" is present.
     exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
                      colnames(bed_file), ignore.case = TRUE, value = TRUE)
     if (length(exon_col) == 0) {

@@ -185,8 +185,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
 
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
-        # FIX BUG-2: original code passed cfg$bed_process as the `type` arg of
-        # log_msg instead of concatenating it into the message string.
+
         log_msg(paste("Preprocessing BED file using mode:", cfg$bed_process))
         processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
         process_bed_file(
@@ -212,15 +211,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           gene_field_index      = gene_field_index
         )
         cfg$input$bed <- processed_bed
-        # FIX BUG-2: same issue — processed_bed was being passed as `type`.
         log_msg(paste("Processed BED saved to:", processed_bed))
       } else {
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
       }
 
-      # FIX BUG-11: initialise steps_total based on which optional steps are
-      # actually enabled, so the N/M counter stays consistent throughout.
-      steps_total   <- 3L +   # coverage + QC + CNV calling are always run
+
+      steps_total   <- 3L +  
                        as.integer(plots) +
                        as.integer(report) +
                        as.integer(!is.null(vcf_output) || vcf_per_sample)
@@ -330,8 +327,6 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       if (!is.null(vcf_output) || vcf_per_sample) {
         run_step("Exporting CNVs to VCF", {
           if (file.exists(paths$summary)) {
-            # FIX BUG-4: exists("cnv_calls_local") was always TRUE immediately
-            # after the assignment.  Check nrow() directly instead.
             cnv_calls_local <- local({
               env <- new.env()
               load(paths$summary, envir = env)
@@ -368,7 +363,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg("Pipeline finished successfully!")
     }, warning = function(w) {
       if (grepl("sequence levels not in the other", conditionMessage(w))) {
-        invokeRestart("muffleWarning")   # silently suppress GenomicRanges noise
+        invokeRestart("muffleWarning")  
       }
       log_msg(conditionMessage(w), "WARNING")
       invokeRestart("muffleWarning")

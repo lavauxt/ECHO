@@ -9,7 +9,7 @@ input:
   rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_TEST_standard"                    # Target directory path for generated assets
+  dir: "./result_TEST_standard"           # Target directory path for generated assets
   prefix: "TEST"                          # Output filename base text identification tag
 
 settings:

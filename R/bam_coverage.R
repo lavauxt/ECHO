@@ -74,7 +74,6 @@ run_bam_coverage <- function(
   } else {
     base_names <- tools::file_path_sans_ext(basename(bams))
 
-    # FIX BUG-5: delim_first was computed but never used; removed.
     if (is.null(sample_name_collapse)) {
       sample_name_collapse <- if (nchar(sample_name_delim) == 1 && sample_name_delim != "\\")
         sample_name_delim else "."
@@ -87,8 +86,6 @@ run_bam_coverage <- function(
         parts <- parts[idx[1]:idx[2]]
       } else {
         idx   <- as.numeric(keep_spec)
-        # FIX BUG-6: silently returned "NA" when idx exceeded parts length.
-        # Now warn and fall back to the last available part.
         if (is.na(idx) || idx < 1L || idx > length(parts)) {
           warning("[WARNING] sample_name_keep index ", idx, " out of range for '",
                   x, "' (", length(parts), " parts). Using last part.")
@@ -116,9 +113,6 @@ run_bam_coverage <- function(
   bed_file <- data.table::fread(bed, header = FALSE)
   if (ncol(bed_file) < 4) stop("[ERROR] BED file must have at least 4 columns (chr, start, end, name)")
 
-  # FIX BUG-3: original code tried to assign 4 column names to a data frame
-  # with 5+ columns, which throws a length-mismatch error.  Now only the first
-  # four (or five) columns are named; any additional columns are dropped.
   core_cols <- c("chromosome", "start", "end", "gene")
   if (ncol(bed_file) >= 5) {
     bed_file <- bed_file[, 1:5, with = FALSE]

@@ -52,8 +52,6 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
   ratio_not_low  <- cnv_calls$reads.ratio <= score_low_ratio_low |
                     cnv_calls$reads.ratio >= score_low_ratio_high
 
-  # FIX BUG-7: sapply() can silently return a list when the function produces
-  # irregular output; vapply() enforces a logical(1) return type.
   gene_flagged <- vapply(cnv_calls$Gene, function(g_str) {
     any(trimws(unlist(strsplit(g_str, "[ ,]"))) %in% score_low_confidence_genes)
   }, logical(1))

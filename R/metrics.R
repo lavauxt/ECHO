@@ -24,10 +24,6 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
 
     message("[INFO] Computing QC Metrics")
 
-    # FIX BUG-12: the original code computed exon_in_gene with ave(seq_along)
-    # independently from assign_exon_numbers_per_gene, which could produce
-    # different numbering.  Re-use the canonical function so QC labels match
-    # what is shown in plots and the CNV calls table.
     bed_file <- assign_exon_numbers_per_gene(bed_file)
     # exon_number is now the authoritative within-gene exon index
     exon_in_gene <- bed_file$exon_number
@@ -100,6 +96,30 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
                    paste("High CV (>", max_exon_cv, "):", round(exon_cv[high_cv], 3)),
                    bed_file$gene[high_cv])
     }
+
+    # Find chromosome column name dynamically
+    chr_col <- intersect(colnames(bed_file), c("chr", "chrom", "seqnames", "chromosome"))[1]
+    if (is.na(chr_col) && ncol(bed_file) >= 1) {
+        chr_col <- colnames(bed_file)[1]
+    }
+
+    if (!is.na(chr_col)) {
+        has_chrX <- any(grepl("^(chr)?X$", bed_file[[chr_col]], ignore.case = TRUE))
+        has_chrY <- any(grepl("^(chr)?Y$", bed_file[[chr_col]], ignore.case = TRUE))
+    } else {
+        has_chrX <- FALSE
+        has_chrY <- FALSE
+    }
+
+    if (!has_chrX) {
+        message("[WARNING] chrX is not present in the BED file; no calls can be made for chromosome X.")
+        add_metric("All", "All", "Missing Chromosome", "chrX not present in BED file", "All")
+    }
+    if (!has_chrY) {
+        message("[WARNING] chrY is not present in the BED file; no calls can be made for chromosome Y.")
+        add_metric("All", "All", "Missing Chromosome", "chrY not present in BED file", "All")
+    }
+    # ---------------------------------------------------------
 
     final_metrics <- data.frame(m, stringsAsFactors = FALSE)
     if (nrow(final_metrics) == 0)

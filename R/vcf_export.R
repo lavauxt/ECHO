@@ -60,9 +60,6 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     stringsAsFactors = FALSE
   ))
 
-  # FIX BUG-9: lexicographic sort of chromosome labels puts chr2 > chr10.
-  # Use a natural-sort key: strip "chr" prefix, parse the numeric part, keep
-  # non-numeric chromosomes (X, Y, M) after autosomes.
   chrom_order <- function(chr) {
     stripped <- sub("^chr", "", chr)
     num      <- suppressWarnings(as.integer(stripped))
@@ -124,8 +121,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     if ("Comparator.name" %in% colnames(representative)) {
       refs_val <- safe_char(representative$Comparator.name, "")
       if (nzchar(refs_val)) {
-        # FIX BUG-8: VCF INFO values must not contain spaces or semicolons.
-        # Replace ", " separators with "," so the field is a bare comma list.
+
         refs_val <- gsub(",\\s*", ",", refs_val)
         info_items <- c(info_items, paste0("REFS=", refs_val))
       }

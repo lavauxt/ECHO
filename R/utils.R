@@ -1,12 +1,5 @@
 # =============================================================================
 # utils.R — ECHO pipeline utilities
-# FIXES applied:
-#   BUG-1: Removed all duplicate function definitions (stop_if_missing,
-#           stop_if_not_file, load_rdata, bam_has_index,
-#           normalize_chromosome_vec, filter_chromosomes, %||%,
-#           sanitize_filename, add_within_gene_indices, compute_exon_index).
-#   BUG-13: plot_coverage_pca — replaced aes(colour = "Sample") literal with
-#           a named constant colour so no spurious legend entry is produced.
 # =============================================================================
 
 #' Stop if value is NULL or empty
@@ -243,9 +236,6 @@ plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
                                            type = "norm", linetype = "dashed")
         }
     }
-    # FIX BUG-13: no-grouping branch used literal aes(colour = "Sample") which
-    # produced a spurious one-entry legend.  Use a fixed colour instead.
-
     p <- p +
         ggplot2::geom_point(size = 3,
                             colour = if (is.null(color_by)) "steelblue" else NULL) +
