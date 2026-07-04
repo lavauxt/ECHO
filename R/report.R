@@ -72,8 +72,18 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     }
   }
 
+  # Captured immediately, before anything else in this function could change
+  # it, so relative paths built by the caller (log_file, in particular)
+  # keep meaning what the caller meant by them once rmarkdown::render()
+  # changes the working directory during knitting — see knit_root_dir below.
+  caller_wd <- getwd()
+
   if (global) {
-    template <- system.file("rmarkdown/ECHO_global_report.Rmd", package = "ECHO")
+    # BUG FIX: the template ships at inst/rmd/, so system.file() resolves
+    # it under "rmd/..." once installed, not "rmarkdown/...". The old path
+    # never matched anything post-install (system.file() silently returns
+    # "" for a nonexistent subdirectory), so this always failed.
+    template <- system.file("rmd/ECHO_global_report.Rmd", package = "ECHO")
     if (template == "") stop("Global report template not found. Reinstall package.")
     
     # Determine output file name
@@ -82,6 +92,18 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     } else {
       out_file <- file.path(output_dir, "ECHO_global_report.html")
     }
+    # BUG FIX: rmarkdown::render() does not resolve a relative output_file
+    # against the caller's working directory — it resolves it against the
+    # directory containing the *input* Rmd file (template, above, which
+    # system.file() resolves to somewhere inside the installed package,
+    # essentially never the same place as output_dir). A perfectly valid,
+    # already-created output_dir would make render() look for it relative
+    # to the package's own installation folder and fail with "The
+    # directory '...' does not exist" — confirmed by direct reproduction.
+    # output_dir is already guaranteed to exist by this point, so
+    # normalizePath() on it is safe; only the (not-yet-existing) filename
+    # is appended afterward.
+    out_file <- file.path(normalizePath(output_dir, mustWork = TRUE), basename(out_file))
     
     rmarkdown::render(template,
                       params = list(
@@ -99,6 +121,17 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                         pdf_output = pdf_output
                       ),
                       output_file = out_file,
+                      # BUG FIX: render() also evaluates the Rmd's own code
+                      # chunks with the working directory set to the Rmd's
+                      # directory by default, not the caller's — a second,
+                      # quieter instance of the same problem. The "Pipeline
+                      # Log" section reads params$log_file (built by the
+                      # caller relative to *its own* working directory)
+                      # behind a file.exists() guard, so this wasn't fatal,
+                      # just a silently-empty log section with no error.
+                      # Pinning knit_root_dir keeps every relative path
+                      # inside the Rmd meaning what its caller intended.
+                      knit_root_dir = caller_wd,
                       quiet = FALSE)
     message("[INFO] Global report written: ", out_file)
     return(invisible(out_file))
@@ -112,13 +145,14 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     } else {
       samples <- sample_name
     }
-    template <- system.file("rmarkdown/ECHO_report.Rmd", package = "ECHO")
+    template <- system.file("rmd/ECHO_report.Rmd", package = "ECHO")
     if (template == "") stop("Report template not found. Reinstall package.")
     out_files <- c()
     for (s in samples) {
       sample_dir <- file.path(output_dir, sanitize_filename(s))
       dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
       out_file <- file.path(sample_dir, paste0("ECHO_report_", sanitize_filename(s), ".html"))
+      out_file <- file.path(normalizePath(sample_dir, mustWork = TRUE), basename(out_file))
       rmarkdown::render(template,
                         params = list(
                           sample = s,
@@ -138,6 +172,7 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
                           gender_map = gender_map     
                         ),
                         output_file = out_file,
+                        knit_root_dir = caller_wd,
                         quiet = FALSE)
       out_files <- c(out_files, out_file)
       message("[INFO] Report written: ", out_file)

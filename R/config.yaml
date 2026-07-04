@@ -1,0 +1,65 @@
+# =============================================================================
+# ECHO Pipeline Configuration File
+# =============================================================================
+
+input:
+  bamdir: "./data/TEST"                   # Path to folder containing BAM and BAI files
+  bed: "./data/TEST/TEST.bed"             # Original input target regions capture file
+  fasta: "./data/REF/hg19.fa"             # Path to Reference Genome sequence file
+  rbams: null                             # Optional external reference matrix list path (or null)
+
+output:
+  dir: "./result_TEST_standard"           # Target directory path for generated assets
+  prefix: "TEST"                          # Output filename base text identification tag
+
+settings:
+  modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
+  min_corr: 0.98                          # Drop reference components with alignment score below this
+  min_cov: 100                            # Minimum read mapping target interval ceiling
+  min_total_reads: 300000                 # Library depth filter criteria rule per sample file
+  max_exon_cv: 0.5                        # Max allowed target variation coefficient metric
+  transition_probability: 0.0001          # HMM state selection shift coefficient value
+  expected_CNV_length: 50000              # Baseline CNV target structural span scaling size
+  n_bins_reduced: 10000                   # Dimensional data optimization normalization size
+  phi_bins: 1                             # Normalization distribution constant scale index
+  formula: "cbind(test, reference) ~ 1"   # ExomeDepth evaluation regression expression frame
+
+  pca_plot: true
+  
+  # QC scoring thresholds for tracking pipeline certainty
+  score_high_corr: 0.985
+  score_med_corr: 0.95
+  score_high_refs: 3
+  score_med_refs: 2
+  score_low_ratio_low: 0.75
+  score_low_ratio_high: 1.25
+  score_high_ratio_low: 0.70
+  score_high_ratio_high: 1.30
+  score_med_ratio_low: 0.60
+  score_med_ratio_high: 1.40
+  
+  # List of highly homologous/problematic genes to flag or drop
+  score_low_confidence_genes: 
+    - "PMS2"
+    - "SMN1"
+    - "CYP2D6"
+    - "HBA1"
+    - "HBA2"
+    - "STRC"
+    - "CYP21A2"
+    - "GBA1"
+    - "CFTR"
+
+# -----------------------------------------------------------------------------
+# Target Name Processing & Cleaning Sub-Section
+# -----------------------------------------------------------------------------
+bed_preprocess:
+  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
+  gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
+  gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges
+  auto_exon_number: false                 # Prevent re-sorting coordinate engines from dropping name numbers
+  region_numbering_mode: "file_order"     # Choose naming logic mode: 'file_order' or 'bed_text'
+  customexon: true                        # Generate custom.exon value outputs in standard formats
+  bed_zero_based: true                    # Set true if input BED file indices track from index 0
+  skip_invalid_intervals: true            # Gracefully filter invalid coordinate ranges

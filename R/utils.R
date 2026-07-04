@@ -273,3 +273,49 @@ plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
     }
     invisible(list(pca = pca, var_exp = var_exp))
 }
+
+#' Flag Background-Exon Calibration Issues for a CNV Call Window
+#'
+#' Ported from CANOPE (a sibling pipeline sharing this reporting/plotting
+#' architecture). For a call's plotted window, tests whether the fraction
+#' of *non-called* ("background") exons whose observed ratio falls outside
+#' the modelled 95% predictive interval is statistically higher than the
+#' ~5% a well-calibrated interval implies (one-sided binomial test against
+#' a 5% null). A high fraction here doesn't necessarily mean the interval
+#' itself is wrong for this sample/region in general — in practice it's
+#' more often a sign that the real alteration extends beyond the exons
+#' that got called, that the reference set is a poor match for this
+#' specific sample/region, or a technical/batch difference between the
+#' test sample and its references at this locus. It's a per-call
+#' diagnostic flag, not an automatic correction — it doesn't change the
+#' call, the interval, or the confidence score.
+#'
+#' @param ratio Numeric vector of Observed/Expected for every exon in the
+#'   plotted window (background and affected together).
+#' @param lo,hi Numeric vectors (same length as \code{ratio}) giving the
+#'   95% predictive interval bounds at each exon.
+#' @param is_affected Logical vector (same length); \code{TRUE} for exons
+#'   already called as part of this CNV — excluded from the check, since
+#'   those are expected to sit outside the interval.
+#' @param min_n Minimum number of background exons required before
+#'   flagging (default 5) — below this the percentage is too noisy on its
+#'   own to test meaningfully.
+#' @return A list with \code{n_background}, \code{n_outside},
+#'   \code{pct_outside}, and \code{flag} — \code{flag} is \code{TRUE} when a
+#'   one-sided binomial test of \code{n_outside} against a 5% null rate is
+#'   significant at p < 0.05.
+#' @export
+check_background_calibration <- function(ratio, lo, hi, is_affected, min_n = 5) {
+    bg <- !is_affected
+    n_bg <- sum(bg, na.rm = TRUE)
+    if (n_bg == 0) {
+        return(list(n_background = 0L, n_outside = 0L, pct_outside = NA_real_, flag = FALSE))
+    }
+    outside <- (ratio[bg] < lo[bg]) | (ratio[bg] > hi[bg])
+    outside[is.na(outside)] <- FALSE
+    n_outside <- sum(outside)
+    pct_outside <- 100 * n_outside / n_bg
+    flag <- n_bg >= min_n &&
+        stats::pbinom(n_outside - 1L, size = n_bg, prob = 0.05, lower.tail = FALSE) < 0.05
+    list(n_background = n_bg, n_outside = n_outside, pct_outside = pct_outside, flag = flag)
+}

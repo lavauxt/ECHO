@@ -81,18 +81,53 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
         is_affected = factor(exon_range %in% (idx_start:idx_end),
                              levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
 
+    # New: z-score panel, matching CANOPE's design.
+    #
+    # ECHO's calling model is fundamentally different from CANOPE's (a
+    # beta-binomial test/expected ratio, not a per-target NB(mean, var)
+    # HMM), so this isn't a copy-paste of CANOPE's z-score formula — it's
+    # the same *principle* (reuse the model's own already-validated
+    # variance; don't invent a new, noisy small-sample one) applied to
+    # ECHO's actual model. `rho` here is ExomeDepth's fitted overdispersion
+    # parameter (genome-wide, not just this local window), the same
+    # quantity the CI ribbon above is built from. The variance of a
+    # Beta-Binomial(n, p, rho) is n*p*(1-p)*(1+(n-1)*rho) — standard result,
+    # and consistent with the qbetabinom() parameterisation used above
+    # (a = p(1-rho)/rho, b = (1-p)(1-rho)/rho  =>  a+b+1 = 1/rho).
+    var_betabinom <- totals * p_expected * (1 - p_expected) *
+        (1 + (totals - 1) * max(rho, 0.005))
+    var_betabinom <- pmax(var_betabinom, 1)
+    sd_z <- sqrt(var_betabinom)
+
+    test_z <- (test_counts - expected_safe) / sd_z
+    ref_z_list <- lapply(ref_samples, function(r) {
+        scaling_r    <- test_median / median(counts[exon_range, r])
+        ref_r_scaled <- counts[exon_range, r] * scaling_r
+        (ref_r_scaled - expected_safe) / sd_z
+    })
+    names(ref_z_list) <- ref_samples
+
+    z_data <- data.frame(
+        exon        = exon_range,
+        z           = test_z,
+        is_affected = ci_data$is_affected)
+
+    bg_calib <- check_background_calibration(ratio, mins, maxs, exon_range %in% (idx_start:idx_end))
+
     list(cov_data = cov_data, pt_data = pt_data, ci_data = ci_data,
+         z_data = z_data, ref_z_list = ref_z_list, bg_calibration = bg_calib,
          exon_range = exon_range, single_chr = single_chr, prev = prev,
          new_chr = new_chr, sample = sample, idx_start = idx_start, idx_end = idx_end)
 }
 
-save_cnv_pdf <- function(p_cov, p_genes, p_ci, file_path) {
-    grDevices::pdf(file_path, useDingbats = FALSE, width = 8, height = 10)
+save_cnv_pdf <- function(p_cov, p_genes, p_ci, p_zscore, file_path) {
+    grDevices::pdf(file_path, useDingbats = FALSE, width = 8, height = 13)
     grid::grid.newpage()
-    grid::pushViewport(grid::viewport(layout = grid::grid.layout(6, 1)))
-    print(p_cov,   vp = grid::viewport(layout.pos.row = 1:3, layout.pos.col = 1))
-    print(p_genes, vp = grid::viewport(layout.pos.row = 4,   layout.pos.col = 1))
-    print(p_ci,    vp = grid::viewport(layout.pos.row = 5:6, layout.pos.col = 1))
+    grid::pushViewport(grid::viewport(layout = grid::grid.layout(8, 1)))
+    print(p_cov,    vp = grid::viewport(layout.pos.row = 1:3, layout.pos.col = 1))
+    print(p_genes,  vp = grid::viewport(layout.pos.row = 4,   layout.pos.col = 1))
+    print(p_ci,     vp = grid::viewport(layout.pos.row = 5:6, layout.pos.col = 1))
+    print(p_zscore, vp = grid::viewport(layout.pos.row = 7:8, layout.pos.col = 1))
     grDevices::dev.off()
     invisible(NULL)
 }
@@ -183,15 +218,52 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
         ggplot2::labs(x = "", y = "")
 }
 
-create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index) {
+create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index, subtitle = NULL) {
     p <- ggplot2::ggplot(ci_data, ggplot2::aes(x = exon)) +
         ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), fill = "grey80", colour = NA) +
         ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected), size = 3.5) +
         ggplot2::scale_color_manual(
             values = c("Observed" = "blue", "Affected" = "red"),
             guide  = ggplot2::guide_legend(override.aes = list(shape = 19, size = 3))) +
+        ggplot2::labs(subtitle = subtitle) +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "none", legend.title = ggplot2::element_blank())
+    apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index)
+}
+
+#' Z-Score Panel vs Reference Samples
+#'
+#' Ported from CANOPE. Shows the test sample's z-score (blue/red, by
+#' affected status) against each individual reference sample's own z-score
+#' (thin gray lines) at every exon in the window, all measured in units of
+#' the beta-binomial model's own implied SD (see \code{prepare_plot_data()}
+#' for the variance derivation) — so a well-behaved region should show the
+#' reference lines clustered near zero with the test sample clearly
+#' separated only where a real CNV is present.
+#' @noRd
+create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range, exon_index) {
+    ref_list <- lapply(names(ref_z_list), function(r) {
+        data.frame(exon = exon_range, z = ref_z_list[[r]], sample = r, stringsAsFactors = FALSE)
+    })
+    ref_df <- do.call(rbind, ref_list)
+
+    z_lim <- suppressWarnings(max(abs(c(ref_df$z, z_data$z)), na.rm = TRUE) * 1.1)
+    if (!is.finite(z_lim) || z_lim <= 0) z_lim <- 1
+
+    p <- ggplot2::ggplot() +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "black") +
+        ggplot2::geom_line(data = ref_df, ggplot2::aes(x = exon, y = z, group = sample),
+                           colour = "grey60", linewidth = 0.4) +
+        ggplot2::geom_line(data = z_data, ggplot2::aes(x = exon, y = z),
+                           colour = "red", linewidth = 0.9) +
+        ggplot2::geom_point(data = z_data, ggplot2::aes(x = exon, y = z, color = is_affected),
+                            size = 3) +
+        ggplot2::scale_color_manual(values = c("Observed" = "red", "Affected" = "darkred")) +
+        ggplot2::coord_cartesian(ylim = c(-z_lim, z_lim)) +
+        ggplot2::labs(y = "Z-score vs references", x = NULL,
+                      subtitle = "Test sample (red) with CNV targets highlighted") +
+        ggplot2::theme_bw() +
+        ggplot2::theme(legend.position = "none")
     apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index)
 }
 
@@ -285,9 +357,17 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
                                             sample_name = plot_data$sample)
             p_genes <- create_gene_tile_plot(bed_file, plot_data$exon_range,
                                              plot_data$single_chr, plot_data$prev, plot_data$new_chr)
+            ci_subtitle <- if (isTRUE(plot_data$bg_calibration$flag)) {
+                sprintf("%d%% of background exons outside CI (%d/%d) \u2014 check region/reference match",
+                        round(plot_data$bg_calibration$pct_outside),
+                        plot_data$bg_calibration$n_outside, plot_data$bg_calibration$n_background)
+            } else NULL
             p_ci    <- create_ci_plot(plot_data$ci_data, plot_data$single_chr, plot_data$prev,
-                                      plot_data$exon_range, exon_index)
-            save_cnv_pdf(p_cov, p_genes, p_ci, file_path)
+                                      plot_data$exon_range, exon_index, subtitle = ci_subtitle)
+            p_zscore <- create_zscore_plot(plot_data$z_data, plot_data$ref_z_list,
+                                           plot_data$single_chr, plot_data$prev,
+                                           plot_data$exon_range, exon_index)
+            save_cnv_pdf(p_cov, p_genes, p_ci, p_zscore, file_path)
             n_written <- n_written + 1L
             log_msg(paste("[INFO] Saved plot:", file_path))
         }, error = function(e) {

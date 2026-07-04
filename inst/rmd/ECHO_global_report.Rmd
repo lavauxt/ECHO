@@ -100,6 +100,25 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
     ) / expected_safe[i]
   }, numeric(1))
 
+  # New: z-score data, same principle as CANOPE's z-score panel (reuse the
+  # model's own already-validated variance rather than inventing a new,
+  # noisy small-sample one) applied to ECHO's actual beta-binomial model.
+  # See plots.R::prepare_plot_data() for the full derivation — this is the
+  # same formula, kept in raw ratio units (Observed/Expected) rather than
+  # counts, since that's what's plotted here.
+  var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
+  var_betabinom <- pmax(var_betabinom, 1)
+  sd_z <- sqrt(var_betabinom)
+  test_z <- (test_counts - expected_safe) / sd_z
+
+  ref_z_mat <- sapply(ref_samples, function(r) {
+    scaling_r    <- test_median / median(counts[exon_range, r])
+    ref_r_scaled <- counts[exon_range, r] * scaling_r
+    (ref_r_scaled - expected_safe) / sd_z
+  })
+  if (is.null(dim(ref_z_mat))) ref_z_mat <- matrix(ref_z_mat, ncol = length(ref_samples))
+  colnames(ref_z_mat) <- ref_samples
+
   exon_labels <- if ("exon_number" %in% colnames(bed_file) && any(!is.na(bed_file$exon_number))) {
     bed_file$exon_number[exon_range]
   } else if ("exon" %in% colnames(bed_file) && any(!is.na(bed_file$exon))) {
@@ -110,7 +129,10 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
         FUN = seq_along)[exon_range]
   }
 
-  data.frame(
+  affected <- exon_range %in% (idx_start:idx_end)
+  bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
+
+  df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
     
@@ -119,10 +141,12 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
     Ratio = ratio,
     CI_low = ci_low,
     CI_high = ci_high,
-    ReferenceCI_low = 1,
-    ReferenceCI_high = 1,
-    Affected = exon_range %in% (idx_start:idx_end)
+    Z = test_z,
+    Affected = affected
   )
+  attr(df, "ref_z_mat") <- ref_z_mat
+  attr(df, "bg_calibration") <- bg_calib
+  df
 }
 ```
 
@@ -152,12 +176,20 @@ if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(para
   missing_chrs <- params$qc_metrics[params$qc_metrics$Type == "Missing Chromosome", ]
   if (nrow(missing_chrs) > 0) {
     for (i in seq_len(nrow(missing_chrs))) {
-      cat(sprintf('
-      <div class="alert alert-warning" role="alert">
-          <h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>
-          <p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>
-      </div>
-      ', htmltools::htmlEscape(missing_chrs$Details[i])))
+      # BUG FIX: this used to be cat(sprintf('\n      <div ...')) with each
+      # HTML line indented to match the surrounding R code. results='asis'
+      # output goes straight into the Markdown source Pandoc then parses,
+      # and Pandoc's Markdown reader treats a line indented 4+ spaces as an
+      # INDENTED CODE BLOCK, not raw HTML — so this rendered as literal,
+      # HTML-escaped text in a <pre><code> block instead of a styled alert
+      # box. Fixed by emitting each line via its own cat() call starting at
+      # column 0 (matching the working style already used successfully
+      # elsewhere in this file, e.g. the confidence_recap chunk below).
+      cat('<div class="alert alert-warning" role="alert">\n')
+      cat('<h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>\n')
+      cat(sprintf('<p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>\n',
+                  htmltools::htmlEscape(missing_chrs$Details[i])))
+      cat('</div>\n')
     }
     cat("<br>")
   }
@@ -494,6 +526,26 @@ if (length(samples) == 0) {
           next
         }
 
+        # New: per-call diagnostic (ported from CANOPE, see
+        # check_background_calibration() in utils.R). Informational only —
+        # doesn't change the call, the interval, or the confidence score.
+        bg_calib <- attr(plot_data, "bg_calibration")
+        if (isTRUE(bg_calib$flag)) {
+          cat("\n> \u26a0\ufe0f **Background calibration flag:** ",
+              round(bg_calib$pct_outside), "% of non-called exons in this window (",
+              bg_calib$n_outside, "/", bg_calib$n_background,
+              ") fall outside the modeled 95% interval \u2014 well above the ~5% expected under a ",
+              "well-calibrated model. This is a diagnostic flag, not a correction: it can mean the real ",
+              "alteration extends beyond the exons called here, the reference set is a weaker match for ",
+              "this sample/region, or there is a technical/batch difference at this locus. Worth a manual ",
+              "look before reporting this call with full confidence.\n\n", sep = "")
+        }
+
+        ratio_subtitle <- if (isTRUE(bg_calib$flag)) {
+          paste0(round(bg_calib$pct_outside), "% of background exons outside CI (",
+                bg_calib$n_outside, "/", bg_calib$n_background, ") \u2014 check region/reference match")
+        } else NULL
+
         # Ratio plot with CI ribbon around reference expectation
         p_ratio <- ggplot(plot_data, aes(x = Exon)) +
           geom_ribbon(
@@ -535,7 +587,8 @@ if (length(samples) == 0) {
 
           labs(
             y = "Observed / Expected",
-            x = NULL
+            x = NULL,
+            subtitle = ratio_subtitle
           ) +
           theme_bw() +
           scale_color_manual(
@@ -649,6 +702,70 @@ if (length(samples) == 0) {
             labels = plot_data$ExonLabel
           ) 
 
+        # Z-score panel: test sample vs. each individual reference sample,
+        # all in units of the beta-binomial model's own implied SD (see
+        # get_cnv_plot_data() above). Ported from CANOPE.
+        ref_z_mat <- attr(plot_data, "ref_z_mat")
+        ref_z_rows <- lapply(colnames(ref_z_mat), function(r) {
+          data.frame(
+            Exon      = plot_data$Exon,
+            Z         = ref_z_mat[, r],
+            Group     = "Reference samples",
+            ExonLabel = plot_data$ExonLabel,
+            RefName   = r,
+            stringsAsFactors = FALSE
+          )
+        })
+        z_obs_df <- data.frame(
+          Exon      = plot_data$Exon,
+          Z         = plot_data$Z,
+          Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
+          ExonLabel = plot_data$ExonLabel,
+          RefName   = "Test sample",
+          stringsAsFactors = FALSE
+        )
+        p_z_data <- bind_rows(c(ref_z_rows, list(z_obs_df)))
+
+        p_zscore <- ggplot() +
+          geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+          geom_line(
+            data = subset(p_z_data, Group == "Reference samples"),
+            aes(x = Exon, y = Z, group = RefName),
+            colour = "grey60", linewidth = 0.4
+          ) +
+          geom_line(
+            data = subset(p_z_data, Group != "Reference samples"),
+            aes(x = Exon, y = Z),
+            colour = "red", linewidth = 0.9
+          ) +
+          geom_point(
+            data = subset(p_z_data, Group == "Test sample"),
+            aes(x = Exon, y = Z, color = Group,
+                text = paste0("Exon: ", ExonLabel, "<br>Z-score: ", round(Z, 2))),
+            size = 3
+          ) +
+          geom_point(
+            data = subset(p_z_data, Group == "Affected exon(s)"),
+            aes(x = Exon, y = Z, color = Group,
+                text = paste0("Exon: ", ExonLabel, "<br>Z-score: ", round(Z, 2),
+                              "<br>Confidence: ", call$Confidence)),
+            size = 3.5
+          ) +
+          labs(y = "Z-score vs references", x = NULL) +
+          theme_bw() +
+          scale_color_manual(
+            values = c("Test sample" = "red", "Affected exon(s)" = "darkred"),
+            name = NULL
+          ) +
+          theme(
+            legend.position = "top",
+            axis.text.x = element_text(angle = 45, size = 8, hjust = 1)
+          ) +
+          scale_x_continuous(
+            breaks = plot_data$Exon,
+            labels = plot_data$ExonLabel
+          )
+
         # Convert to interactive and adjust layout to prevent truncation
         w_ratio <- ggplotly(p_ratio, tooltip = "text", height = 400) %>%
           layout(
@@ -656,6 +773,11 @@ if (length(samples) == 0) {
                 legend = list(orientation = "h", y = 1.1))
 
         w_cov <- ggplotly(p_cov, tooltip = "text", height = 400) %>%
+          layout(
+                margin = list(t = 60, b = 80),
+                legend = list(orientation = "h", y = 1.1))
+
+        w_zscore <- ggplotly(p_zscore, tooltip = "text", height = 400) %>%
           layout(
                 margin = list(t = 60, b = 80),
                 legend = list(orientation = "h", y = 1.1))
@@ -669,6 +791,11 @@ if (length(samples) == 0) {
         rendered_cov <- htmltools::renderTags(w_cov)
         knitr::knit_meta_add(rendered_cov$dependencies)
         cat(rendered_cov$html)
+        cat("\n")
+
+        rendered_zscore <- htmltools::renderTags(w_zscore)
+        knitr::knit_meta_add(rendered_zscore$dependencies)
+        cat(rendered_zscore$html)
         cat("\n")
       }
     }
