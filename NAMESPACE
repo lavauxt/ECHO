@@ -2,6 +2,7 @@
 
 export("%||%")
 export(add_within_gene_indices)
+export(check_background_calibration)
 export(compute_exon_index)
 export(echo)
 export(export_cnvs_to_vcf)
