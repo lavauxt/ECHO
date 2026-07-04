@@ -566,7 +566,7 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Reference samples",
-              text = paste0("Exon: ", ExonLabel,
+              text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
                 "<br>Observed/Expected: ", round(Ratio, 3)
               )
             ),
@@ -577,7 +577,7 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Affected exon(s)",
-              text = paste0("Exon: ", ExonLabel,
+              text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
                 "<br>Observed/Expected: ", round(Ratio, 3),
                 "<br>Confidence: ", call$Confidence
               )
@@ -623,6 +623,7 @@ if (length(samples) == 0) {
             Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
+            SampleID  = r,
             stringsAsFactors = FALSE
           )
         })
@@ -632,6 +633,7 @@ if (length(samples) == 0) {
           Count     = log(pmax(plot_data$Observed, 1)),
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
+          SampleID  = call$Sample,
           stringsAsFactors = FALSE
         )
 
@@ -644,7 +646,7 @@ if (length(samples) == 0) {
               x = Exon,
               y = Count,
               color = Group,
-              text = paste0("Exon: ", ExonLabel,
+              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
                 "<br>Log coverage: ", round(Count, 3)
               )
             ),
@@ -657,7 +659,7 @@ if (length(samples) == 0) {
               x = Exon,
               y = Count,
               color = Group,
-              text = paste0("Exon: ", ExonLabel,
+              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
                 "<br>Log coverage: ", round(Count, 3)
               )
             ),
@@ -669,7 +671,7 @@ if (length(samples) == 0) {
               x = Exon,
               y = Count,
               color = Group,
-              text = paste0("Exon: ", ExonLabel,
+              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
                 "<br>Log coverage: ", round(Count, 3),
                 "<br>Confidence: ", call$Confidence
               )
@@ -721,7 +723,7 @@ if (length(samples) == 0) {
           Z         = plot_data$Z,
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
-          RefName   = "Test sample",
+          RefName   = call$Sample,
           stringsAsFactors = FALSE
         )
         p_z_data <- bind_rows(c(ref_z_rows, list(z_obs_df)))
@@ -733,6 +735,13 @@ if (length(samples) == 0) {
             aes(x = Exon, y = Z, group = RefName),
             colour = "grey60", linewidth = 0.4
           ) +
+          geom_point(
+            data = subset(p_z_data, Group == "Reference samples"),
+            aes(x = Exon, y = Z, group = RefName,
+                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Z-score: ", round(Z, 2))),
+            colour = "grey60", size = 1.6, alpha = 0.8
+          ) +
           geom_line(
             data = subset(p_z_data, Group != "Reference samples"),
             aes(x = Exon, y = Z),
@@ -741,13 +750,15 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_z_data, Group == "Test sample"),
             aes(x = Exon, y = Z, color = Group,
-                text = paste0("Exon: ", ExonLabel, "<br>Z-score: ", round(Z, 2))),
+                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Z-score: ", round(Z, 2))),
             size = 3
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Affected exon(s)"),
             aes(x = Exon, y = Z, color = Group,
-                text = paste0("Exon: ", ExonLabel, "<br>Z-score: ", round(Z, 2),
+                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
             size = 3.5
           ) +
