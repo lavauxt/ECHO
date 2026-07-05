@@ -34,6 +34,8 @@ Imports:
     plotly,
     htmltools,
     tidyr,
+    dplyr,
+    kableExtra,
     GenomicRanges,
     GenomicFeatures,
     IRanges,
@@ -47,9 +49,9 @@ Suggests:
     TxDb.Hsapiens.UCSC.hg19.knownGene,
     TxDb.Hsapiens.UCSC.hg38.knownGene,
     org.Hs.eg.db,
-    kableExtra,
     pagedown,
     RColorBrewer,
+    ggrepel,
     scales
 Remotes:
     vplagnol/ExomeDepth

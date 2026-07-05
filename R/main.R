@@ -362,8 +362,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
 
       log_msg("Pipeline finished successfully!")
     }, warning = function(w) {
+      # Known noisy GenomicRanges warning: suppress it silently (no log
+      # entry) rather than filling the log with a benign, expected message.
+      # Every other warning falls through to the log_msg()+restart below.
       if (grepl("sequence levels not in the other", conditionMessage(w))) {
-        invokeRestart("muffleWarning")  
+        invokeRestart("muffleWarning")
       }
       log_msg(conditionMessage(w), "WARNING")
       invokeRestart("muffleWarning")

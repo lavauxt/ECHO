@@ -83,7 +83,7 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
   rho <- max(models[[sample]][1], 0.005)
 
   ci_low <- vapply(seq_along(exon_range), function(i) {
-    ExomeDepth:::qbetabinom(
+    ECHO:::qbetabinom(
       0.025,
       totals[i],
       rho,
@@ -92,7 +92,7 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
   }, numeric(1))
 
   ci_high <- vapply(seq_along(exon_range), function(i) {
-    ExomeDepth:::qbetabinom(
+    ECHO:::qbetabinom(
       0.975,
       totals[i],
       rho,

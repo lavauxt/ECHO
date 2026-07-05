@@ -83,6 +83,27 @@ filter_chromosomes <- function(df, include = NULL, exclude = NULL) {
     df
 }
 
+#' Quantile function of the Beta-Binomial distribution
+#'
+#' Local copy of \code{ExomeDepth:::qbetabinom} (from ExomeDepth v1.1.15,
+#' with permission), kept here as the single shared copy so that both
+#' \code{plots.R} and \code{ECHO_global_report.Rmd} depend on ECHO's own
+#' maintained code rather than an unexported ExomeDepth internal accessed
+#' via \code{:::}, which offers no stability guarantee across ExomeDepth
+#' versions.
+#'
+#' @param p Numeric vector of probabilities.
+#' @param size Numeric vector of trial totals.
+#' @param rho Numeric overdispersion parameter.
+#' @param prob Numeric vector of expected success probabilities.
+#' @return Numeric vector of quantiles.
+#' @noRd
+qbetabinom <- function(p, size, rho, prob) {
+    a <- prob * (1 - rho) / rho
+    b <- (1 - prob) * (1 - rho) / rho
+    qbeta(p, a, b) * size
+}
+
 #' Null coalescing operator
 #' @param a Primary value.
 #' @param b Fallback value.
@@ -119,6 +140,7 @@ assign_exon_numbers_per_gene <- function(bed_file) {
     stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
 
     dt <- data.table::as.data.table(bed_file)
+    dt[, .orig_row := .I]  # remember incoming row order so we never permute it
     data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                          c("chrom", "start", "end", "gene"))
 
@@ -129,13 +151,25 @@ assign_exon_numbers_per_gene <- function(bed_file) {
         dt <- dt[!dup_rows]
     }
 
+    # IMPORTANT: bed_file/counts elsewhere in the pipeline are ordered by
+    # FASTA contig order (see bam_coverage.R), which need not match this
+    # hardcoded karyotype order. Any caller downstream relies on this
+    # function returning rows in the SAME order they came in (only true
+    # duplicates removed) so that positional assignments like
+    # `counts$exon_number <- bed_file$exon_number` or
+    # `exon_numbers[cnv_calls$global_start]` stay aligned. So we compute
+    # the numbering on a sorted *copy* of the row order and map the result
+    # back onto the original row order, rather than sorting dt itself.
     chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
                       c(as.character(1:22), "X", "Y", "M"))
-    dt[, chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(chrom))))]
-    data.table::setorder(dt, chrom_fac, start, end)
-    dt[, chrom_fac := NULL]
+    chrom_fac <- factor(dt$chrom, levels = unique(c(chrom_levels, unique(dt$chrom))))
+    ord <- order(chrom_fac, dt$start, dt$end)
 
-    dt[, exon_number := seq_len(.N), by = "gene"]
+    dt[, exon_number := NA_integer_]
+    dt[ord, exon_number := stats::ave(seq_along(ord), gene[ord], FUN = seq_along)]
+
+    data.table::setorder(dt, .orig_row)  # restore original (input) row order
+    dt[, .orig_row := NULL]
 
     data.table::setnames(dt, c("chrom", "start", "end", "gene"),
                          c(chrom_col, start_col, end_col, gene_col))

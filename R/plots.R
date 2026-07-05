@@ -1,10 +1,3 @@
-# Local copy of qbetabinom (from ExomeDepth v1.1.15, with permission)
-qbetabinom <- function(p, size, rho, prob) {
-    a <- prob * (1 - rho) / rho
-    b <- (1 - prob) * (1 - rho) / rho
-    qbeta(p, a, b) * size
-}
-
 harmonise_chr_prefix <- function(ref_df, target_df) {
     has_chr_ref <- any(grepl("^chr", ref_df$chromosome))
     has_chr_tgt <- any(grepl("^chr", target_df$Chromosome))

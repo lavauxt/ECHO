@@ -162,22 +162,31 @@ run_bam_coverage <- function(
   }
 
   if (skip_invalid_intervals && nrow(bed_file) > 0) {
-    if (verbose) message("[INFO] Testing FASTA extraction for ", nrow(bed_file), " intervals (this may be slow)...")
+    if (verbose) message("[INFO] Testing FASTA extraction for ", nrow(bed_file), " intervals...")
     keep       <- logical(nrow(bed_file))
     chunk_size <- 5000L
     for (chunk_start in seq(1L, nrow(bed_file), chunk_size)) {
-      chunk_end <- min(chunk_start + chunk_size - 1L, nrow(bed_file))
-      for (i in chunk_start:chunk_end) {
-        gr <- GenomicRanges::GRanges(
-          seqnames = bed_file$chromosome[i],
-          ranges   = IRanges::IRanges(start = bed_file$start[i], end = bed_file$end[i])
-        )
-        ok <- tryCatch({
-          sq <- Rsamtools::scanFa(fa, param = gr)
-          length(sq) == 1L && BiocGenerics::width(sq)[1] > 0L
-        }, error = function(e) FALSE)
-        keep[i] <- ok
-      }
+      chunk_end   <- min(chunk_start + chunk_size - 1L, nrow(bed_file))
+      chunk_idx   <- chunk_start:chunk_end
+      gr <- GenomicRanges::GRanges(
+        seqnames = bed_file$chromosome[chunk_idx],
+        ranges   = IRanges::IRanges(start = bed_file$start[chunk_idx], end = bed_file$end[chunk_idx])
+      )
+      chunk_ok <- tryCatch({
+        sq <- Rsamtools::scanFa(fa, param = gr)
+        BiocGenerics::width(sq) > 0L
+      }, error = function(e) {
+        # Fall back to per-row testing only if the whole-chunk call errors
+        # (e.g. one bad interval in the batch), so a single bad row doesn't
+        # cost the vectorized speedup for every other chunk.
+        vapply(chunk_idx, function(i) {
+          tryCatch({
+            sq_i <- Rsamtools::scanFa(fa, param = gr[match(i, chunk_idx)])
+            length(sq_i) == 1L && BiocGenerics::width(sq_i)[1] > 0L
+          }, error = function(e) FALSE)
+        }, logical(1))
+      })
+      keep[chunk_idx] <- chunk_ok
     }
     if (!all(keep)) {
       removed <- which(!keep)
