@@ -308,6 +308,104 @@ plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
     invisible(list(pca = pca, var_exp = var_exp))
 }
 
+#' Validate a BED file for common structural and coordinate errors
+#'
+#' Lightweight, non-fatal sanity checks run on a BED file before it enters
+#' the ECHO pipeline: malformed/inverted coordinates, duplicate regions,
+#' and (when present) a consistency check between the BED's own
+#' start/end columns and any \code{"_chrN_start_end"}-style coordinate
+#' suffix embedded in the name column (a convention used by some
+#' capture-panel design exports, e.g. \code{"..._chr13_32889589_32889829"}).
+#' That last check compares the embedded 1-based coordinate against
+#' \code{start + 1} (the standard 0-based -> 1-based conversion). If most
+#' rows share the exact same non-zero offset, that is reported as a likely
+#' systematic authoring bug in the BED file (e.g. the export script
+#' subtracting one base too many) rather than N independent bad rows.
+#'
+#' This function never stops the pipeline — only warns — since some
+#' findings (e.g. multi-segment merged exons) are expected quirks rather
+#' than fatal errors.
+#'
+#' @param bed_path Character string. Path to a BED file.
+#' @param verbose Logical. Print a summary of findings. Default TRUE.
+#' @return Invisibly, a named list of diagnostic data frames (empty list
+#'   if no issues were found).
+#' @export
+validate_bed_regions <- function(bed_path, verbose = TRUE) {
+    bed <- tryCatch(data.table::fread(bed_path, header = FALSE, sep = "\t"),
+                     error = function(e) NULL)
+    if (is.null(bed) || nrow(bed) == 0) {
+        if (verbose) message("[WARNING] Could not read BED file for validation: ", bed_path)
+        return(invisible(list()))
+    }
+    if (ncol(bed) < 3) {
+        if (verbose) message("[WARNING] BED file has fewer than 3 columns; skipping validation.")
+        return(invisible(list()))
+    }
+    data.table::setnames(bed, 1:3, c("chrom", "start", "end"))
+    if (ncol(bed) >= 4) data.table::setnames(bed, 4, "name") else bed$name <- NA_character_
+
+    issues <- list()
+    if (verbose) message("[INFO] Validating BED file: ", bed_path, " (", nrow(bed), " rows)")
+
+    bad_coords <- which(!is.na(bed$start) & !is.na(bed$end) & (bed$end <= bed$start | bed$start < 0))
+    if (length(bad_coords)) {
+        issues$invalid_coordinates <- as.data.frame(bed[bad_coords, ])
+        if (verbose) message("[WARNING] ", length(bad_coords),
+                              " row(s) have end <= start or a negative start (e.g. row ",
+                              bad_coords[1], ").")
+    }
+
+    dup_rows <- which(duplicated(bed[, c("chrom", "start", "end")]))
+    if (length(dup_rows)) {
+        issues$duplicate_regions <- as.data.frame(bed[dup_rows, ])
+        if (verbose) message("[WARNING] ", length(dup_rows), " duplicate chrom/start/end row(s) found.")
+    }
+
+    # Optional: cross-check any "_chrN_start_end"-style coordinate embedded
+    # in the name column against the BED's own columns.
+    pat <- "chr\\w+_([0-9]+)_([0-9]+)"
+    has_pattern <- grepl(pat, bed$name)
+    if (any(has_pattern)) {
+        sub_bed <- bed[has_pattern, ]
+        all_matches <- regmatches(sub_bed$name, gregexpr(pat, sub_bed$name))
+        embedded_start <- vapply(all_matches, function(m) {
+            if (!length(m)) return(NA_real_)
+            min(as.numeric(sub(paste0("^", pat, "$"), "\\1", m)))
+        }, numeric(1))
+        embedded_end <- vapply(all_matches, function(m) {
+            if (!length(m)) return(NA_real_)
+            max(as.numeric(sub(paste0("^", pat, "$"), "\\2", m)))
+        }, numeric(1))
+        expected_start <- sub_bed$start + 1
+        start_diff <- embedded_start - expected_start
+        end_diff   <- embedded_end - sub_bed$end
+        off <- which(start_diff != 0 | end_diff != 0)
+        if (length(off)) {
+            issues$name_coordinate_mismatch <- as.data.frame(sub_bed[off, ])
+            pct <- round(100 * length(off) / nrow(sub_bed), 1)
+            if (verbose) {
+                message("[WARNING] ", length(off), " of ", nrow(sub_bed), " (", pct, "%) row(s) with a ",
+                        "name-embedded coordinate disagree with the BED start/end columns.")
+                tab_start <- table(start_diff[off])
+                dominant_shift <- as.numeric(names(tab_start)[which.max(tab_start)])
+                dominant_frac  <- max(tab_start) / length(off)
+                if (dominant_frac > 0.9 && dominant_shift != 0) {
+                    message("[WARNING]   ", round(dominant_frac * 100, 1), "% of the mismatched rows share the ",
+                            "exact same offset (", dominant_shift, " bp on the start coordinate). A single, ",
+                            "uniform shift across nearly every row usually means the script that generated ",
+                            "this BED file has a systematic off-by-one/two error (its 'Start' column is ",
+                            abs(dominant_shift), " bp too ", ifelse(dominant_shift > 0, "small", "large"),
+                            " relative to the position encoded in the name column) rather than isolated bad rows.")
+                }
+            }
+        }
+    }
+
+    if (verbose && length(issues) == 0) message("[INFO] BED validation found no issues.")
+    invisible(issues)
+}
+
 #' Flag Background-Exon Calibration Issues for a CNV Call Window
 #'
 #' Ported from CANOPE (a sibling pipeline sharing this reporting/plotting

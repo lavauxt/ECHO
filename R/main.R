@@ -25,7 +25,7 @@
 #' @export
 echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  report = TRUE,
-                 plots = NULL,  # <- changed from FALSE to NULL
+                 plots = NULL,  # NULL means "use config"
                  vcf_per_sample = FALSE,
                  sample_name_delim = "\\.",
                  sample_name_keep = "1",
@@ -39,6 +39,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  ...) {
   args <- list(...)
 
+  # ---- Load or build configuration -----------------------------------------
   if (!is.null(config_path)) {
     cfg <- load_config(config_path)
     if (!is.null(cfg$bed_preprocess)) {
@@ -50,11 +51,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   } else if (length(args) > 0) {
     cfg <- list(
       input = list(
-        bamdir   = args$bamdir %||% "./data",
-        bamfiles = args$bamfiles,
-        bed      = args$bed,
-        fasta    = args$fasta,
-        rbams    = args$rbams
+        bamdir             = args$bamdir %||% "./data",
+        bamfiles           = args$bamfiles,
+        bed                = args$bed,
+        fasta              = args$fasta,
+        fasta_source       = args$fasta_source %||% "file",
+        bsgenome_cache_dir = args$bsgenome_cache_dir,
+        rbams              = args$rbams
       ),
       output = list(
         dir    = args$outdir %||% "./result",
@@ -106,19 +109,19 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     stop("[ERROR] Either config_path or pipeline parameters must be provided.")
   }
 
-  # ===== NEW: Read 'plots' from config =====
-  # If plots argument is NULL, use value from config (top-level or inside settings)
+  # ---- Handle plots argument ----------------------------------------------
   if (is.null(plots)) {
     plots <- cfg$plots %||% cfg$settings$plots %||% FALSE
   }
-  # ========================================
 
+  # ---- Override gene_field_index from config if present --------------------
   if (!is.null(cfg$gene_field_index)) {
     gene_field_index <- cfg$gene_field_index
   } else if (!is.null(cfg$bed_preprocess$gene_field_index)) {
     gene_field_index <- cfg$bed_preprocess$gene_field_index
   }
 
+  # ---- Set up output directory and log file --------------------------------
   cfg$output$dir <- normalizePath(file.path(getwd(), cfg$output$dir), mustWork = FALSE)
   if (!dir.exists(cfg$output$dir)) {
     dir.create(cfg$output$dir, recursive = TRUE, showWarnings = FALSE)
@@ -130,21 +133,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   log_dir <- dirname(log_file)
   if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
-  log_con <- file(log_file, open = "wt")
-  writeLines(paste0("# ECHO Pipeline Log - ", Sys.time()), log_con)
-  writeLines(paste0("# Output directory: ", basename(cfg$output$dir)), log_con)
-  writeLines("# ", log_con)
-  writeLines("## Session Info", log_con)
-  si <- utils::sessionInfo()
-  writeLines(paste0("R version: ", si$R.version$version.string), log_con)
-  writeLines(paste0("Platform: ", si$platform), log_con)
-  writeLines("Packages:", log_con)
-  for (pkg in names(si$otherPkgs)) {
-    writeLines(paste0("   ", pkg, ": ", si$otherPkgs[[pkg]]$Version), log_con)
-  }
-  writeLines(" ", log_con)
-  close(log_con)
-
+  # ---- Define log_msg early (available for all subsequent code) -----------
   log_msg <- function(msg, type = "INFO") {
     timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     formatted <- paste0("[", type, "] ", timestamp, " ", msg)
@@ -152,17 +141,59 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     cat(formatted, "\n", file = log_file, append = TRUE)
   }
 
+  # ---- Write session info to log ------------------------------------------
+  log_msg("ECHO pipeline started")
+  log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
+  log_msg(paste("Output directory:", basename(cfg$output$dir)))
+  log_msg(paste("Log file:", basename(log_file)))
+
+  si <- utils::sessionInfo()
+  log_msg(paste0("R version: ", si$R.version$version.string))
+  log_msg(paste0("Platform: ", si$platform))
+  log_msg("Packages:")
+  for (pkg in names(si$otherPkgs)) {
+    log_msg(paste0("   ", pkg, ": ", si$otherPkgs[[pkg]]$Version))
+  }
+  log_msg(" ")
+
+  # ---- Auto‑set bed_process to "REGEN" ONLY if not explicitly defined ----
+  auto_regen <- cfg$auto_regen %||% TRUE
+  if (auto_regen && !is.null(cfg$input$bed) && is.null(cfg$bed_process)) {
+    cfg$bed_process <- "REGEN"
+    log_msg("BED preprocessing auto‑set to 'REGEN' (using TxDb/org.Hs.eg.db)")
+  }
+
+  # ---- Infer genome_version if not set -------------------------------------
+  if (is.null(cfg$genome_version)) {
+    if (!is.null(cfg$settings$genome_version)) {
+      cfg$genome_version <- cfg$settings$genome_version
+    } else if (!is.null(cfg$input$fasta)) {
+      fname <- basename(cfg$input$fasta)
+      if (grepl("hg19", fname, ignore.case = TRUE)) {
+        cfg$genome_version <- "hg19"
+      } else if (grepl("hg38", fname, ignore.case = TRUE)) {
+        cfg$genome_version <- "hg38"
+      } else {
+        cfg$genome_version <- "hg19"
+        log_msg("Genome version not inferred; defaulting to 'hg19'.")
+      }
+    } else {
+      cfg$genome_version <- "hg19"
+    }
+  }
+
+  # ---- Save original warning option and set up error handling -------------
   old_warn <- options(warn = 1)
   on.exit(options(warn = old_warn$warn), add = TRUE)
 
+  # ---- Main pipeline execution --------------------------------------------
   tryCatch({
     withCallingHandlers({
-      log_msg("ECHO pipeline started")
-      log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
-      log_msg(paste("Output directory:", basename(cfg$output$dir)))
-      log_msg(paste("Log file:", basename(log_file)))
-      log_msg(paste("Plots enabled:", plots))  # log the setting
+      log_msg(paste("Plots enabled:", plots))
+      log_msg(paste("BED processing mode:", cfg$bed_process))
+      log_msg(paste("Genome version:", cfg$genome_version))
 
+      # Define output paths
       paths <- list(
         rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),
         metrics = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_QC_metrics.tsv")),
@@ -171,11 +202,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         plots   = file.path(cfg$output$dir, "Plots")
       )
 
+      # Allow command‑line overrides for paths
       if (!is.null(args$rdata))   paths$rdata   <- args$rdata
       if (!is.null(args$metrics)) paths$metrics <- args$metrics
       if (!is.null(args$cnvs))    paths$cnvs    <- args$cnvs
       if (!is.null(args$summary)) paths$summary <- args$summary
 
+      # Create directories for output files
       lapply(paths[!names(paths) %in% "plots"], function(p) {
         if (grepl("\\.[a-zA-Z]+$", p)) {
           dir.create(dirname(p), showWarnings = FALSE, recursive = TRUE)
@@ -184,17 +217,33 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         }
       })
 
+      # VCF output path
       if (is.null(vcf_output)) {
         vcf_output <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNVs.vcf"))
       } else if (identical(vcf_output, FALSE)) {
         vcf_output <- NULL
       }
 
-      stop_if_not_file(cfg$input$bed,   "[ERROR] BED file missing")
-      stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
+      # Validate BED file existence
+      stop_if_not_file(cfg$input$bed, "[ERROR] BED file missing")
 
+      # Reference sequence source
+      fasta_source <- cfg$input$fasta_source %||% "file"
+      if (identical(fasta_source, "file")) {
+        stop_if_not_file(cfg$input$fasta, "[ERROR] FASTA file missing")
+      } else {
+        log_msg(paste0("Reference sequence source: fasta_source = '", fasta_source,
+                        "' (genome_version = ", cfg$genome_version, "); no local FASTA required."))
+      }
+
+      # Non‑fatal BED validation
+      tryCatch(
+        validate_bed_regions(cfg$input$bed, verbose = TRUE),
+        error = function(e) log_msg(paste("BED validation skipped:", conditionMessage(e)), "WARNING")
+      )
+
+      # ---- BED preprocessing (if not "NO") ---------------------------------
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
-
         log_msg(paste("Preprocessing BED file using mode:", cfg$bed_process))
         processed_bed <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_targets.bed"))
         process_bed_file(
@@ -215,7 +264,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           list_genes            = cfg$list_genes %||% NULL,
           genes_file            = cfg$genes_file %||% NULL,
           panel_files           = cfg$panel_files %||% NULL,
-          genome_version        = cfg$genome_version %||% "hg19",
+          genome_version        = cfg$genome_version,
           txdb                  = NULL,
           gene_field_index      = gene_field_index
         )
@@ -225,7 +274,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
       }
 
-
+      # ---- Step counter ---------------------------------------------------
       steps_total   <- 3L +  
                        as.integer(plots) +
                        as.integer(report) +
@@ -239,12 +288,16 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         invisible(result)
       }
 
+      # ---- Step 1: BAM coverage extraction --------------------------------
       run_step("Extracting BAM coverage", {
         run_bam_coverage(
           bamfiles             = cfg$input$bamfiles,
           bamdir               = cfg$input$bamdir,
           bed                  = cfg$input$bed,
           fasta                = cfg$input$fasta,
+          fasta_source         = fasta_source,
+          genome_version       = cfg$genome_version,
+          bsgenome_cache_dir   = cfg$input$bsgenome_cache_dir,
           rbams                = cfg$input$rbams,
           data_out             = paths$rdata,
           verbose              = TRUE,
@@ -257,6 +310,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         )
       })
 
+      # ---- PCA plot (optional) --------------------------------------------
       if (cfg$settings$pca_plot %||% TRUE) {
         objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
         counts       <- objs$counts
@@ -270,6 +324,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
       }
 
+      # ---- Step 2: QC metrics ---------------------------------------------
       run_step("Running QC metrics", {
         run_qc_metrics(
           rdata_file      = paths$rdata,
@@ -281,6 +336,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         )
       })
 
+      # ---- Step 3: CNV calling --------------------------------------------
       run_step("Calling CNVs", {
         cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
         cnv_args <- c(list(
@@ -300,6 +356,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         do.call(run_cnv_calling, cnv_args)
       })
 
+      # ---- Plot generation (optional) -------------------------------------
       if (plots) {
         run_step("Generating plots", {
           generate_plots(
@@ -314,6 +371,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         log_msg("Plot generation skipped (plots = FALSE).")
       }
 
+      # ---- HTML report (optional) -----------------------------------------
       if (report) {
         run_step("Generating HTML report", {
           generate_report(
@@ -333,6 +391,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         log_msg("Report generation skipped (report = FALSE).")
       }
 
+      # ---- VCF export (optional) ------------------------------------------
       if (!is.null(vcf_output) || vcf_per_sample) {
         run_step("Exporting CNVs to VCF", {
           if (file.exists(paths$summary)) {
@@ -371,9 +430,6 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
 
       log_msg("Pipeline finished successfully!")
     }, warning = function(w) {
-      # Known noisy GenomicRanges warning: suppress it silently (no log
-      # entry) rather than filling the log with a benign, expected message.
-      # Every other warning falls through to the log_msg()+restart below.
       if (grepl("sequence levels not in the other", conditionMessage(w))) {
         invokeRestart("muffleWarning")
       }

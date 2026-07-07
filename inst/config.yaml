@@ -3,14 +3,27 @@
 # =============================================================================
 
 input:
-  bamdir: "./data/TEST"                   # Path to folder containing BAM and BAI files
-  bed: "./data/TEST/TEST.bed"             # Original input target regions capture file
-  fasta: "./data/REF/hg19.fa"             # Path to Reference Genome sequence file
+  bamdir: "./data/KMT2A"
+  bed: "./data/KMT2A/KMT2A.bed"
+  # Option A: use a local FASTA file
+  # fasta: "./data/REF/hg19.fa"
+  # fasta_source: "file"
+  #
+  # Option B: use genome_version mapping (hg19 → BSgenome.Hsapiens.UCSC.hg19)
+  # fasta_source: "bsgenome"
+  # genome_version: "hg19"
+  #
+  # Option C: directly specify the BSgenome package name
+  fasta_source: "BSgenome.Hsapiens.UCSC.hg19"
+  # genome_version is not needed here
+  # bsgenome_cache_dir: null   # optional
   rbams: null                             # Optional external reference matrix list path (or null)
 
+plots: true                                # Generate per‑CNV PDF plots
+
 output:
-  dir: "./result_TEST_nointerval"         # Target directory path for generated assets
-  prefix: "TEST"                          # Output filename base text identification tag
+  dir: "./result_KMT2A_nointerval"         # Target directory path for generated assets
+  prefix: "KMT2A"                          # Output filename base text identification tag
 
 settings:
   modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
@@ -54,14 +67,14 @@ settings:
 # Target Name Processing & Cleaning Sub-Section
 # -----------------------------------------------------------------------------
 bed_preprocess:
-  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
-  exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
-  gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
-  gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges
+  bed_process: "NO"                    # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  #exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
+  #gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
+  #gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges
   auto_exon_number: false                 # Prevent re-sorting coordinate engines from dropping name numbers
   region_numbering_mode: "file_order"     # Choose naming logic mode: 'file_order' or 'bed_text'
   customexon: true                        # Generate custom.exon value outputs in standard formats
-  bed_zero_based: true                    # Set true if input BED file indices track from index 0
-  skip_invalid_intervals: false           # Gracefully filter invalid coordinate ranges
+  bed_zero_based: false                    # Set true if input BED file indices track from index 0
+  skip_invalid_intervals: true           # Gracefully filter invalid coordinate ranges
 
-plots: true                                # Generate per‑CNV PDF plots
+

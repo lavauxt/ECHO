@@ -3,7 +3,7 @@
 #' @param input_bed Path to input BED file.
 #' @param output_bed Path to output processed BED file.
 #' @param bed_process Mode: "STANDARD", "REGEN", or "NO".
-#' @param bed_zero_based Logical: is the input BED 0‑based? Default TRUE.
+#' @param bed_zero_based Logical: is the input BED 0-based? Default TRUE.
 #' @param unknown_gene Keep intervals without gene name? Default FALSE.
 #' @param exon_sep Character string or list/vector of characters to split gene names (e.g., "[ ()]" or c(" ", "(")). Default " ".
 #' @param gene_name_collapse Character token used to rejoin kept parts. Default " ".
@@ -15,7 +15,7 @@
 #' @param gene_name_keep Specifies parts to keep after splitting by exon_sep (e.g., "1", "1-2", "1,3").
 #' @param panel_files Character vector of BED file paths (one per line) or a single file containing paths.
 #' @param genome_version "hg19" or "hg38" (REGEN mode).
-#' @param gene_field_index 1‑based index of the gene name field after splitting (legacy fallback for gene_name_keep).
+#' @param gene_field_index 1-based index of the gene name field after splitting (legacy fallback for gene_name_keep).
 #' @param ... other parameters for compatibility.
 #'
 #' @export
@@ -237,6 +237,13 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     names(df)[names(df) == "End"] <- "end"
     names(df)[names(df) == "Gene"] <- "gene"
     df <- assign_exon_numbers_per_gene(df)
+    
+    # Robust safety: ensure exon_number column exists and has correct length
+    if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
+      warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
+      df$exon_number <- seq_len(nrow(df))
+    }
+    
     names(df)[names(df) == "chromosome"] <- "Chr"
     names(df)[names(df) == "start"] <- "Start"
     names(df)[names(df) == "end"] <- "End"
@@ -298,6 +305,13 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         names(df)[names(df) == "End"] <- "end"
         names(df)[names(df) == "Gene"] <- "gene"
         df <- assign_exon_numbers_per_gene(df)
+        
+        # Robust safety
+        if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
+          warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
+          df$exon_number <- seq_len(nrow(df))
+        }
+        
         names(df)[names(df) == "chromosome"] <- "Chr"
         names(df)[names(df) == "start"] <- "Start"
         names(df)[names(df) == "end"] <- "End"
@@ -316,6 +330,13 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
         names(df)[names(df) == "End"] <- "end"
         names(df)[names(df) == "Gene"] <- "gene"
         df <- assign_exon_numbers_per_gene(df)
+        
+        # Robust safety
+        if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
+          warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
+          df$exon_number <- seq_len(nrow(df))
+        }
+        
         names(df)[names(df) == "chromosome"] <- "Chr"
         names(df)[names(df) == "start"] <- "Start"
         names(df)[names(df) == "end"] <- "End"
@@ -335,6 +356,13 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
       names(df)[names(df) == "End"] <- "end"
       names(df)[names(df) == "Gene"] <- "gene"
       df <- assign_exon_numbers_per_gene(df)
+      
+      # Robust safety
+      if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
+        warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
+        df$exon_number <- seq_len(nrow(df))
+      }
+      
       names(df)[names(df) == "chromosome"] <- "Chr"
       names(df)[names(df) == "start"] <- "Start"
       names(df)[names(df) == "end"] <- "End"
