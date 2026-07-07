@@ -8,7 +8,8 @@
 #'   directory is used.  Set to \code{FALSE} to skip VCF export. Default \code{NULL}.
 #' @param save_ed_objects Logical. Save full ExomeDepth objects? Default \code{FALSE}.
 #' @param report Logical. Generate interactive HTML reports? Default \code{TRUE}.
-#' @param plots Logical. Generate per-CNV PDF plots? Default \code{FALSE}.
+#' @param plots Logical. Generate per-CNV PDF plots? Default \code{FALSE}. Can also be set
+#'   in the YAML config under \code{plots} or \code{settings$plots}.
 #' @param vcf_per_sample Logical. Write a separate VCF file for each sample? Default \code{FALSE}.
 #' @param sample_name_delim Character string. Delimiter(s) to split the filename.
 #' @param sample_name_keep Character string. Specifies which parts to keep after splitting.
@@ -24,7 +25,7 @@
 #' @export
 echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  report = TRUE,
-                 plots = FALSE,
+                 plots = NULL,  # <- changed from FALSE to NULL
                  vcf_per_sample = FALSE,
                  sample_name_delim = "\\.",
                  sample_name_keep = "1",
@@ -105,6 +106,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     stop("[ERROR] Either config_path or pipeline parameters must be provided.")
   }
 
+  # ===== NEW: Read 'plots' from config =====
+  # If plots argument is NULL, use value from config (top-level or inside settings)
+  if (is.null(plots)) {
+    plots <- cfg$plots %||% cfg$settings$plots %||% FALSE
+  }
+  # ========================================
+
   if (!is.null(cfg$gene_field_index)) {
     gene_field_index <- cfg$gene_field_index
   } else if (!is.null(cfg$bed_preprocess$gene_field_index)) {
@@ -153,6 +161,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
       log_msg(paste("Output directory:", basename(cfg$output$dir)))
       log_msg(paste("Log file:", basename(log_file)))
+      log_msg(paste("Plots enabled:", plots))  # log the setting
 
       paths <- list(
         rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),

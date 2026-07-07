@@ -9,7 +9,7 @@ input:
   rbams: null                             # Optional external reference matrix list path (or null)
 
 output:
-  dir: "./result_TEST_standard"           # Target directory path for generated assets
+  dir: "./result_TEST_nointerval"         # Target directory path for generated assets
   prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
@@ -24,8 +24,8 @@ settings:
   phi_bins: 1                             # Normalization distribution constant scale index
   formula: "cbind(test, reference) ~ 1"   # ExomeDepth evaluation regression expression frame
 
-  pca_plot: true
-  
+  pca_plot: true                          # Generate PCA coverage plot (PDF)
+
   # QC scoring thresholds for tracking pipeline certainty
   score_high_corr: 0.985
   score_med_corr: 0.95
@@ -37,9 +37,9 @@ settings:
   score_high_ratio_high: 1.30
   score_med_ratio_low: 0.60
   score_med_ratio_high: 1.40
-  
+
   # List of highly homologous/problematic genes to flag or drop
-  score_low_confidence_genes: 
+  score_low_confidence_genes:
     - "PMS2"
     - "SMN1"
     - "CYP2D6"
@@ -62,4 +62,6 @@ bed_preprocess:
   region_numbering_mode: "file_order"     # Choose naming logic mode: 'file_order' or 'bed_text'
   customexon: true                        # Generate custom.exon value outputs in standard formats
   bed_zero_based: true                    # Set true if input BED file indices track from index 0
-  skip_invalid_intervals: true            # Gracefully filter invalid coordinate ranges
+  skip_invalid_intervals: false           # Gracefully filter invalid coordinate ranges
+
+plots: true                                # Generate per‑CNV PDF plots
