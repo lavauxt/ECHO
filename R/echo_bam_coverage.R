@@ -159,6 +159,13 @@ resolve_reference_fasta <- function(fasta = NULL,
 #' @param custom_sample_names Optional character vector.
 #' @param bed_zero_based Logical. If TRUE, BED start coordinates are 0-based.
 #' @param skip_invalid_intervals Logical. If TRUE, validate each interval against FASTA.
+#' @param pad_terminal_exons Integer >= 0. Bases to extend the outward-facing
+#'   edge of each gene's first and last exon (both edges, for a single-exon
+#'   gene), to reduce the chance of a 0/low count right at a gene boundary
+#'   where there's no neighbouring exon to carry the signal. Never creates
+#'   an overlap with a neighbouring interval or crosses a contig boundary --
+#'   padding is applied "if possible" and clamped short otherwise. See
+#'   \code{\link{pad_gene_terminal_exons}}. Default \code{0} (disabled).
 #' @return Invisibly \code{NULL}. Coverage object saved to disk.
 #' @export
 run_bam_coverage <- function(
@@ -178,7 +185,8 @@ run_bam_coverage <- function(
   sample_name_collapse = NULL,
   custom_sample_names  = NULL,
   bed_zero_based       = TRUE,
-  skip_invalid_intervals = FALSE
+  skip_invalid_intervals = FALSE,
+  pad_terminal_exons   = 0
 ) {
   if (verbose) message("[INFO] ", Sys.time(), " BEGIN bam coverage calculation")
   if (is.null(bamfiles) && is.null(bamdir)) stop("[ERROR] Either bamfiles or bamdir must be provided")
@@ -326,6 +334,19 @@ run_bam_coverage <- function(
   if (length(out_of_bounds) > 0) {
     message("[WARNING] Removing ", length(out_of_bounds), " rows outside chromosome boundaries")
     bed_file <- bed_file[-out_of_bounds, ]
+  }
+
+  # ── Terminal-exon padding (optional) ───────────────────────────────────────
+  # Applied here -- after chromosomes are mapped/filtered and coordinates are
+  # clean numerics, but before the reference-sequence extractability check
+  # below -- so the (already boundary-aware) padded coordinates still get
+  # validated against the FASTA/BSgenome sequence for free, and so every
+  # downstream step (CNV calling, plots, VCF, report) sees the padded
+  # windows via the bed_file saved in data_out, consistent with how they
+  # already consume bed_file rather than re-reading the original BED path.
+  if (nrow(bed_file) > 0 && !is.null(pad_terminal_exons) && !is.na(pad_terminal_exons) && pad_terminal_exons > 0) {
+    bed_file <- pad_gene_terminal_exons(bed_file, padding = pad_terminal_exons,
+                                         chr_lengths = fasta_lengths, verbose = verbose)
   }
 
   if (nrow(bed_file) > 0) {

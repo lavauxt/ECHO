@@ -208,6 +208,179 @@ assign_exon_numbers_per_gene <- function(bed_file) {
     out
 }
 
+#' Pad the outer edge of each gene's first and last exon
+#'
+#' Capture-based coverage often drops off right at the true edge of a
+#' target interval (probe/bait tiling is rarely perfect exactly at the
+#' boundary, and reads whose alignment barely spans the edge get soft-
+#' clipped or excluded). For an internal exon this is usually harmless --
+#' its neighbours carry the signal -- but for a gene's *first* (lowest-
+#' coordinate) or *last* (highest-coordinate) exon there is no such
+#' neighbour on the outward side, so a thin sliver of low/zero coverage
+#' right at that edge can pull the whole exon's count down and trigger a
+#' spurious QC flag or CNV call. This function extends only the outward-
+#' facing edge of those two terminal exons per gene (both edges, for a
+#' single-exon gene) by \code{padding} bases, giving that boundary the same
+#' kind of margin an internal exon already has "for free" from its
+#' neighbour.
+#'
+#' "First"/"last" follows the same purely-genomic (chrom, start, end)
+#' ordering that \code{\link{assign_exon_numbers_per_gene}} uses everywhere
+#' else in ECHO -- i.e. lowest-coordinate exon is #1 regardless of strand.
+#' Internal exons (and the inward-facing edge of a terminal exon) are left
+#' untouched: padding an internal boundary would just eat into the intron
+#' between two already-covered exons for no benefit.
+#'
+#' Padding is applied on a best-effort basis ("if possible"): the function
+#' never creates an overlap with whatever interval sits next to it on the
+#' same chromosome (a neighbouring exon of the same gene or of a different
+#' one), and never pushes a coordinate below 1 or past the contig length
+#' (when \code{chr_lengths} is supplied). Where the available gap is
+#' narrower than \code{padding}, that side is extended only as far as the
+#' gap allows.
+#'
+#' Rows whose \code{gene} value is missing/empty or the literal placeholder
+#' \code{"Unknown"} are left unpadded, since "first/last exon of a gene"
+#' isn't meaningful for unannotated regions.
+#'
+#' @param bed_file data.frame with columns chromosome/Chr, start/Start,
+#'   end/End, gene/Gene (1-based, inclusive coordinates).
+#' @param padding Integer >= 0. Bases to add to the outward edge of each
+#'   gene's first and last exon. \code{0} (the default) disables padding
+#'   and returns \code{bed_file} unchanged.
+#' @param chr_lengths Optional named numeric vector (names = chromosome,
+#'   values = contig length) used to cap the last exon's End at the contig
+#'   boundary. If \code{NULL}, no contig-length clamp is applied (only the
+#'   neighbouring-interval clamp).
+#' @param verbose Logical. Print a one-line summary of how many
+#'   starts/ends were extended and how many sides were clamped short of
+#'   the requested padding. Default \code{TRUE}.
+#' @return The same data.frame (original row order and row count
+#'   preserved), with Start/End adjusted for terminal-exon rows only.
+#' @export
+pad_gene_terminal_exons <- function(bed_file, padding = 0, chr_lengths = NULL, verbose = TRUE) {
+    if (is.null(padding) || length(padding) != 1 || is.na(padding) || padding <= 0) {
+        return(bed_file)
+    }
+    padding <- as.integer(round(padding))
+
+    chrom_col <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
+    start_col <- if ("start"      %in% names(bed_file)) "start"      else "Start"
+    end_col   <- if ("end"        %in% names(bed_file)) "end"        else "End"
+    gene_col  <- if ("gene"       %in% names(bed_file)) "gene"       else "Gene"
+    stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
+
+    n_in <- nrow(bed_file)
+    if (n_in == 0) return(bed_file)
+
+    # Reuse the pipeline's own per-gene ordering so "first"/"last" here
+    # always agrees with exon_number everywhere else in ECHO.
+    numbered <- assign_exon_numbers_per_gene(bed_file)
+
+    dt <- data.table::as.data.table(numbered)
+    dt[, .orig_row := .I]  # remember incoming row order
+    data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
+                         c("chrom", "start", "end", "gene"))
+
+    dt[, is_first := exon_number == 1L]
+    dt[, is_last  := exon_number == max(exon_number), by = "gene"]
+    no_gene <- is.na(dt$gene) | dt$gene %in% c("", ".", "Unknown")
+    dt[no_gene, c("is_first", "is_last") := FALSE]
+
+    # Sort a copy by genomic position (per chromosome) so each terminal
+    # exon can see its nearest neighbour on either side -- regardless of
+    # which gene that neighbour belongs to -- and never be padded into it.
+    chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
+                      c(as.character(1:22), "X", "Y", "M"))
+    dt[, .chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(chrom))))]
+    data.table::setorder(dt, .chrom_fac, start, end)
+
+    n        <- nrow(dt)
+    chrom_id <- as.integer(dt$.chrom_fac)
+    start_v  <- dt$start
+    end_v    <- dt$end
+    is_first_v <- dt$is_first
+    is_last_v  <- dt$is_last
+
+    right_extend <- integer(n)  # applies to is_last rows: bp added to end
+    left_extend  <- integer(n)  # applies to is_first rows: bp subtracted from start
+
+    # Gap k (k = 1..n-1) sits between sorted row k and row k+1. Both may
+    # want a share of it at once -- row k if it's a last exon growing
+    # rightward, row k+1 if it's a first exon growing leftward (this is
+    # the one place two *different* genes' terminal exons can compete for
+    # the same free space). Give each what it asks for if the gap is big
+    # enough for both; otherwise split the gap between them so neither
+    # padded interval ever crosses into the other's.
+    if (n > 1) {
+        same_chr_pair <- chrom_id[-n] == chrom_id[-1]
+        gap        <- pmax(start_v[-1] - end_v[-n] - 1L, 0L)
+        want_left  <- ifelse(is_last_v[-n],  padding, 0L)  # row k wants to grow right
+        want_right <- ifelse(is_first_v[-1], padding, 0L)  # row k+1 wants to grow left
+        demand     <- want_left + want_right
+
+        grant_left  <- integer(n - 1L)
+        grant_right <- integer(n - 1L)
+        has_demand  <- same_chr_pair & demand > 0
+        fits        <- has_demand & demand <= gap
+        tight       <- has_demand & demand > gap
+
+        grant_left[fits]  <- want_left[fits]
+        grant_right[fits] <- want_right[fits]
+        # Proportional split of a too-small gap, rounded down so the two
+        # grants can never sum to more than the gap itself.
+        grant_left[tight]  <- as.integer(floor(gap[tight] * want_left[tight] / demand[tight]))
+        grant_right[tight] <- gap[tight] - grant_left[tight]
+
+        right_extend[-n] <- grant_left
+        left_extend[-1]  <- grant_right
+    }
+
+    # Rows at a chromosome boundary (no same-chromosome neighbour on the
+    # relevant side) have no interval to compete with there, so they fall
+    # back to the contig start (position 1) / contig length instead.
+    has_prev <- c(FALSE, if (n > 1) chrom_id[-1] == chrom_id[-n] else logical(0))
+    has_next <- c(if (n > 1) chrom_id[-n] == chrom_id[-1] else logical(0), FALSE)
+
+    no_prev_first <- is_first_v & !has_prev
+    if (any(no_prev_first)) {
+        left_extend[no_prev_first] <- pmin(padding, pmax(start_v[no_prev_first] - 1L, 0L))
+    }
+
+    no_next_last <- is_last_v & !has_next
+    if (any(no_next_last)) {
+        chr_len_here <- if (!is.null(chr_lengths)) {
+            unname(chr_lengths[as.character(dt$chrom[no_next_last])])
+        } else {
+            rep(NA_real_, sum(no_next_last))
+        }
+        avail <- ifelse(!is.na(chr_len_here), chr_len_here - end_v[no_next_last], Inf)
+        right_extend[no_next_last] <- pmin(padding, pmax(avail, 0))
+    }
+
+    n_padded_start <- sum(left_extend > 0L)
+    n_padded_end   <- sum(right_extend > 0L)
+    n_clamped      <- sum(is_first_v & left_extend  < padding) +
+                       sum(is_last_v  & right_extend < padding)
+
+    dt[, start := start_v - left_extend]
+    dt[, end   := end_v   + right_extend]
+
+    data.table::setorder(dt, .orig_row)  # restore original (input) row order
+    dt[, c(".orig_row", ".chrom_fac", "is_first", "is_last", "exon_number") := NULL]
+    data.table::setnames(dt, c("chrom", "start", "end", "gene"),
+                         c(chrom_col, start_col, end_col, gene_col))
+    out <- as.data.frame(dt)
+    stopifnot(nrow(out) == n_in)
+
+    if (verbose) {
+        message(sprintf(
+            "[INFO] pad_gene_terminal_exons: requested %d bp padding -- extended %d gene start(s) and %d gene end(s); %d side(s) received less than the full request (shared gap with a neighbouring interval, or a contig boundary).",
+            padding, n_padded_start, n_padded_end, n_clamped))
+    }
+    out
+}
+
 #' Convert global exon indices to within-gene indices (using start-order)
 #'
 #' @param cnv_calls Data frame of CNV calls (from ExomeDepth).

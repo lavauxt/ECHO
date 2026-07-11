@@ -48,6 +48,12 @@ below.
   z-score on cross-target noise) and `exon_qc` drops problematic exons (high
   cross-sample MAD, low mean coverage, or GC content outside
   `gc_extreme_filter`) *before* any sample is handed to ExomeDepth.
+* **Terminal-Exon Padding:** `pad_terminal_exons` (bp, default `0` = off)
+  extends the outward-facing edge of each gene's first and last exon, where
+  there's no neighbouring exon to carry the signal if coverage thins out
+  right at the boundary. Padding is applied "if possible" — it never
+  overlaps a neighbouring target or crosses a contig boundary, clamping
+  short instead. Internal exons are untouched.
 * **Confidence Scoring:** HIGH/MEDIUM/LOW tiers from correlation, reference
   count, and read-ratio, with a built-in list of pseudogene/homology-prone
   genes always scored LOW.
@@ -114,6 +120,7 @@ settings:
   exon_mad_quantile: 0.90
   gc_extreme_filter: [0.15, 0.85]
   min_exon_mean: 20
+  pad_terminal_exons: 0                  # e.g. 10 to pad each gene's first/last exon by 10bp
 
 genome_version: "hg19"
 bed_process: "STANDARD"                  # or "REGEN" / "NO"
@@ -164,6 +171,13 @@ with gene/exon information first.
   samples (robust z-score on cross-target noise) and `exon_qc` drops
   problematic exons (high cross-sample MAD, low mean coverage, or GC
   content outside `gc_extreme_filter`) before calling. Both default `TRUE`.
+- **Terminal-exon padding** (`echo_utils.R::pad_gene_terminal_exons()`) —
+  extends the outward edge of each gene's first/last exon by
+  `pad_terminal_exons` bp (default `0`, off) before coverage extraction, so
+  a thin sliver of low coverage right at a gene boundary is less likely to
+  drag the whole exon's count down. Applied "if possible": clamped short of
+  the requested amount rather than overlapping a neighbouring target or
+  crossing a contig boundary. Internal exon boundaries are left alone.
 - **QC metrics table** (`echo_metrics.R`) — per-sample and per-exon flags
   (low correlation, low depth, high CV, missing sex chromosomes), written to
   TSV and shown in the report.

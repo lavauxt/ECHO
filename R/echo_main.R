@@ -91,7 +91,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         qc_zscore                  = args$qc_zscore %||% 3,
         exon_mad_quantile          = args$exon_mad_quantile %||% 0.90,
         gc_extreme_filter          = args$gc_extreme_filter %||% c(0.15, 0.85),
-        min_exon_mean              = args$min_exon_mean %||% 20
+        min_exon_mean              = args$min_exon_mean %||% 20,
+        pad_terminal_exons         = args$pad_terminal_exons %||% 0
       ),
       bed_process            = args$bed_process %||% "NO",
       refseqgene             = args$refseqgene,
@@ -198,6 +199,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg(paste("Plots enabled:", plots))
       log_msg(paste("BED processing mode:", cfg$bed_process))
       log_msg(paste("Genome version:", cfg$genome_version))
+      log_msg(paste("Terminal-exon padding:", paste0(cfg$settings$pad_terminal_exons %||% 0, " bp")))
 
       # Define output paths
       paths <- list(
@@ -312,7 +314,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
           custom_sample_names  = custom_sample_names,
           bed_zero_based       = cfg$bed_zero_based %||% TRUE,
-          skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE
+          skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE,
+          pad_terminal_exons   = cfg$settings$pad_terminal_exons %||% 0
         )
       })
 
