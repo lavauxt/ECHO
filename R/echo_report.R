@@ -42,8 +42,15 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   gender_map <- local_env$gender_map
   sample_names <- local_env$sample_names   
 
-  # Use fread to handle missing fields gracefully
-  qc_metrics <- data.table::fread(qc_metrics_file, header = TRUE, fill = TRUE, data.table = FALSE)
+  # Use fread to handle missing fields gracefully. Guarded (unlike a bare
+  # fread() call) so a missing/failed QC-metrics step degrades the report
+  # gracefully instead of throwing -- mirrors CANOPE's generate_canope_report().
+  qc_metrics <- NULL
+  if (!is.null(qc_metrics_file) && file.exists(qc_metrics_file)) {
+    qc_metrics <- data.table::fread(qc_metrics_file, header = TRUE, fill = TRUE, data.table = FALSE)
+  } else {
+    message("[INFO] No QC metrics file supplied/found; report will skip the QC section.")
+  }
 
   # Load sample table if provided and not already in RData
   sample_df <- NULL

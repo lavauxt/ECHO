@@ -36,7 +36,11 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
         max_corr <- setNames(rep(NA_real_, ncol(dt_counts)), names(dt_counts))
         message("[WARNING] Correlation QC skipped: fewer than 2 samples")
     } else {
-        corr_matrix <- stats::cor(dt_counts, use = "pairwise.complete.obs")
+        # Spearman (rank-based), matching CANOPE's run_canope_qc_metrics() --
+        # more robust to the outliers/non-linearity typical of coverage data
+        # than the previous default (Pearson), and keeps both pipelines'
+        # QC tables flagging samples on the same statistical basis.
+        corr_matrix <- stats::cor(dt_counts, method = "spearman", use = "pairwise.complete.obs")
         max_corr <- apply(corr_matrix, 1, function(x) {
             others <- x[x != 1]
             if (!length(others)) NA_real_ else max(others, na.rm = TRUE)

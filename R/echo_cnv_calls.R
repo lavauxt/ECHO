@@ -29,7 +29,8 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
                                  score_high_ratio_high = 1.30,
                                  score_med_ratio_low   = 0.60,
                                  score_med_ratio_high  = 1.40,
-                                 score_low_confidence_genes = c("PMS2")) {
+                                 score_low_confidence_genes = c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2",
+                                                                 "STRC", "CYP21A2", "GBA1", "CFTR")) {
   if (nrow(cnv_calls) == 0) return(cnv_calls)
 
   cnv_calls$Gene <- vapply(seq_len(nrow(cnv_calls)), function(i) {
@@ -79,6 +80,21 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
 #' @param save_ed_objects Logical. If TRUE, save full ExomeDepth objects per sample.
 #' @param modechrom Character. Mode for sex chromosome handling.
 #' @param sample_table Optional character string. Path to sample table.
+#' @param sample_qc Logical. Exclude outlier samples (robust z-score on
+#'   cross-target noise) before calling -- mirrors CANOPE's \code{sample_qc}.
+#'   Default \code{TRUE}.
+#' @param exon_qc Logical. Exclude problematic exons (high cross-sample MAD,
+#'   low mean coverage, or -- using the \code{GC} column that
+#'   \code{ExomeDepth::getBamCounts()} always computes as a side effect of
+#'   coverage extraction -- extreme GC content) before calling. Mirrors
+#'   CANOPE's \code{exon_qc}. Default \code{TRUE}.
+#' @param qc_zscore Numeric. Robust z-score threshold for \code{sample_qc}.
+#' @param exon_mad_quantile Numeric. MAD quantile threshold for \code{exon_qc}.
+#' @param gc_extreme_filter Numeric[2] or \code{NULL}. Min/max GC (fraction,
+#'   0-1) to retain a target under \code{exon_qc}; ignored if the coverage
+#'   RData has no \code{GC} column. Default \code{c(0.15, 0.85)}.
+#' @param min_exon_mean Numeric. Minimum mean count (across kept samples) to
+#'   retain a target under \code{exon_qc}.
 #' @param ... Additional parameters passed to \code{score_cnv_confidence}.
 #'
 #' @return Invisibly returns \code{NULL}. Writes TSV and RData outputs to disk.
@@ -95,6 +111,12 @@ run_cnv_calling <- function(rdata_file,
                             save_ed_objects        = FALSE,
                             modechrom              = "A",
                             sample_table           = NULL,
+                            sample_qc              = TRUE,
+                            exon_qc                = TRUE,
+                            qc_zscore              = 3,
+                            exon_mad_quantile      = 0.90,
+                            gc_extreme_filter      = c(0.15, 0.85),
+                            min_exon_mean          = 20,
                             ...) {
   message("[INFO] ", Sys.time(), " BEGIN CNV calls")
   objs         <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
@@ -143,6 +165,47 @@ run_cnv_calling <- function(rdata_file,
     sample_names <- intersect(sample_names, male_samples)
     if (length(sample_names) == 0) stop("[ERROR] No male samples for mode Y")
     message("[INFO] Mode Y: keeping only male samples (", length(sample_names), " samples)")
+  }
+
+  # ---- Outlier sample exclusion (mirrors CANOPE's sample_qc) -------------
+  if (sample_qc) {
+    sqc  <- detect_outlier_samples(counts[, sample_names, drop = FALSE], z_threshold = qc_zscore)
+    excl <- sqc$sample[sqc$is_outlier]
+    if (length(excl) > 0) {
+      message(sprintf("[WARNING] sample_qc: excluding %d outlier sample(s) from calling (used neither as test nor reference): %s",
+                       length(excl), paste(excl, collapse = ", ")))
+      sample_names <- setdiff(sample_names, excl)
+      if (length(sample_names) == 0)
+        stop("[ERROR] sample_qc excluded every sample; relax qc_zscore or set sample_qc = FALSE.")
+    }
+  }
+
+  # ---- GC-extreme / low-mean / high-MAD exon exclusion (mirrors CANOPE's
+  # exon_qc) ---------------------------------------------------------------
+  if (exon_qc) {
+    gc_for_exon_qc <- if ("GC" %in% colnames(counts)) as.numeric(counts$GC) else NULL
+    if (is.null(gc_for_exon_qc) && !is.null(gc_extreme_filter)) {
+      message("[INFO] exon_qc: no 'GC' column in the coverage RData (re-run ",
+              "run_bam_coverage() to pick it up); skipping the GC-extreme check.")
+    }
+    eqc <- detect_problematic_exons(
+      counts[, sample_names, drop = FALSE],
+      chromosomes  = counts$chromosome,
+      mad_quantile = exon_mad_quantile,
+      min_mean     = min_exon_mean,
+      gc           = gc_for_exon_qc,
+      gc_min       = if (!is.null(gc_extreme_filter)) gc_extreme_filter[1] else 0.10,
+      gc_max       = if (!is.null(gc_extreme_filter)) gc_extreme_filter[2] else 0.90
+    )
+    good_exons <- eqc$exon[!eqc$problematic]
+    if (length(good_exons) < nrow(counts)) {
+      message(sprintf("[INFO] exon_qc: excluding %d/%d problematic target(s) before calling",
+                       nrow(counts) - length(good_exons), nrow(counts)))
+      counts   <- counts[good_exons, , drop = FALSE]
+      bed_file <- bed_file[good_exons, , drop = FALSE]
+      rownames(counts)   <- NULL
+      rownames(bed_file) <- NULL
+    }
   }
 
   clean_chroms <- sub("^chr", "", counts$chromosome)

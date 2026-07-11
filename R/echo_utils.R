@@ -125,11 +125,27 @@ sanitize_filename <- function(name) {
 #' Assign sequential exon numbers within each gene
 #'
 #' Sorts rows by chromosome, start, end and then within each gene assigns
-#' 1..n based on genomic order. Duplicate intervals (same chrom, start, end)
-#' are removed with a warning.
+#' 1..n based on genomic order. Duplicate intervals (same chrom, start, end,
+#' gene) share the \code{exon_number} of their first occurrence but are
+#' \strong{not} dropped from the output.
+#'
+#' BUGFIX: this previously did `dt <- dt[!dup_rows]` whenever duplicates were
+#' found, silently shrinking the row count -- directly contradicting this
+#' function's own contract (every caller binds `exon_number` back onto
+#' `bed_file`/`counts` purely by position: `counts$exon_number <-
+#' bed_file$exon_number` in bam_coverage.R, `exon_in_gene[fail_exon]` in
+#' metrics.R, `exon_numbers[cnv_calls$global_start]` in
+#' add_within_gene_indices()). Any duplicate row shifted every downstream
+#' target's exon/gene label by one and, in `add_within_gene_indices()`,
+#' misaligned the CNV-to-exon index lookup outright. Fixed (matching
+#' CANOPE's `assign_exon_numbers_per_gene()`) to number only the unique
+#' (chrom, start, end, gene) combinations internally, then map the result
+#' back onto *every* original row -- so `nrow(output) == nrow(bed_file)`
+#' always holds, regardless of duplicates.
 #'
 #' @param bed_file data.frame with columns chromosome/Chr, start/Start, end/End, gene/Gene
-#' @return A modified data.frame with added column exon_number
+#' @return A modified data.frame (original row order and row count preserved)
+#'   with added column exon_number
 #' @noRd
 assign_exon_numbers_per_gene <- function(bed_file) {
     chrom_col <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
@@ -139,41 +155,57 @@ assign_exon_numbers_per_gene <- function(bed_file) {
 
     stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
 
+    n_in <- nrow(bed_file)
+
     dt <- data.table::as.data.table(bed_file)
     dt[, .orig_row := .I]  # remember incoming row order so we never permute it
     data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                          c("chrom", "start", "end", "gene"))
+    dt[, .key := paste(chrom, start, end, gene, sep = "\r")]
 
-    dup_rows <- duplicated(dt, by = c("chrom", "start", "end", "gene"))
+    dup_rows <- duplicated(dt, by = ".key")
     if (any(dup_rows)) {
-        warning(sprintf("Removed %d duplicate rows (identical chromosome, start, end, gene).",
-                        sum(dup_rows)), immediate. = TRUE)
-        dt <- dt[!dup_rows]
+        warning(sprintf(
+            "Found %d duplicate row(s) (identical chromosome, start, end, gene); duplicates share the exon_number of their first occurrence (rows are NOT dropped).",
+            sum(dup_rows)), immediate. = TRUE)
     }
+
+    # Number only the unique (chrom, start, end, gene) combinations -- a
+    # duplicate row must not get its own exon_number bumped from the count,
+    # or a gene with a repeated interval would appear to have more exons
+    # than it does.
+    dt_unique <- dt[!dup_rows]
 
     # IMPORTANT: bed_file/counts elsewhere in the pipeline are ordered by
     # FASTA contig order (see bam_coverage.R), which need not match this
     # hardcoded karyotype order. Any caller downstream relies on this
-    # function returning rows in the SAME order they came in (only true
-    # duplicates removed) so that positional assignments like
-    # `counts$exon_number <- bed_file$exon_number` or
-    # `exon_numbers[cnv_calls$global_start]` stay aligned. So we compute
-    # the numbering on a sorted *copy* of the row order and map the result
-    # back onto the original row order, rather than sorting dt itself.
+    # function returning rows in the SAME order they came in so that
+    # positional assignments like `counts$exon_number <-
+    # bed_file$exon_number` or `exon_numbers[cnv_calls$global_start]` stay
+    # aligned. So we compute the numbering on a sorted *copy* of the row
+    # order and map the result back onto the original row order, rather
+    # than sorting dt itself.
     chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
                       c(as.character(1:22), "X", "Y", "M"))
-    chrom_fac <- factor(dt$chrom, levels = unique(c(chrom_levels, unique(dt$chrom))))
-    ord <- order(chrom_fac, dt$start, dt$end)
+    dt_unique[, .chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(chrom))))]
+    data.table::setorder(dt_unique, .chrom_fac, start, end)
+    dt_unique[, .chrom_fac := NULL]
 
-    dt[, exon_number := NA_integer_]
-    dt[ord, exon_number := stats::ave(seq_along(ord), gene[ord], FUN = seq_along)]
+    dt_unique[, exon_number := seq_len(.N), by = "gene"]
+
+    # Map exon_number back onto every original row (including duplicates)
+    # by key, then restore the original row order. Guarantees
+    # nrow(output) == nrow(bed_file) always.
+    dt[, exon_number := dt_unique$exon_number[match(.key, dt_unique$.key)]]
 
     data.table::setorder(dt, .orig_row)  # restore original (input) row order
-    dt[, .orig_row := NULL]
+    dt[, c(".orig_row", ".key") := NULL]
 
     data.table::setnames(dt, c("chrom", "start", "end", "gene"),
                          c(chrom_col, start_col, end_col, gene_col))
-    as.data.frame(dt)
+    out <- as.data.frame(dt)
+    stopifnot(nrow(out) == n_in)
+    out
 }
 
 #' Convert global exon indices to within-gene indices (using start-order)
@@ -450,4 +482,104 @@ check_background_calibration <- function(ratio, lo, hi, is_affected, min_n = 5) 
     flag <- n_bg >= min_n &&
         stats::pbinom(n_outside - 1L, size = n_bg, prob = 0.05, lower.tail = FALSE) < 0.05
     list(n_background = n_bg, n_outside = n_outside, pct_outside = pct_outside, flag = flag)
+}
+
+# =============================================================================
+# Pre-calling sample/exon QC exclusion -- ported from CANOPE for feature
+# parity. CANOPE's run_canope() has always excluded noisy samples/exons
+# before HMM calling via sample_qc/exon_qc; ECHO had no equivalent, so every
+# sample and exon -- however noisy -- went straight into ExomeDepth. These
+# two functions are generic (they operate on a plain numeric matrix, not on
+# any HMM-specific state), so they're reused here verbatim; only the wiring
+# in run_cnv_calling() below is ECHO-specific.
+# =============================================================================
+
+#' Detect Outlier Samples (robust z-score on MAD noise)
+#'
+#' @param counts      Numeric matrix or data frame (targets x samples).
+#' @param pseudocount Numeric.
+#' @param z_threshold Numeric. Robust z-score above which a sample is an outlier.
+#'
+#' @return Data frame: sample, noise_score, robust_z, is_outlier.
+#' @export
+detect_outlier_samples <- function(counts, pseudocount = 0.5, z_threshold = 3) {
+    counts <- as.matrix(counts)
+    log_counts   <- log2(counts + pseudocount)
+    sample_noise <- apply(log_counts, 2, stats::mad, na.rm = TRUE)
+
+    med  <- median(sample_noise, na.rm = TRUE)
+    mad0 <- stats::mad(sample_noise, na.rm = TRUE)
+
+    # Guard against mad0 == 0 (all samples identical noise) or a single sample
+    z_scores  <- if (length(sample_noise) > 1L && is.finite(mad0) && mad0 > 0)
+        (sample_noise - med) / mad0 else rep(0, length(sample_noise))
+
+    is_outlier <- abs(z_scores) > z_threshold
+
+    data.frame(
+        sample       = names(sample_noise),
+        noise_score  = sample_noise,
+        robust_z     = z_scores,
+        is_outlier   = is_outlier,
+        stringsAsFactors = FALSE
+    )
+}
+
+#' Detect Problematic Exons
+#'
+#' Flags exons with high MAD (cross-sample noise), low mean coverage,
+#' extreme GC content, or non-finite values. Ensures at least one exon per
+#' chromosome is retained to prevent empty chromosomes.
+#'
+#' @param count_matrix Numeric matrix (targets x samples).
+#' @param chromosomes  Optional factor/character vector of chromosome labels.
+#' @param mad_quantile Numeric. Top quantile of exon MAD to flag.
+#' @param min_mean     Numeric. Minimum mean coverage to retain.
+#' @param gc           Optional numeric vector of GC content (0-1 or 0-100).
+#' @param gc_min       Numeric. Minimum GC fraction.
+#' @param gc_max       Numeric. Maximum GC fraction.
+#'
+#' @return Data frame: exon (row index), mean, mad, problematic.
+#' @export
+detect_problematic_exons <- function(
+    count_matrix,
+    chromosomes  = NULL,
+    mad_quantile = 0.90,
+    min_mean     = 20,
+    gc           = NULL,
+    gc_min       = 0.10,
+    gc_max       = 0.90
+) {
+    count_matrix <- as.matrix(count_matrix)
+    exon_mean    <- rowMeans(count_matrix, na.rm = TRUE)
+    exon_mad     <- apply(count_matrix, 1, stats::mad, na.rm = TRUE)
+    mad_thresh   <- stats::quantile(exon_mad, probs = mad_quantile, na.rm = TRUE)
+
+    problematic  <- (exon_mad > mad_thresh | exon_mean < min_mean |
+                       !is.finite(exon_mean))
+
+    if (!is.null(gc)) {
+        if (length(gc) != nrow(count_matrix))
+            stop("'gc' must have one value per row of count_matrix (", nrow(count_matrix),
+                 " rows, got ", length(gc), ").")
+        gc_val       <- if (max(gc, na.rm = TRUE) > 1) gc / 100 else gc
+        problematic  <- problematic | gc_val < gc_min | gc_val > gc_max |
+            !is.finite(gc_val)
+    }
+
+    # Guarantee at least one exon per chromosome
+    if (!is.null(chromosomes)) {
+        for (chr in unique(chromosomes)) {
+            idx <- which(chromosomes == chr)
+            if (length(idx) > 0 && all(problematic[idx]))
+                problematic[idx[which.min(exon_mad[idx])]] <- FALSE
+        }
+    }
+
+    data.frame(
+        exon        = seq_len(nrow(count_matrix)),
+        mean        = exon_mean,
+        mad         = exon_mad,
+        problematic = problematic
+    )
 }

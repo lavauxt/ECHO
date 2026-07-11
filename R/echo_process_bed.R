@@ -405,6 +405,7 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     out_df <- df[, c("Chr", "Start", "End", "Gene")]
   }
   
+  dir.create(dirname(output_bed), showWarnings = FALSE, recursive = TRUE)
   utils::write.table(out_df, file = output_bed, sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE)
   message("[INFO] BED written: ", output_bed)
   invisible(output_bed)

@@ -85,7 +85,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         score_med_ratio_low        = args$score_med_ratio_low %||% 0.60,
         score_med_ratio_high       = args$score_med_ratio_high %||% 1.40,
         score_low_confidence_genes = args$score_low_confidence_genes %||%
-          c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR")
+          c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC", "CYP21A2", "GBA1", "CFTR"),
+        sample_qc                  = args$sample_qc %||% TRUE,
+        exon_qc                    = args$exon_qc %||% TRUE,
+        qc_zscore                  = args$qc_zscore %||% 3,
+        exon_mad_quantile          = args$exon_mad_quantile %||% 0.90,
+        gc_extreme_filter          = args$gc_extreme_filter %||% c(0.15, 0.85),
+        min_exon_mean              = args$min_exon_mean %||% 20
       ),
       bed_process            = args$bed_process %||% "NO",
       refseqgene             = args$refseqgene,
@@ -311,28 +317,42 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       })
 
       # ---- PCA plot (optional) --------------------------------------------
+      # Wrapped in tryCatch (unlike the required Steps 1-3 above) so a
+      # plotting failure -- e.g. too few informative targets, a missing
+      # ggrepel -- degrades gracefully instead of aborting an otherwise
+      # successful run; mirrors CANOPE's run_canope() resilience pattern,
+      # where every optional post-processing step is individually guarded.
       if (cfg$settings$pca_plot %||% TRUE) {
-        objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
-        counts       <- objs$counts
-        sample_names <- objs$sample_names
-        pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
-        group_info   <- NULL
-        if (!is.null(sample_table) && file.exists(sample_table)) {
-          sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
-          group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
-        }
-        plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
+        tryCatch({
+          objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
+          counts       <- objs$counts
+          sample_names <- objs$sample_names
+          pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
+          group_info   <- NULL
+          if (!is.null(sample_table) && file.exists(sample_table)) {
+            sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
+            group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
+          }
+          plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
+        }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING"))
       }
 
       # ---- Step 2: QC metrics ---------------------------------------------
+      # Softly-failing, like CANOPE's run_canope_qc_metrics() step: this is a
+      # diagnostic side-report, not an input to CNV calling itself, and
+      # generate_report() already degrades gracefully when paths$metrics
+      # doesn't exist (see echo_report.R).
       run_step("Running QC metrics", {
-        run_qc_metrics(
-          rdata_file      = paths$rdata,
-          output_file     = paths$metrics,
-          min_corr        = cfg$settings$min_corr,
-          min_cov         = cfg$settings$min_cov,
-          min_total_reads = cfg$settings$min_total_reads,
-          max_exon_cv     = cfg$settings$max_exon_cv
+        tryCatch(
+          run_qc_metrics(
+            rdata_file      = paths$rdata,
+            output_file     = paths$metrics,
+            min_corr        = cfg$settings$min_corr,
+            min_cov         = cfg$settings$min_cov,
+            min_total_reads = cfg$settings$min_total_reads,
+            max_exon_cv     = cfg$settings$max_exon_cv
+          ),
+          error = function(e) log_msg(paste("QC metrics step failed:", conditionMessage(e)), "WARNING")
         )
       })
 
@@ -351,7 +371,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           data                   = NULL,
           save_ed_objects        = save_ed_objects,
           modechrom              = cfg$settings$modechrom,
-          sample_table           = sample_table
+          sample_table           = sample_table,
+          sample_qc              = cfg$settings$sample_qc %||% TRUE,
+          exon_qc                = cfg$settings$exon_qc %||% TRUE,
+          qc_zscore              = cfg$settings$qc_zscore %||% 3,
+          exon_mad_quantile      = cfg$settings$exon_mad_quantile %||% 0.90,
+          gc_extreme_filter      = cfg$settings$gc_extreme_filter %||% c(0.15, 0.85),
+          min_exon_mean          = cfg$settings$min_exon_mean %||% 20
         ), cnv_args)
         do.call(run_cnv_calling, cnv_args)
       })
@@ -359,12 +385,15 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       # ---- Plot generation (optional) -------------------------------------
       if (plots) {
         run_step("Generating plots", {
-          generate_plots(
-            rdata_file = paths$summary,
-            output_dir = paths$plots,
-            modechrom  = cfg$settings$modechrom,
-            prefix     = cfg$output$prefix,
-            log_file   = log_file
+          tryCatch(
+            generate_plots(
+              rdata_file = paths$summary,
+              output_dir = paths$plots,
+              modechrom  = cfg$settings$modechrom,
+              prefix     = cfg$output$prefix,
+              log_file   = log_file
+            ),
+            error = function(e) log_msg(paste("Plot generation failed:", conditionMessage(e)), "WARNING")
           )
         })
       } else {
@@ -374,17 +403,20 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       # ---- HTML report (optional) -----------------------------------------
       if (report) {
         run_step("Generating HTML report", {
-          generate_report(
-            summary_rdata   = paths$summary,
-            qc_metrics_file = paths$metrics,
-            output_dir      = cfg$output$dir,
-            settings        = cfg$settings,
-            config          = cfg,
-            sample_table    = sample_table,
-            ref_bams        = ref_bams %||% cfg$input$rbams,
-            log_file        = log_file,
-            pdf_output      = cfg$settings$pdf_output %||% FALSE,
-            prefix          = cfg$output$prefix
+          tryCatch(
+            generate_report(
+              summary_rdata   = paths$summary,
+              qc_metrics_file = paths$metrics,
+              output_dir      = cfg$output$dir,
+              settings        = cfg$settings,
+              config          = cfg,
+              sample_table    = sample_table,
+              ref_bams        = ref_bams %||% cfg$input$rbams,
+              log_file        = log_file,
+              pdf_output      = cfg$settings$pdf_output %||% FALSE,
+              prefix          = cfg$output$prefix
+            ),
+            error = function(e) log_msg(paste("Report generation failed:", conditionMessage(e)), "WARNING")
           )
         })
       } else {
@@ -394,6 +426,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       # ---- VCF export (optional) ------------------------------------------
       if (!is.null(vcf_output) || vcf_per_sample) {
         run_step("Exporting CNVs to VCF", {
+          tryCatch({
           if (file.exists(paths$summary)) {
             cnv_calls_local <- local({
               env <- new.env()
@@ -423,6 +456,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           } else {
             log_msg("Summary RData not found – cannot export VCF.", "WARNING")
           }
+          }, error = function(e) log_msg(paste("VCF export failed:", conditionMessage(e)), "WARNING"))
         })
       } else {
         log_msg("VCF export skipped.")

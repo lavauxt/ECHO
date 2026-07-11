@@ -157,6 +157,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
                         sep = "\t")
   }
 
+  dir.create(dirname(output_vcf), showWarnings = FALSE, recursive = TRUE)
   con <- file(output_vcf, "w")
   on.exit(close(con), add = TRUE)
   writeLines(header,  con)

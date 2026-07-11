@@ -442,7 +442,12 @@ run_bam_coverage <- function(
     colnames(counts)[colnames(counts) == old_name] <- name_mapping[old_name]
   }
 
+  # BUGFIX: "GC" was previously computed by ExomeDepth::getBamCounts() (it's
+  # always part of its output) but silently dropped by the keep_cols subset
+  # below, so nothing downstream (exon_qc's GC-extreme filter, any future
+  # report/plot) could ever see it. Retained here.
   keep_cols <- c("chromosome", "start", "end", "exon", sample_names)
+  if ("GC" %in% colnames(counts)) keep_cols <- c(keep_cols, "GC")
   if ("exon_number" %in% colnames(counts)) keep_cols <- c(keep_cols, "exon_number")
   counts <- counts[, keep_cols, drop = FALSE]
 
@@ -463,6 +468,7 @@ run_bam_coverage <- function(
 
   bed_file           <- assign_exon_numbers_per_gene(bed_file)
   counts$exon_number <- bed_file$exon_number
+  if ("GC" %in% colnames(counts)) bed_file$GC <- counts$GC
 
   save(counts, bams, bed_file, sample_names, fasta, name_mapping, file = data_out)
   if (verbose) message("[INFO] ", Sys.time(), " END bam coverage calculation")
