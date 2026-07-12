@@ -18,10 +18,12 @@ input:
   # genome_version is not needed here
   # bsgenome_cache_dir: null   # optional
   rbams: null                             # Optional external reference matrix list path (or null)
-plots: true                                # Generate per‑CNV PDF plots
+
+
+plots: true                               # Generate per‑CNV PDF plots
 
 output:
-  dir: "./result_TEST_padding"         # Target directory path for generated assets
+  dir: "./result_TEST"                    # Target directory path for generated assets
   prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
@@ -37,7 +39,9 @@ settings:
   formula: "cbind(test, reference) ~ 1"   # ExomeDepth evaluation regression expression frame
 
   pca_plot: true                          # Generate PCA coverage plot (PDF)
-  pad_terminal_exons: 200                   # Bases to extend the outward edge of each gene's first/last exon (0 = off); reduces 0/low counts at gene boundaries without overlapping neighbouring targets
+  pad_terminal_exons: 300                 # Bases to extend the outward edge of each gene's first/last exon (0 = off); reduces 0/low counts at gene boundaries without overlapping neighbouring targets
+  plot_gene_gap: 1                        # Extra x-axis units of blank space between a gene's last exon and the next gene's first exon, in every PDF/report panel (0 = off)
+  off_target_gene_pattern: "^HorsROI"     # Regex matching off-target/filler BED entries (own unrelated numbering, interspersed between a gene's real exons); these get a fixed grey tile, no text label, and a blanked axis tick instead of being treated like a real gene. "" or null = off
 
   # QC scoring thresholds for tracking pipeline certainty
   score_high_corr: 0.985
@@ -67,14 +71,14 @@ settings:
 # Target Name Processing & Cleaning Sub-Section
 # -----------------------------------------------------------------------------
 bed_preprocess:
-  bed_process: "STANDARD"                    # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
+  bed_process: "STANDARD"                 # Choose pipeline mode: 'STANDARD', 'REGEN', or 'NO'
   exon_sep: "[_()]"                       # Regex pattern string defining column 4 name token boundaries
   gene_name_keep: "3"                     # 1-indexed token part number identifying target Gene string
   gene_name_collapse: "_"                 # Spacer symbol choice for multi-token range merges
   auto_exon_number: false                 # Prevent re-sorting coordinate engines from dropping name numbers
   region_numbering_mode: "file_order"     # Choose naming logic mode: 'file_order' or 'bed_text'
   customexon: true                        # Generate custom.exon value outputs in standard formats
-  bed_zero_based: false                    # Set true if input BED file indices track from index 0
-  skip_invalid_intervals: true           # Gracefully filter invalid coordinate ranges
-
-
+  bed_zero_based: false                   # Set true if input BED file indices track from index 0
+  skip_invalid_intervals: true            # Gracefully filter invalid coordinate ranges
+  off_target_pattern: "^HorsROI"          # Regex (case-sensitive) identifying off-target/filler intervals (e.g. backbone probes) that are NOT real gene exons; null/"" disables this
+  off_target_handling: "na"               # What to do with rows matching off_target_pattern: "na" (keep interval, exclude from exon numbering), "remove" (drop the rows), "merge" (attach to nearest neighbouring real gene)

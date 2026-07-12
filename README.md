@@ -54,6 +54,25 @@ below.
   right at the boundary. Padding is applied "if possible" — it never
   overlaps a neighbouring target or crosses a contig boundary, clamping
   short instead. Internal exons are untouched.
+* **Gene-Boundary Spacing in Plots:** `plot_gene_gap` (default `1`) inserts
+  blank x-axis space between a gene's last exon and the next gene's first
+  exon in every PDF and HTML-report panel, so a window that spans more
+  than one gene doesn't read as one continuous, unbroken feature.
+* **Off-Target/Filler Region Handling:** BED panels sometimes include
+  normalization "backbone" probes that are never a real gene exon (often
+  named things like `HorsROI`). Rows whose parsed gene name matches
+  `off_target_pattern` (default `"^HorsROI"`; set to `null`/`""` to
+  disable) are handled per `off_target_handling`: `"na"` (default — kept,
+  but excluded from exon numbering/gene grouping instead of being numbered
+  as if the filler label were a gene), `"remove"` (dropped entirely), or
+  `"merge"` (attached to the nearest neighbouring real gene, numbered as
+  one of that gene's own exons).
+* **Off-Target/Filler Region Handling in Plots:** `off_target_gene_pattern`
+  (regex, default `"^HorsROI"`) flags BED rows like off-target padding
+  regions that carry their own unrelated numbering. Flagged rows render as
+  a fixed neutral grey tile with no text label (PDF gene track) and a
+  blanked axis tick (every panel, PDF and report), instead of being
+  interleaved with a gene's real exon numbers with no visual distinction.
 * **Confidence Scoring:** HIGH/MEDIUM/LOW tiers from correlation, reference
   count, and read-ratio, with a built-in list of pseudogene/homology-prone
   genes always scored LOW.
@@ -121,6 +140,14 @@ settings:
   gc_extreme_filter: [0.15, 0.85]
   min_exon_mean: 20
   pad_terminal_exons: 0                  # e.g. 10 to pad each gene's first/last exon by 10bp
+  plot_gene_gap: 1                       # blank x-axis space between adjacent genes in plots
+```
+
+```yaml
+bed_preprocess:
+  off_target_pattern: "^HorsROI"         # regex matching filler/backbone intervals, not real exons
+  off_target_handling: "na"              # "na" | "remove" | "merge"
+  off_target_gene_pattern: "^HorsROI"    # grey out/blank-label off-target filler regions in plots
 
 genome_version: "hg19"
 bed_process: "STANDARD"                  # or "REGEN" / "NO"
@@ -167,6 +194,21 @@ with gene/exon information first.
 - **BED preprocessing** (`echo_process_bed.R`) — `STANDARD`/`REGEN`/`NO`
   modes, gene/exon annotation from panel files or RefSeq, auto-set to
   `REGEN` whenever a BED file is supplied and no mode is configured.
+  Exon-number extraction from the BED name (e.g. `..._ex12_...`) requires
+  a genuine `ex`/`exon` token boundary (not a substring of a larger word)
+  and takes the *last* such token in the name rather than the first, so
+  compound names like `5utr1-ex1` or `utr2-ex10-extra` resolve to the
+  right exon. Off-target/filler intervals (e.g. `HorsROI` backbone probes)
+  are caught by name via `off_target_pattern` before any exon numbering
+  happens — see `handle_off_target_regions()` below.
+- **Off-target/filler region handling** (`echo_utils.R::handle_off_target_regions()`) —
+  rows whose parsed gene matches `off_target_pattern` (default
+  `"^HorsROI"`) are, per `off_target_handling`: kept with `gene = NA` and
+  excluded from numbering (`"na"`, default), dropped (`"remove"`), or
+  attached to the nearest neighbouring real gene on the same chromosome
+  and numbered as one of its exons (`"merge"`). Without this, such rows
+  get numbered as if the filler label were a gene in its own right, and
+  show up interleaved with the real gene's exons in plots.
 - **Sample/exon QC exclusion** (`echo_utils.R`) — `sample_qc` drops outlier
   samples (robust z-score on cross-target noise) and `exon_qc` drops
   problematic exons (high cross-sample MAD, low mean coverage, or GC
@@ -178,6 +220,13 @@ with gene/exon information first.
   drag the whole exon's count down. Applied "if possible": clamped short of
   the requested amount rather than overlapping a neighbouring target or
   crossing a contig boundary. Internal exon boundaries are left alone.
+- **Gene-boundary spacing in plots** (`echo_utils.R::compute_gene_gap_positions()`) —
+  shared by both the PDF panels (`plots.R`) and the HTML report
+  (`ECHO_global_report.Rmd`), so a CNV window spanning more than one gene
+  shows real blank space, in every panel, exactly between a gene's last
+  exon and the next gene's first exon — lines and ribbons break there
+  rather than visually bridging the gap. Controlled by `plot_gene_gap`
+  (default `1`; `0` disables it).
 - **QC metrics table** (`echo_metrics.R`) — per-sample and per-exon flags
   (low correlation, low depth, high CV, missing sex chromosomes), written to
   TSV and shown in the report.

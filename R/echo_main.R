@@ -109,6 +109,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       genome_version         = args$genome_version %||% "hg19",
       bed_zero_based         = args$bed_zero_based %||% TRUE,
       skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
+      off_target_pattern     = args$off_target_pattern %||% "^HorsROI",
+      off_target_handling    = args$off_target_handling %||% "na",
       sample_name_collapse   = args$sample_name_collapse %||% sample_name_collapse,
       panel_files            = args$panel_files %||% panel_files
     )
@@ -200,6 +202,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg(paste("BED processing mode:", cfg$bed_process))
       log_msg(paste("Genome version:", cfg$genome_version))
       log_msg(paste("Terminal-exon padding:", paste0(cfg$settings$pad_terminal_exons %||% 0, " bp")))
+      if (!is.null(cfg$bed_process) && cfg$bed_process != "NO" && !is.null(cfg$off_target_pattern %||% "^HorsROI")) {
+        log_msg(paste0("Off-target region handling: pattern = '", cfg$off_target_pattern %||% "^HorsROI",
+                       "', handling = '", cfg$off_target_handling %||% "na", "'"))
+      }
 
       # Define output paths
       paths <- list(
@@ -274,7 +280,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           panel_files           = cfg$panel_files %||% NULL,
           genome_version        = cfg$genome_version,
           txdb                  = NULL,
-          gene_field_index      = gene_field_index
+          gene_field_index      = gene_field_index,
+          off_target_pattern    = cfg$off_target_pattern %||% "^HorsROI",
+          off_target_handling   = cfg$off_target_handling %||% "na"
         )
         cfg$input$bed <- processed_bed
         log_msg(paste("Processed BED saved to:", processed_bed))
@@ -394,7 +402,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
               output_dir = paths$plots,
               modechrom  = cfg$settings$modechrom,
               prefix     = cfg$output$prefix,
-              log_file   = log_file
+              log_file   = log_file,
+              gene_gap   = cfg$settings$plot_gene_gap %||% 1
             ),
             error = function(e) log_msg(paste("Plot generation failed:", conditionMessage(e)), "WARNING")
           )

@@ -40,7 +40,7 @@ library(ExomeDepth)
 library(kableExtra)
 
 # Helper function to get CNV-specific data for plotting
-get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
+get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap = 1) {
 
   sample <- call_row$Sample
   idx_start <- if ("global_start" %in% colnames(call_row)) as.numeric(call_row$global_start) else as.numeric(call_row$Start.p)
@@ -60,6 +60,15 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
   if (length(exon_range) == 0) {
     return(NULL)
   }
+
+  # Gap-inserted x-axis positions, so a gene's last exon and the next
+  # gene's first exon get real blank space between them instead of
+  # sitting flush like ordinary neighbouring exons -- see
+  # compute_gene_gap_positions() (utils.R) for the full rationale. Shared
+  # with plots.R::prepare_plot_data() so PDF and HTML report panels agree.
+  gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
+  px         <- gap_pos$px
+  gene_group <- gap_pos$gene_group
 
   test_counts <- counts[exon_range, sample]
 
@@ -135,6 +144,8 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs) {
   df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
+    Px = px,
+    GeneGroup = gene_group,
     
     Observed = test_counts,
     Expected = expected_safe,
@@ -518,7 +529,8 @@ if (length(samples) == 0) {
           params$counts,
           params$bed_file,
           params$models,
-          params$refs
+          params$refs,
+          gene_gap = params$settings$plot_gene_gap %||% 1
         )
 
         if (is.null(plot_data) || nrow(plot_data) == 0) {
@@ -547,11 +559,12 @@ if (length(samples) == 0) {
         } else NULL
 
         # Ratio plot with CI ribbon around reference expectation
-        p_ratio <- ggplot(plot_data, aes(x = Exon)) +
+        p_ratio <- ggplot(plot_data, aes(x = Px)) +
           geom_ribbon(
             aes(
               ymin = CI_low,
-              ymax = CI_high
+              ymax = CI_high,
+              group = GeneGroup
             ),
             fill = "grey80",
             alpha = 0.35
@@ -607,7 +620,7 @@ if (length(samples) == 0) {
             )
           ) +
           scale_x_continuous(
-            breaks = plot_data$Exon,
+            breaks = plot_data$Px,
             labels = plot_data$ExonLabel
           )  
 
@@ -620,6 +633,7 @@ if (length(samples) == 0) {
           scaling <- test_median_s / median(params$counts[exon_range_s, r])
           data.frame(
             Exon      = exon_range_s,
+            Px        = plot_data$Px,
             Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
@@ -630,6 +644,7 @@ if (length(samples) == 0) {
 
         obs_df <- data.frame(
           Exon      = plot_data$Exon,
+          Px        = plot_data$Px,
           Count     = log(pmax(plot_data$Observed, 1)),
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
@@ -643,7 +658,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_cov_data, Group == "Reference samples"),
             aes(
-              x = Exon,
+              x = Px,
               y = Count,
               color = Group,
               text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
@@ -656,7 +671,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_cov_data, Group == "Test sample"),
             aes(
-              x = Exon,
+              x = Px,
               y = Count,
               color = Group,
               text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
@@ -668,7 +683,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_cov_data, Group == "Affected exon(s)"),
             aes(
-              x = Exon,
+              x = Px,
               y = Count,
               color = Group,
               text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
@@ -700,7 +715,7 @@ if (length(samples) == 0) {
             )
           ) +
           scale_x_continuous(
-            breaks = plot_data$Exon,
+            breaks = plot_data$Px,
             labels = plot_data$ExonLabel
           ) 
 
@@ -711,6 +726,8 @@ if (length(samples) == 0) {
         ref_z_rows <- lapply(colnames(ref_z_mat), function(r) {
           data.frame(
             Exon      = plot_data$Exon,
+            Px        = plot_data$Px,
+            GeneGroup = plot_data$GeneGroup,
             Z         = ref_z_mat[, r],
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
@@ -720,6 +737,8 @@ if (length(samples) == 0) {
         })
         z_obs_df <- data.frame(
           Exon      = plot_data$Exon,
+          Px        = plot_data$Px,
+          GeneGroup = plot_data$GeneGroup,
           Z         = plot_data$Z,
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
@@ -732,31 +751,31 @@ if (length(samples) == 0) {
           geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
           geom_line(
             data = subset(p_z_data, Group == "Reference samples"),
-            aes(x = Exon, y = Z, group = RefName),
+            aes(x = Px, y = Z, group = interaction(RefName, GeneGroup, drop = TRUE)),
             colour = "grey60", linewidth = 0.4
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Reference samples"),
-            aes(x = Exon, y = Z, group = RefName,
+            aes(x = Px, y = Z, group = RefName,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
           ) +
           geom_line(
             data = subset(p_z_data, Group != "Reference samples"),
-            aes(x = Exon, y = Z),
+            aes(x = Px, y = Z, group = GeneGroup),
             colour = "red", linewidth = 0.9
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Test sample"),
-            aes(x = Exon, y = Z, color = Group,
+            aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             size = 3
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Affected exon(s)"),
-            aes(x = Exon, y = Z, color = Group,
+            aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
@@ -773,7 +792,7 @@ if (length(samples) == 0) {
             axis.text.x = element_text(angle = 45, size = 8, hjust = 1)
           ) +
           scale_x_continuous(
-            breaks = plot_data$Exon,
+            breaks = plot_data$Px,
             labels = plot_data$ExonLabel
           )
 

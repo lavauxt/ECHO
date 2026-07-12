@@ -122,6 +122,144 @@ sanitize_filename <- function(name) {
     gsub("[^[:alnum:]]", "_", name)
 }
 
+#' Reclassify off-target / filler BED intervals before exon numbering
+#'
+#' Some target panels include intervals that were never a real gene exon at
+#' all: normalization/backbone probes placed off-target for coverage
+#' calibration, commonly named things like \code{"HorsROI"} ("hors ROI" is
+#' French for "outside the region of interest"), \code{"OffTarget"},
+#' \code{"Backbone"}, and so on. Left alone, the BED-name parser extracts
+#' whatever the first token of that name happens to be (e.g.
+#' \code{"HorsROI"}) as if it were a gene symbol, and
+#' \code{\link{assign_exon_numbers_per_gene}} then numbers it 1..n exactly
+#' like a real gene with its own exons -- so a plot window that happens to
+#' straddle one of these intervals shows it interleaved with the real
+#' gene's exons under its own (fake) "gene" tile. This function catches
+#' those rows, by name, \strong{before} any numbering happens, and lets the
+#' caller choose what should happen to them.
+#'
+#' @param df data.frame with chromosome/Chr, start/Start, end/End,
+#'   gene/Gene columns (1-based coordinates; genomic order not required --
+#'   \code{handling = "merge"} sorts internally).
+#' @param pattern Character. A regular expression (matched against the
+#'   \code{gene} column, case-sensitively, consistent with the exon-name
+#'   parser) identifying off-target/filler rows -- e.g. \code{"^HorsROI"},
+#'   or \code{"^(HorsROI|OffTarget|Backbone)$"} for a panel using several
+#'   such labels. \code{NULL} or \code{""} disables this feature entirely
+#'   (returns \code{df} unchanged). Default \code{"^HorsROI"}.
+#' @param handling One of:
+#'   \itemize{
+#'     \item \code{"na"} (default) -- keep the interval (it still gets
+#'       coverage extracted and still contributes background signal) but
+#'       set \code{gene} to \code{NA} on those rows, so
+#'       \code{assign_exon_numbers_per_gene()} and everything downstream
+#'       (plots, VCF gene column, confidence scoring) leaves them
+#'       un-numbered and out of any gene-based grouping, instead of
+#'       numbering the filler label as if it were a gene.
+#'     \item \code{"remove"} -- drop those rows entirely.
+#'     \item \code{"merge"} -- reassign \code{gene} to the nearest
+#'       neighbouring \emph{real} gene on the same chromosome (ties go to
+#'       the preceding gene), so the interval is treated as one of that
+#'       gene's own exons and gets numbered like any other exon. A row
+#'       with no real gene anywhere on its chromosome is left unchanged.
+#'   }
+#' @param verbose Logical. Print a one-line summary. Default \code{TRUE}.
+#' @return The same data.frame: column set and row order preserved for
+#'   \code{"na"}/\code{"merge"}; row count reduced for \code{"remove"}.
+#' @export
+handle_off_target_regions <- function(df, pattern = "^HorsROI",
+                                      handling = c("na", "remove", "merge"),
+                                      verbose = TRUE) {
+    handling <- match.arg(handling)
+    if (is.null(pattern) || !nzchar(pattern)) return(df)
+    if (is.null(df) || nrow(df) == 0) return(df)
+
+    chrom_col <- if ("chromosome" %in% names(df)) "chromosome" else "Chr"
+    start_col <- if ("start"      %in% names(df)) "start"      else "Start"
+    end_col   <- if ("end"        %in% names(df)) "end"        else "End"
+    gene_col  <- if ("gene"       %in% names(df)) "gene"       else "Gene"
+    if (!gene_col %in% names(df)) return(df)
+
+    gene_vals <- as.character(df[[gene_col]])
+    is_off <- !is.na(gene_vals) & grepl(pattern, gene_vals, perl = TRUE)
+    n_off <- sum(is_off)
+    if (n_off == 0) return(df)
+
+    if (handling == "remove") {
+        out <- df[!is_off, , drop = FALSE]
+        if (verbose) {
+            message(sprintf("[INFO] handle_off_target_regions: removed %d off-target interval(s) matching /%s/.",
+                            n_off, pattern))
+        }
+        return(out)
+    }
+
+    if (handling == "na") {
+        df[[gene_col]][is_off] <- NA_character_
+        if (verbose) {
+            message(sprintf(
+                "[INFO] handle_off_target_regions: set gene = NA for %d off-target interval(s) matching /%s/ (kept, excluded from exon numbering).",
+                n_off, pattern))
+        }
+        return(df)
+    }
+
+    # handling == "merge": walk the off-target rows in genomic order and
+    # attach each one to whichever real gene -- the previous one or the
+    # next one, on the same chromosome -- sits closer. A simple forward/
+    # backward carry-forward pass (O(n), two linear scans) rather than a
+    # per-row search, since a panel BED can run into the tens of
+    # thousands of rows.
+    ord     <- order(df[[chrom_col]], df[[start_col]], df[[end_col]])
+    n       <- length(ord)
+    chrom_s <- as.character(df[[chrom_col]])[ord]
+    start_s <- df[[start_col]][ord]
+    end_s   <- df[[end_col]][ord]
+    gene_s  <- gene_vals[ord]
+    off_s   <- is_off[ord]
+
+    prev_gene <- character(n); prev_end   <- numeric(n)
+    g <- NA_character_; e <- NA_real_; last_chrom <- NA_character_
+    for (i in seq_len(n)) {
+        if (!identical(chrom_s[i], last_chrom)) { g <- NA_character_; e <- NA_real_; last_chrom <- chrom_s[i] }
+        prev_gene[i] <- g; prev_end[i] <- e
+        if (!off_s[i]) { g <- gene_s[i]; e <- end_s[i] }
+    }
+
+    next_gene <- character(n); next_start <- numeric(n)
+    g <- NA_character_; s <- NA_real_; last_chrom <- NA_character_
+    for (i in rev(seq_len(n))) {
+        if (!identical(chrom_s[i], last_chrom)) { g <- NA_character_; s <- NA_real_; last_chrom <- chrom_s[i] }
+        next_gene[i] <- g; next_start[i] <- s
+        if (!off_s[i]) { g <- gene_s[i]; s <- start_s[i] }
+    }
+
+    new_gene_s <- gene_s
+    n_merged   <- 0L
+    for (i in which(off_s)) {
+        has_prev <- !is.na(prev_gene[i])
+        has_next <- !is.na(next_gene[i])
+        if (has_prev && has_next) {
+            d_prev <- start_s[i] - prev_end[i]
+            d_next <- next_start[i] - end_s[i]
+            new_gene_s[i] <- if (d_prev <= d_next) prev_gene[i] else next_gene[i]
+            n_merged <- n_merged + 1L
+        } else if (has_prev) {
+            new_gene_s[i] <- prev_gene[i]; n_merged <- n_merged + 1L
+        } else if (has_next) {
+            new_gene_s[i] <- next_gene[i]; n_merged <- n_merged + 1L
+        } # else: no real gene anywhere on this chromosome -- leave as-is
+    }
+
+    df[[gene_col]][ord] <- new_gene_s
+    if (verbose) {
+        message(sprintf(
+            "[INFO] handle_off_target_regions: merged %d/%d off-target interval(s) matching /%s/ into their nearest neighbouring gene (%d had no real gene on their chromosome to attach to).",
+            n_merged, n_off, pattern, n_off - n_merged))
+    }
+    df
+}
+
 #' Assign sequential exon numbers within each gene
 #'
 #' Sorts rows by chromosome, start, end and then within each gene assigns
@@ -379,6 +517,64 @@ pad_gene_terminal_exons <- function(bed_file, padding = 0, chr_lengths = NULL, v
             padding, n_padded_start, n_padded_end, n_clamped))
     }
     out
+}
+
+#' Compute gap-inserted x-axis positions for CNV window plots
+#'
+#' All of ECHO's per-call plots (the four PDF panels in \code{plots.R} and
+#' the three interactive panels in \code{ECHO_global_report.Rmd}) lay a
+#' window of exons out along a single x-axis. Plotted at plain 1..n integer
+#' positions, a gene boundary inside that window looks identical to an
+#' ordinary intron between two exons of the *same* gene -- there's nothing
+#' to tell a reader "these two points belong to different genes" other than
+#' the tile-track colour (PDF only; the HTML report has no tile track at
+#' all). This function computes an alternative x-position (\code{px}) for
+#' each exon in the window that inserts \code{gap} extra, unlabelled axis
+#' units wherever the \code{gene} column changes between consecutive exons
+#' -- i.e. between a gene's last exon and the next gene's first exon --
+#' while keeping ordinary within-gene spacing at a plain 1 unit. The result
+#' is blank visual space at every gene boundary, in every panel, with no
+#' change to which exons are shown or how they're labelled.
+#'
+#' It also returns \code{gene_group}, a per-position integer that increments
+#' at every such boundary. Passing this as the \code{group} aesthetic on a
+#' \code{geom_line()}/\code{geom_ribbon()} keeps that visual gap genuinely
+#' blank -- otherwise ggplot draws a single connected line/ribbon straight
+#' across it, right through the empty space \code{px} just created.
+#'
+#' @param bed_file data.frame with a gene/Gene column. \code{exon_range}
+#'   values are row indices into this data.frame.
+#' @param exon_range Integer vector of \code{bed_file} row indices, in the
+#'   order they'll be plotted along the x-axis (ascending genomic order,
+#'   as produced by \code{prepare_plot_data()}/\code{get_cnv_plot_data()}).
+#' @param gap Numeric >= 0. Extra x-axis units inserted at each gene
+#'   boundary. \code{0} falls back to plain 1..n spacing (no visual gap,
+#'   but \code{gene_group} is still computed correctly). Default \code{1}.
+#' @return data.frame with one row per element of \code{exon_range}:
+#'   \code{idx} (the original \code{bed_file} row index, i.e. the input
+#'   \code{exon_range} value), \code{px} (the x-axis position to plot at),
+#'   \code{gene_break} (TRUE at the first exon of a new gene, i.e.
+#'   immediately after a gap) and \code{gene_group} (integer, constant
+#'   within a gene's run of exons, incrementing at each \code{gene_break}).
+#' @export
+compute_gene_gap_positions <- function(bed_file, exon_range, gap = 1) {
+    if (length(exon_range) == 0) {
+        return(data.frame(idx = integer(0), px = numeric(0),
+                          gene_break = logical(0), gene_group = integer(0)))
+    }
+    gap <- if (is.null(gap) || is.na(gap) || gap < 0) 1 else gap
+
+    gene_col <- if ("gene" %in% names(bed_file)) "gene" else "Gene"
+    genes    <- as.character(bed_file[[gene_col]][exon_range])
+    genes[is.na(genes)] <- ""
+
+    gene_break    <- c(FALSE, genes[-1] != genes[-length(genes)])
+    step          <- ifelse(gene_break, 1 + gap, 1)
+    step[1]       <- 0
+    px            <- cumsum(step) + 1
+
+    data.frame(idx = exon_range, px = px, gene_break = gene_break,
+              gene_group = cumsum(gene_break) + 1L, stringsAsFactors = FALSE)
 }
 
 #' Convert global exon indices to within-gene indices (using start-order)
