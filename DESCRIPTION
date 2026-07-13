@@ -8,17 +8,7 @@ Description: A modular R package for processing BAM files, extracting coverage, 
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
-Collate:
-    'utils.R'
-    'process_bed.R'
-    'bam_coverage.R'
-    'cnv_calls.R'
-    'metrics.R'
-    'main.R'
-    'plots.R'
-    'report.R'
-    'vcf_export.R'
-Imports:
+sImports:
     ExomeDepth,
     utils,
     tools,
