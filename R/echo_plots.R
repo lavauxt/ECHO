@@ -28,84 +28,44 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
     }
     if (length(exon_range) == 0) return(NULL)
 
-    # Gap-inserted x-axis positions, so every panel shows a visual break
-    # between a gene's last exon and the next gene's first exon rather
-    # than plotting them as if they were plain neighbouring exons. See
-    # compute_gene_gap_positions() for the full rationale.
+    # Gap-inserted x-axis positions
     gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
     px         <- gap_pos$px
     gene_group <- gap_pos$gene_group
 
-    test_median <- median(counts[exon_range, sample])
-    ref_median  <- median(rowSums(counts[exon_range, ref_samples, drop = FALSE]))
-    test_log    <- log(pmax(counts[exon_range, sample], 1))
-
-    cov_list <- lapply(ref_samples, function(r) {
-        scaling <- test_median / median(counts[exon_range, r])
-        r_log   <- log(pmax(counts[exon_range, r] * scaling, 1))
-        data.frame(exon_idx = exon_range, px = px, gene_group = gene_group,
-                   coverage = r_log, group = r,
-                   color_group = "Reference samples", stringsAsFactors = FALSE)
-    })
-    cov_list[[length(cov_list) + 1]] <- data.frame(
-        exon_idx = exon_range, px = px, gene_group = gene_group, coverage = test_log,
-        group = "Test sample", color_group = "Test sample", stringsAsFactors = FALSE)
-    cov_data <- do.call(rbind, cov_list)
-
-    pt_data <- data.frame(
-        exon_idx    = exon_range,
-        px          = px,
-        gene_group  = gene_group,
-        coverage    = test_log,
-        color_group = ifelse(exon_range %in% (idx_start:idx_end), "Affected exon(s)", "Test sample"))
-    pt_data <- pt_data[pt_data$color_group == "Affected exon(s)", ]
-
-    ref_counts  <- rowSums(counts[exon_range, ref_samples, drop = FALSE])
     test_counts <- counts[exon_range, sample]
-    totals      <- test_counts + ref_counts
+    ref_counts  <- rowSums(counts[exon_range, ref_samples, drop = FALSE])
+    test_median <- median(test_counts)
+    ref_median  <- median(ref_counts)
+
     expected    <- ref_counts * (test_median / ref_median)
     expected_safe <- pmax(expected, 1)
-    p_expected  <- expected_safe / totals
+    totals      <- test_counts + ref_counts
+    p_expected  <- expected_safe / pmax(totals, 1)
     p_expected  <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
-    ratio <- test_counts / expected_safe
-    rho   <- models[[sample]][1]
+    ratio_raw   <- test_counts / expected_safe          # raw ratio for calibration
+    rho         <- models[[sample]][1]
 
+    # Beta-binomial quantiles (counts)
     mins <- vapply(seq_along(exon_range), function(i) {
-        qbetabinom(0.025, totals[i], max(rho, 0.005), p_expected[i]) / expected_safe[i]
+        qbetabinom(0.025, totals[i], max(rho, 0.005), p_expected[i])
     }, numeric(1))
     maxs <- vapply(seq_along(exon_range), function(i) {
-        qbetabinom(0.975, totals[i], max(rho, 0.005), p_expected[i]) / expected_safe[i]
+        qbetabinom(0.975, totals[i], max(rho, 0.005), p_expected[i])
     }, numeric(1))
 
-    ci_data <- data.frame(
-        exon        = exon_range,
-        px          = px,
-        gene_group  = gene_group,
-        ratio       = ratio,
-        lo          = mins,
-        hi          = maxs,
-        is_affected = factor(exon_range %in% (idx_start:idx_end),
-                             levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
+    # Log2 ratios and CI bounds
+    ratio_log2 <- log2(ratio_raw)
+    lo_log2    <- log2(mins / expected_safe)
+    hi_log2    <- log2(maxs / expected_safe)
 
-    # New: z-score panel, matching CANOPE's design.
-    #
-    # ECHO's calling model is fundamentally different from CANOPE's (a
-    # beta-binomial test/expected ratio, not a per-target NB(mean, var)
-    # HMM), so this isn't a copy-paste of CANOPE's z-score formula — it's
-    # the same *principle* (reuse the model's own already-validated
-    # variance; don't invent a new, noisy small-sample one) applied to
-    # ECHO's actual model. `rho` here is ExomeDepth's fitted overdispersion
-    # parameter (genome-wide, not just this local window), the same
-    # quantity the CI ribbon above is built from. The variance of a
-    # Beta-Binomial(n, p, rho) is n*p*(1-p)*(1+(n-1)*rho) — standard result,
-    # and consistent with the qbetabinom() parameterisation used above
-    # (a = p(1-rho)/rho, b = (1-p)(1-rho)/rho  =>  a+b+1 = 1/rho).
+    # Z-score (standardised against model variance)
     var_betabinom <- totals * p_expected * (1 - p_expected) *
         (1 + (totals - 1) * max(rho, 0.005))
     var_betabinom <- pmax(var_betabinom, 1)
     sd_z <- sqrt(var_betabinom)
-
     test_z <- (test_counts - expected_safe) / sd_z
+
     ref_z_list <- lapply(ref_samples, function(r) {
         scaling_r    <- test_median / median(counts[exon_range, r])
         ref_r_scaled <- counts[exon_range, r] * scaling_r
@@ -113,14 +73,50 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
     })
     names(ref_z_list) <- ref_samples
 
+    # Background calibration (raw ratio)
+    bg_calib <- check_background_calibration(ratio_raw, mins/expected_safe, maxs/expected_safe,
+                                             exon_range %in% (idx_start:idx_end))
+
+    # Coverage data (log2 with pseudocount)
+    pseudocount <- 0.5
+    test_log2 <- log2(test_counts + pseudocount)
+
+    cov_list <- lapply(ref_samples, function(r) {
+        scaling <- test_median / median(counts[exon_range, r])
+        r_log   <- log2(counts[exon_range, r] * scaling + pseudocount)
+        data.frame(exon_idx = exon_range, px = px, gene_group = gene_group,
+                   coverage = r_log, group = r,
+                   color_group = "Reference samples", stringsAsFactors = FALSE)
+    })
+    cov_list[[length(cov_list) + 1]] <- data.frame(
+        exon_idx = exon_range, px = px, gene_group = gene_group, coverage = test_log2,
+        group = "Test sample", color_group = "Test sample", stringsAsFactors = FALSE)
+    cov_data <- do.call(rbind, cov_list)
+
+    pt_data <- data.frame(
+        exon_idx    = exon_range,
+        px          = px,
+        gene_group  = gene_group,
+        coverage    = test_log2,
+        color_group = ifelse(exon_range %in% (idx_start:idx_end), "Affected exon(s)", "Test sample"))
+    pt_data <- pt_data[pt_data$color_group == "Affected exon(s)", ]
+
+    ci_data <- data.frame(
+        exon        = exon_range,
+        px          = px,
+        gene_group  = gene_group,
+        ratio       = ratio_log2,
+        lo          = lo_log2,
+        hi          = hi_log2,
+        is_affected = factor(exon_range %in% (idx_start:idx_end),
+                             levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
+
     z_data <- data.frame(
         exon        = exon_range,
         px          = px,
         gene_group  = gene_group,
         z           = test_z,
         is_affected = ci_data$is_affected)
-
-    bg_calib <- check_background_calibration(ratio, mins, maxs, exon_range %in% (idx_start:idx_end))
 
     list(cov_data = cov_data, pt_data = pt_data, ci_data = ci_data,
          z_data = z_data, ref_z_list = ref_z_list, bg_calibration = bg_calib,
@@ -179,7 +175,7 @@ create_coverage_plot <- function(cov_data, pt_data, single_chr, prev, exon_range
         ggplot2::scale_colour_manual(
             values = cols,
             guide  = ggplot2::guide_legend(override.aes = list(size = 4), nrow = 1, title = NULL)) +
-        ggplot2::labs(y = "Log (Coverage)", x = NULL) +
+        ggplot2::labs(y = "log2(Coverage + 0.5)", x = NULL) +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "top", legend.title = ggplot2::element_blank(),
                        legend.key = ggplot2::element_rect(fill = "white", colour = NA))
@@ -205,10 +201,6 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
         } else pal <- rainbow(n_genes)
     }
     names(pal) <- gene_names
-    # mid/width are computed on the gap-inserted px scale (not raw
-    # exon_range indices) so each gene's tile lines up with that gene's
-    # points/lines in the other panels, and adjacent tiles get real blank
-    # space between them at a gene boundary instead of sitting flush.
     gene_tiles <- data.frame(
         gene  = gene_names,
         mid   = as.numeric(sapply(gene_names, function(g) mean(px[temp$gene == g]))),
@@ -233,30 +225,19 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
 
 create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index, px, subtitle = NULL) {
     p <- ggplot2::ggplot(ci_data, ggplot2::aes(x = px)) +
-        # group = gene_group breaks the ribbon into one polygon per gene,
-        # so it doesn't visually bridge the blank space at a gene boundary.
         ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi, group = gene_group),
                              fill = "grey80", colour = NA) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
         ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected), size = 3.5) +
         ggplot2::scale_color_manual(
             values = c("Observed" = "blue", "Affected" = "red"),
             guide  = ggplot2::guide_legend(override.aes = list(shape = 19, size = 3))) +
-        ggplot2::labs(subtitle = subtitle) +
+        ggplot2::labs(y = "log2(Observed / Expected)", x = NULL, subtitle = subtitle) +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "none", legend.title = ggplot2::element_blank())
     apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index, px)
 }
 
-#' Z-Score Panel vs Reference Samples
-#'
-#' Shows the test sample's z-score (blue/red, by
-#' affected status) against each individual reference sample's own z-score
-#' (small gray points) at every exon in the window, all measured in units of
-#' the beta-binomial model's own implied SD (see \code{prepare_plot_data()}
-#' for the variance derivation) — so a well-behaved region should show the
-#' reference points clustered near zero with the test sample clearly
-#' separated only where a real CNV is present.
-#' @noRd
 create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range, exon_index) {
     px         <- z_data$px
     gene_group <- z_data$gene_group
@@ -271,15 +252,13 @@ create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range,
 
     p <- ggplot2::ggplot() +
         ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "black") +
-        # Points only -- no line joins reference or test z-scores across exons.
         ggplot2::geom_point(data = ref_df,
                             ggplot2::aes(x = px, y = z), colour = "grey60", size = 1.5, alpha = 0.7) +
         ggplot2::geom_point(data = z_data, ggplot2::aes(x = px, y = z, color = is_affected),
                             size = 3) +
         ggplot2::scale_color_manual(values = c("Observed" = "blue", "Affected" = "red")) +
         ggplot2::coord_cartesian(ylim = c(-z_lim, z_lim)) +
-        ggplot2::labs(y = "Z-score vs references", x = NULL,
-                      subtitle = "Test sample (blue, non‑affected; red, affected) — gray points are individual reference samples") +
+        ggplot2::labs(y = "Z-score vs references", x = NULL) +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "none")
     apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index, px)
@@ -337,7 +316,6 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
                      colnames(bed_file), ignore.case = TRUE, value = TRUE)
     if (length(exon_col) == 0) {
-        # fall back to the legacy "exon" column only if exon_number is absent
         exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
     }
     if (length(exon_col) > 0) {

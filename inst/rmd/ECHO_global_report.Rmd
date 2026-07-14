@@ -83,27 +83,22 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
   p_expected <- expected_safe / pmax(totals, 1)
   p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
 
-  ratio <- test_counts / expected_safe
-
+  # ---- Compute raw ratio for calibration, then log2 ratio and CI ----
+  ratio_raw <- test_counts / expected_safe
   rho <- max(models[[sample]][1], 0.005)
 
-  ci_low <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(
-      0.025,
-      totals[i],
-      rho,
-      p_expected[i]
-    ) / expected_safe[i]
+  ci_low_counts <- vapply(seq_along(exon_range), function(i) {
+    ECHO:::qbetabinom(0.025, totals[i], rho, p_expected[i])
+  }, numeric(1))
+  ci_high_counts <- vapply(seq_along(exon_range), function(i) {
+    ECHO:::qbetabinom(0.975, totals[i], rho, p_expected[i])
   }, numeric(1))
 
-  ci_high <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(
-      0.975,
-      totals[i],
-      rho,
-      p_expected[i]
-    ) / expected_safe[i]
-  }, numeric(1))
+  # Log2 ratios and CI bounds
+  ratio_log2 <- log2(ratio_raw)
+  lo_log2    <- log2(ci_low_counts / expected_safe)
+  hi_log2    <- log2(ci_high_counts / expected_safe)
+  # ---- END ----
 
   # Z-score data
   var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
@@ -129,26 +124,24 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
         FUN = seq_along)[exon_range]
   }
 
-  # ---- ADD Gene column ----
   gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else "Gene"
   gene_names <- bed_file[[gene_col]][exon_range]
   gene_names[is.na(gene_names)] <- ""
 
   affected <- exon_range %in% (idx_start:idx_end)
-  bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
+  bg_calib <- check_background_calibration(ratio_raw, ci_low_counts/expected_safe, ci_high_counts/expected_safe, affected)
 
-  df <- data.frame(
+   df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
-    Gene = gene_names,        # <-- ADDED
+    Gene = gene_names,
     Px = px,
     GeneGroup = gene_group,
-    
     Observed = test_counts,
     Expected = expected_safe,
-    Ratio = ratio,
-    CI_low = ci_low,
-    CI_high = ci_high,
+    Ratio = ratio_log2,     
+    CI_low = lo_log2,       
+    CI_high = hi_log2,      
     Z = test_z,
     Affected = affected
   )
@@ -184,15 +177,6 @@ if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(para
   missing_chrs <- params$qc_metrics[params$qc_metrics$Type == "Missing Chromosome", ]
   if (nrow(missing_chrs) > 0) {
     for (i in seq_len(nrow(missing_chrs))) {
-      # BUG FIX: this used to be cat(sprintf('\n      <div ...')) with each
-      # HTML line indented to match the surrounding R code. results='asis'
-      # output goes straight into the Markdown source Pandoc then parses,
-      # and Pandoc's Markdown reader treats a line indented 4+ spaces as an
-      # INDENTED CODE BLOCK, not raw HTML — so this rendered as literal,
-      # HTML-escaped text in a <pre><code> block instead of a styled alert
-      # box. Fixed by emitting each line via its own cat() call starting at
-      # column 0 (matching the working style already used successfully
-      # elsewhere in this file, e.g. the confidence_recap chunk below).
       cat('<div class="alert alert-warning" role="alert">\n')
       cat('<h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>\n')
       cat(sprintf('<p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>\n',

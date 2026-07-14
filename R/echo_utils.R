@@ -267,20 +267,6 @@ handle_off_target_regions <- function(df, pattern = "^HorsROI",
 #' gene) share the \code{exon_number} of their first occurrence but are
 #' \strong{not} dropped from the output.
 #'
-#' BUGFIX: this previously did `dt <- dt[!dup_rows]` whenever duplicates were
-#' found, silently shrinking the row count -- directly contradicting this
-#' function's own contract (every caller binds `exon_number` back onto
-#' `bed_file`/`counts` purely by position: `counts$exon_number <-
-#' bed_file$exon_number` in bam_coverage.R, `exon_in_gene[fail_exon]` in
-#' metrics.R, `exon_numbers[cnv_calls$global_start]` in
-#' add_within_gene_indices()). Any duplicate row shifted every downstream
-#' target's exon/gene label by one and, in `add_within_gene_indices()`,
-#' misaligned the CNV-to-exon index lookup outright. Fixed (matching
-#' CANOPE's `assign_exon_numbers_per_gene()`) to number only the unique
-#' (chrom, start, end, gene) combinations internally, then map the result
-#' back onto *every* original row -- so `nrow(output) == nrow(bed_file)`
-#' always holds, regardless of duplicates.
-#'
 #' @param bed_file data.frame with columns chromosome/Chr, start/Start, end/End, gene/Gene
 #' @return A modified data.frame (original row order and row count preserved)
 #'   with added column exon_number

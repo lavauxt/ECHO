@@ -89,21 +89,6 @@ process_bed_file <- function(input_bed, output_bed, bed_process = "STANDARD",
     g_clean <- sub("^([^,]+),.*$", "\\1", g_clean)
     
     # Exon-number extraction.
-    #
-    # BUGFIX: the previous pattern, `(_ex|ex)([0-9]+)` with `regexpr()`
-    # (first match only, no word-boundary requirement on the bare "ex"
-    # branch), had two failure modes on real-world naming variations: (1)
-    # it always took the *first* "exN"-looking token in the string, so any
-    # earlier stray match would win over the true exon token later in the
-    # name; (2) the bare "ex" alternative could in principle match inside
-    # a larger word rather than a genuine "ex"/"_ex"/"-ex" token boundary.
-    # Fixed by: requiring "ex" not be immediately preceded by a letter/
-    # digit (a real token boundary, via a lookbehind), accepting "ex" or
-    # "exon" optionally followed by "_"/"-", and taking the *last* such
-    # token in the (already comma-truncated) name rather than the first --
-    # the true exon designator is normally the one immediately before the
-    # trailing chr/position suffix. Digits are read straight from the
-    # capture group rather than stripped out of the whole match.
     exon_pattern <- "(?<![A-Za-z0-9])ex(?:on)?[_-]?([0-9]+)"
     exon_all <- gregexpr(exon_pattern, g_clean, perl = TRUE)
     exon_numbers <- vapply(seq_along(g_clean), function(i) {
