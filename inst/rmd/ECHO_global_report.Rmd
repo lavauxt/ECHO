@@ -61,11 +61,7 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
     return(NULL)
   }
 
-  # Gap-inserted x-axis positions, so a gene's last exon and the next
-  # gene's first exon get real blank space between them instead of
-  # sitting flush like ordinary neighbouring exons -- see
-  # compute_gene_gap_positions() (utils.R) for the full rationale. Shared
-  # with plots.R::prepare_plot_data() so PDF and HTML report panels agree.
+  # Gap-inserted x-axis positions
   gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
   px         <- gap_pos$px
   gene_group <- gap_pos$gene_group
@@ -109,12 +105,7 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
     ) / expected_safe[i]
   }, numeric(1))
 
-  # New: z-score data, same principle as CANOPE's z-score panel (reuse the
-  # model's own already-validated variance rather than inventing a new,
-  # noisy small-sample one) applied to ECHO's actual beta-binomial model.
-  # See plots.R::prepare_plot_data() for the full derivation — this is the
-  # same formula, kept in raw ratio units (Observed/Expected) rather than
-  # counts, since that's what's plotted here.
+  # Z-score data
   var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
   var_betabinom <- pmax(var_betabinom, 1)
   sd_z <- sqrt(var_betabinom)
@@ -138,12 +129,18 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
         FUN = seq_along)[exon_range]
   }
 
+  # ---- ADD Gene column ----
+  gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else "Gene"
+  gene_names <- bed_file[[gene_col]][exon_range]
+  gene_names[is.na(gene_names)] <- ""
+
   affected <- exon_range %in% (idx_start:idx_end)
   bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
 
   df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
+    Gene = gene_names,        # <-- ADDED
     Px = px,
     GeneGroup = gene_group,
     
@@ -582,7 +579,8 @@ if (length(samples) == 0) {
               y = Ratio,
               color = "Reference samples",
               text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                "<br>Observed/Expected: ", round(Ratio, 3)
+                            "<br>Gene: ", Gene,   # <-- ADDED
+                            "<br>Observed/Expected: ", round(Ratio, 3)
               )
             ),
             size = 3
@@ -593,8 +591,9 @@ if (length(samples) == 0) {
               y = Ratio,
               color = "Affected exon(s)",
               text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                "<br>Observed/Expected: ", round(Ratio, 3),
-                "<br>Confidence: ", call$Confidence
+                            "<br>Gene: ", Gene,   # <-- ADDED
+                            "<br>Observed/Expected: ", round(Ratio, 3),
+                            "<br>Confidence: ", call$Confidence
               )
             ),
             size = 3.5
@@ -639,6 +638,7 @@ if (length(samples) == 0) {
             Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
+            Gene      = plot_data$Gene,   # <-- ADDED
             SampleID  = r,
             stringsAsFactors = FALSE
           )
@@ -650,6 +650,7 @@ if (length(samples) == 0) {
           Count     = log(pmax(plot_data$Observed, 1)),
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
+          Gene      = plot_data$Gene,   # <-- ADDED
           SampleID  = call$Sample,
           stringsAsFactors = FALSE
         )
@@ -755,6 +756,7 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Reference samples"),
             aes(x = Px, y = Z, group = RefName,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
           ) +
@@ -762,6 +764,7 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Test sample"),
             aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2))),
             size = 3
           ) +
@@ -769,9 +772,16 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Affected exon(s)"),
             aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
             size = 3.5
+          ) +
+          labs(y = "Z-score vs references", x = NULL) +
+          theme_bw() +
+          scale_color_manual(
+            values = c("Test sample" = "blue", "Affected exon(s)" = "red"),   # <-- CHANGED
+            name = NULL
           ) +
           labs(y = "Z-score vs references", x = NULL) +
           theme_bw() +

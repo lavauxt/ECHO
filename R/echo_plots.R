@@ -249,7 +249,7 @@ create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index, px
 
 #' Z-Score Panel vs Reference Samples
 #'
-#' Ported from CANOPE. Shows the test sample's z-score (blue/red, by
+#' Shows the test sample's z-score (blue/red, by
 #' affected status) against each individual reference sample's own z-score
 #' (small gray points) at every exon in the window, all measured in units of
 #' the beta-binomial model's own implied SD (see \code{prepare_plot_data()}
@@ -276,10 +276,10 @@ create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range,
                             ggplot2::aes(x = px, y = z), colour = "grey60", size = 1.5, alpha = 0.7) +
         ggplot2::geom_point(data = z_data, ggplot2::aes(x = px, y = z, color = is_affected),
                             size = 3) +
-        ggplot2::scale_color_manual(values = c("Observed" = "red", "Affected" = "darkred")) +
+        ggplot2::scale_color_manual(values = c("Observed" = "blue", "Affected" = "red")) +
         ggplot2::coord_cartesian(ylim = c(-z_lim, z_lim)) +
         ggplot2::labs(y = "Z-score vs references", x = NULL,
-                      subtitle = "Test sample (red) with CNV targets highlighted") +
+                      subtitle = "Test sample (blue, non‑affected; red, affected) — gray points are individual reference samples") +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "none")
     apply_xaxis_formatting(p, single_chr, prev, exon_range, exon_index, px)
