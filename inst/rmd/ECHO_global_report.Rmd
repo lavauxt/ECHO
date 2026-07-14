@@ -61,7 +61,11 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
     return(NULL)
   }
 
-  # Gap-inserted x-axis positions
+  # Gap-inserted x-axis positions, so a gene's last exon and the next
+  # gene's first exon get real blank space between them instead of
+  # sitting flush like ordinary neighbouring exons -- see
+  # compute_gene_gap_positions() (utils.R) for the full rationale. Shared
+  # with plots.R::prepare_plot_data() so PDF and HTML report panels agree.
   gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
   px         <- gap_pos$px
   gene_group <- gap_pos$gene_group
@@ -83,24 +87,34 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
   p_expected <- expected_safe / pmax(totals, 1)
   p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
 
-  # ---- Compute raw ratio for calibration, then log2 ratio and CI ----
-  ratio_raw <- test_counts / expected_safe
+  ratio <- test_counts / expected_safe
+
   rho <- max(models[[sample]][1], 0.005)
 
-  ci_low_counts <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(0.025, totals[i], rho, p_expected[i])
-  }, numeric(1))
-  ci_high_counts <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(0.975, totals[i], rho, p_expected[i])
+  ci_low <- vapply(seq_along(exon_range), function(i) {
+    ECHO:::qbetabinom(
+      0.025,
+      totals[i],
+      rho,
+      p_expected[i]
+    ) / expected_safe[i]
   }, numeric(1))
 
-  # Log2 ratios and CI bounds
-  ratio_log2 <- log2(ratio_raw)
-  lo_log2    <- log2(ci_low_counts / expected_safe)
-  hi_log2    <- log2(ci_high_counts / expected_safe)
-  # ---- END ----
+  ci_high <- vapply(seq_along(exon_range), function(i) {
+    ECHO:::qbetabinom(
+      0.975,
+      totals[i],
+      rho,
+      p_expected[i]
+    ) / expected_safe[i]
+  }, numeric(1))
 
-  # Z-score data
+  # New: z-score data, same principle as CANOPE's z-score panel (reuse the
+  # model's own already-validated variance rather than inventing a new,
+  # noisy small-sample one) applied to ECHO's actual beta-binomial model.
+  # See plots.R::prepare_plot_data() for the full derivation — this is the
+  # same formula, kept in raw ratio units (Observed/Expected) rather than
+  # counts, since that's what's plotted here.
   var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
   var_betabinom <- pmax(var_betabinom, 1)
   sd_z <- sqrt(var_betabinom)
@@ -124,24 +138,20 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
         FUN = seq_along)[exon_range]
   }
 
-  gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else "Gene"
-  gene_names <- bed_file[[gene_col]][exon_range]
-  gene_names[is.na(gene_names)] <- ""
-
   affected <- exon_range %in% (idx_start:idx_end)
-  bg_calib <- check_background_calibration(ratio_raw, ci_low_counts/expected_safe, ci_high_counts/expected_safe, affected)
+  bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
 
-   df <- data.frame(
+  df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
-    Gene = gene_names,
     Px = px,
     GeneGroup = gene_group,
+    
     Observed = test_counts,
     Expected = expected_safe,
-    Ratio = ratio_log2,     
-    CI_low = lo_log2,       
-    CI_high = hi_log2,      
+    Ratio = ratio,
+    CI_low = ci_low,
+    CI_high = ci_high,
     Z = test_z,
     Affected = affected
   )
@@ -177,6 +187,15 @@ if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(para
   missing_chrs <- params$qc_metrics[params$qc_metrics$Type == "Missing Chromosome", ]
   if (nrow(missing_chrs) > 0) {
     for (i in seq_len(nrow(missing_chrs))) {
+      # BUG FIX: this used to be cat(sprintf('\n      <div ...')) with each
+      # HTML line indented to match the surrounding R code. results='asis'
+      # output goes straight into the Markdown source Pandoc then parses,
+      # and Pandoc's Markdown reader treats a line indented 4+ spaces as an
+      # INDENTED CODE BLOCK, not raw HTML — so this rendered as literal,
+      # HTML-escaped text in a <pre><code> block instead of a styled alert
+      # box. Fixed by emitting each line via its own cat() call starting at
+      # column 0 (matching the working style already used successfully
+      # elsewhere in this file, e.g. the confidence_recap chunk below).
       cat('<div class="alert alert-warning" role="alert">\n')
       cat('<h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>\n')
       cat(sprintf('<p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>\n',
@@ -563,8 +582,7 @@ if (length(samples) == 0) {
               y = Ratio,
               color = "Reference samples",
               text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                            "<br>Gene: ", Gene,   # <-- ADDED
-                            "<br>Observed/Expected: ", round(Ratio, 3)
+                "<br>Observed/Expected: ", round(Ratio, 3)
               )
             ),
             size = 3
@@ -575,9 +593,8 @@ if (length(samples) == 0) {
               y = Ratio,
               color = "Affected exon(s)",
               text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                            "<br>Gene: ", Gene,   # <-- ADDED
-                            "<br>Observed/Expected: ", round(Ratio, 3),
-                            "<br>Confidence: ", call$Confidence
+                "<br>Observed/Expected: ", round(Ratio, 3),
+                "<br>Confidence: ", call$Confidence
               )
             ),
             size = 3.5
@@ -622,7 +639,6 @@ if (length(samples) == 0) {
             Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
-            Gene      = plot_data$Gene,   # <-- ADDED
             SampleID  = r,
             stringsAsFactors = FALSE
           )
@@ -634,7 +650,6 @@ if (length(samples) == 0) {
           Count     = log(pmax(plot_data$Observed, 1)),
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
-          Gene      = plot_data$Gene,   # <-- ADDED
           SampleID  = call$Sample,
           stringsAsFactors = FALSE
         )
@@ -740,7 +755,6 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Reference samples"),
             aes(x = Px, y = Z, group = RefName,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
-                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
           ) +
@@ -748,7 +762,6 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Test sample"),
             aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
-                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2))),
             size = 3
           ) +
@@ -756,7 +769,6 @@ if (length(samples) == 0) {
             data = subset(p_z_data, Group == "Affected exon(s)"),
             aes(x = Px, y = Z, color = Group,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
-                              "<br>Gene: ", Gene,   # <-- ADDED
                               "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
             size = 3.5
@@ -764,13 +776,7 @@ if (length(samples) == 0) {
           labs(y = "Z-score vs references", x = NULL) +
           theme_bw() +
           scale_color_manual(
-            values = c("Test sample" = "blue", "Affected exon(s)" = "red"),   # <-- CHANGED
-            name = NULL
-          ) +
-          labs(y = "Z-score vs references", x = NULL) +
-          theme_bw() +
-          scale_color_manual(
-            values = c("Test sample" = "red", "Affected exon(s)" = "darkred"),
+            values = c("Test sample" = "blue", "Affected exon(s)" = "red"),
             name = NULL
           ) +
           theme(
