@@ -45,7 +45,8 @@ change to which exons are shown or how they're labelled.
 \details{
 It also returns \code{gene_group}, a per-position integer that increments
 at every such boundary. Passing this as the \code{group} aesthetic on a
-\code{geom_line()}/\code{geom_ribbon()} keeps that visual gap genuinely
-blank -- otherwise ggplot draws a single connected line/ribbon straight
-across it, right through the empty space \code{px} just created.
+\code{geom_ribbon()} keeps that visual gap genuinely blank -- otherwise
+ggplot draws a single connected ribbon straight across it, right through
+the empty space \code{px} just created. (Points are never joined by a
+line in these plots, so this only matters for the ribbon.)
 }
