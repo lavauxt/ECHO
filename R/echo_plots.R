@@ -251,10 +251,10 @@ create_ci_plot <- function(ci_data, single_chr, prev, exon_range, exon_index, px
 #'
 #' Ported from CANOPE. Shows the test sample's z-score (blue/red, by
 #' affected status) against each individual reference sample's own z-score
-#' (thin gray lines) at every exon in the window, all measured in units of
+#' (small gray points) at every exon in the window, all measured in units of
 #' the beta-binomial model's own implied SD (see \code{prepare_plot_data()}
 #' for the variance derivation) — so a well-behaved region should show the
-#' reference lines clustered near zero with the test sample clearly
+#' reference points clustered near zero with the test sample clearly
 #' separated only where a real CNV is present.
 #' @noRd
 create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range, exon_index) {
@@ -271,13 +271,9 @@ create_zscore_plot <- function(z_data, ref_z_list, single_chr, prev, exon_range,
 
     p <- ggplot2::ggplot() +
         ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "black") +
-        # group = interaction(sample, gene_group): each reference sample's
-        # line still breaks at a gene boundary, same as the test line below.
-        ggplot2::geom_line(data = ref_df,
-                           ggplot2::aes(x = px, y = z, group = interaction(sample, gene_group, drop = TRUE)),
-                           colour = "grey60", linewidth = 0.4) +
-        ggplot2::geom_line(data = z_data, ggplot2::aes(x = px, y = z, group = gene_group),
-                           colour = "red", linewidth = 0.9) +
+        # Points only -- no line joins reference or test z-scores across exons.
+        ggplot2::geom_point(data = ref_df,
+                            ggplot2::aes(x = px, y = z), colour = "grey60", size = 1.5, alpha = 0.7) +
         ggplot2::geom_point(data = z_data, ggplot2::aes(x = px, y = z, color = is_affected),
                             size = 3) +
         ggplot2::scale_color_manual(values = c("Observed" = "red", "Affected" = "darkred")) +

@@ -538,9 +538,10 @@ pad_gene_terminal_exons <- function(bed_file, padding = 0, chr_lengths = NULL, v
 #'
 #' It also returns \code{gene_group}, a per-position integer that increments
 #' at every such boundary. Passing this as the \code{group} aesthetic on a
-#' \code{geom_line()}/\code{geom_ribbon()} keeps that visual gap genuinely
-#' blank -- otherwise ggplot draws a single connected line/ribbon straight
-#' across it, right through the empty space \code{px} just created.
+#' \code{geom_ribbon()} keeps that visual gap genuinely blank -- otherwise
+#' ggplot draws a single connected ribbon straight across it, right through
+#' the empty space \code{px} just created. (Points are never joined by a
+#' line in these plots, so this only matters for the ribbon.)
 #'
 #' @param bed_file data.frame with a gene/Gene column. \code{exon_range}
 #'   values are row indices into this data.frame.

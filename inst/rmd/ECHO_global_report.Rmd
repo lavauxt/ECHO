@@ -207,7 +207,7 @@ if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(para
 }
 
 # 2. Render main table excluding technical missing chromosome warnings
-if (!is.null(params$qc_metrics) && nrow(params$qc_metrics) > 0) {
+if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(params$qc_metrics) > 0) {
   display_qc <- params$qc_metrics[params$qc_metrics$Type != "Missing Chromosome", ]
   
   if (nrow(display_qc) > 0) {
@@ -234,7 +234,7 @@ if (!is.null(params$qc_metrics) && nrow(params$qc_metrics) > 0) {
     cat("<p>No sample-specific QC warnings or issues recorded.</p>\n")
   }
 } else {
-  cat("No QC issues detected.\n")
+  cat("<p><em>No QC metrics file supplied — QC section skipped.</em></p>\n")
 }
 ```
 
@@ -321,31 +321,33 @@ if (length(samples) == 0) {
     cat("\n\n## ", s, "\n")
 
     # QC metrics for this sample
-    qc_s <- params$qc_metrics[
-      (params$qc_metrics$Sample == s | params$qc_metrics$Sample == "All") & 
-       params$qc_metrics$Type != "Missing Chromosome",
-    ]
+    if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics)) {
+      qc_s <- params$qc_metrics[
+        (params$qc_metrics$Sample == s | params$qc_metrics$Sample == "All") & 
+         params$qc_metrics$Type != "Missing Chromosome",
+      ]
 
-    if (nrow(qc_s) > 0) {
+      if (nrow(qc_s) > 0) {
 
-      cat("\n### QC flags\n")
+        cat("\n### QC flags\n")
 
-      w_qc <- DT::datatable(
-        qc_s,
-        options = list(
-          dom = 't',
-          pageLength = 5
+        w_qc <- DT::datatable(
+          qc_s,
+          options = list(
+            dom = 't',
+            pageLength = 5
+          )
         )
-      )
 
-      rendered_qc <- htmltools::renderTags(w_qc)
+        rendered_qc <- htmltools::renderTags(w_qc)
 
-      knitr::knit_meta_add(
-        rendered_qc$dependencies
-      )
+        knitr::knit_meta_add(
+          rendered_qc$dependencies
+        )
 
-      cat(rendered_qc$html)
-      cat("\n")
+        cat(rendered_qc$html)
+        cat("\n")
+      }
     }
 
     # Key metrics for this sample
@@ -749,22 +751,12 @@ if (length(samples) == 0) {
 
         p_zscore <- ggplot() +
           geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
-          geom_line(
-            data = subset(p_z_data, Group == "Reference samples"),
-            aes(x = Px, y = Z, group = interaction(RefName, GeneGroup, drop = TRUE)),
-            colour = "grey60", linewidth = 0.4
-          ) +
           geom_point(
             data = subset(p_z_data, Group == "Reference samples"),
             aes(x = Px, y = Z, group = RefName,
                 text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
-          ) +
-          geom_line(
-            data = subset(p_z_data, Group != "Reference samples"),
-            aes(x = Px, y = Z, group = GeneGroup),
-            colour = "red", linewidth = 0.9
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Test sample"),
