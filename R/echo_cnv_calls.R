@@ -15,6 +15,8 @@
 #' @param score_med_ratio_low Ratio between this and low_ratio_low -> MEDIUM (if criteria met).
 #' @param score_med_ratio_high Ratio between low_ratio_high and this -> MEDIUM.
 #' @param score_low_confidence_genes Character vector of gene symbols always flagged LOW.
+#' @param penalize_terminal_only Logical. If TRUE, any call flagged as `terminal_only`
+#'   is forced to "LOW" confidence.
 #'
 #' @return The input \code{cnv_calls} data frame with confidence column added.
 #' @export
@@ -30,39 +32,50 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
                                  score_med_ratio_low   = 0.60,
                                  score_med_ratio_high  = 1.40,
                                  score_low_confidence_genes = c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2",
-                                                                 "STRC", "CYP21A2", "GBA1", "CFTR")) {
+                                                                 "STRC", "CYP21A2", "GBA1", "CFTR"),
+                                 penalize_terminal_only = FALSE) {
   if (nrow(cnv_calls) == 0) return(cnv_calls)
-
+  
+  # Ensure terminal_only column exists
+  if (!"terminal_only" %in% colnames(cnv_calls)) {
+    cnv_calls <- flag_terminal_only_calls(cnv_calls, bed_file)
+  }
+  
   cnv_calls$Gene <- vapply(seq_len(nrow(cnv_calls)), function(i) {
     start_idx <- max(1L, cnv_calls$start.p[i])
     end_idx   <- min(nrow(bed_file), cnv_calls$end.p[i])
     paste(unique(bed_file$gene[start_idx:end_idx]), collapse = " ")
   }, character(1))
-
+  
   cnv_calls$Start.b <- NULL
   cnv_calls$End.b   <- NULL
   cnv_calls$Confidence <- "LOW"
-
+  
   high_corr_ok  <- !is.na(current_cor) && current_cor >= score_high_corr
   high_refs_ok  <- num_refs >= score_high_refs
   ratio_high_ok <- cnv_calls$reads.ratio <= score_high_ratio_low |
                    cnv_calls$reads.ratio >= score_high_ratio_high
-
+  
   med_corr_ok    <- !is.na(current_cor) && current_cor >= score_med_corr
   med_refs_ok    <- num_refs >= score_med_refs
   ratio_not_low  <- cnv_calls$reads.ratio <= score_low_ratio_low |
                     cnv_calls$reads.ratio >= score_low_ratio_high
-
+  
   gene_flagged <- vapply(cnv_calls$Gene, function(g_str) {
     any(trimws(unlist(strsplit(g_str, "[ ,]"))) %in% score_low_confidence_genes)
   }, logical(1))
-
+  
   high_cond <- !gene_flagged & high_corr_ok & high_refs_ok & ratio_high_ok
   med_cond  <- !gene_flagged & !high_cond & med_corr_ok & med_refs_ok & ratio_not_low
-
+  
   cnv_calls$Confidence[high_cond] <- "HIGH"
   cnv_calls$Confidence[med_cond]  <- "MEDIUM"
-
+  
+  # ---- Penalize terminal-only calls (if requested) ----
+  if (penalize_terminal_only && any(cnv_calls$terminal_only, na.rm = TRUE)) {
+    cnv_calls$Confidence[cnv_calls$terminal_only] <- "LOW"
+  }
+  
   return(cnv_calls)
 }
 
@@ -81,20 +94,16 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
 #' @param modechrom Character. Mode for sex chromosome handling.
 #' @param sample_table Optional character string. Path to sample table.
 #' @param sample_qc Logical. Exclude outlier samples (robust z-score on
-#'   cross-target noise) before calling -- mirrors CANOPE's \code{sample_qc}.
-#'   Default \code{TRUE}.
-#' @param exon_qc Logical. Exclude problematic exons (high cross-sample MAD,
-#'   low mean coverage, or -- using the \code{GC} column that
-#'   \code{ExomeDepth::getBamCounts()} always computes as a side effect of
-#'   coverage extraction -- extreme GC content) before calling. Mirrors
-#'   CANOPE's \code{exon_qc}. Default \code{TRUE}.
+#'   cross-target noise) before calling.
+#' @param exon_qc Logical. Exclude problematic exons before calling.
 #' @param qc_zscore Numeric. Robust z-score threshold for \code{sample_qc}.
 #' @param exon_mad_quantile Numeric. MAD quantile threshold for \code{exon_qc}.
-#' @param gc_extreme_filter Numeric[2] or \code{NULL}. Min/max GC (fraction,
-#'   0-1) to retain a target under \code{exon_qc}; ignored if the coverage
-#'   RData has no \code{GC} column. Default \code{c(0.15, 0.85)}.
-#' @param min_exon_mean Numeric. Minimum mean count (across kept samples) to
-#'   retain a target under \code{exon_qc}.
+#' @param gc_extreme_filter Numeric[2] or \code{NULL}. Min/max GC fraction to retain.
+#' @param min_exon_mean Numeric. Minimum mean count to retain a target.
+#' @param remove_terminal_only Logical. If TRUE, remove calls that affect only
+#'   first/last exons of a gene (after scoring). Default FALSE.
+#' @param penalize_terminal_only Logical. If TRUE, force such calls to LOW
+#'   confidence (instead of removing them). Default FALSE.
 #' @param ... Additional parameters passed to \code{score_cnv_confidence}.
 #'
 #' @return Invisibly returns \code{NULL}. Writes TSV and RData outputs to disk.
@@ -117,6 +126,8 @@ run_cnv_calling <- function(rdata_file,
                             exon_mad_quantile      = 0.90,
                             gc_extreme_filter      = c(0.15, 0.85),
                             min_exon_mean          = 20,
+                            remove_terminal_only   = FALSE,
+                            penalize_terminal_only = FALSE,
                             ...) {
   message("[INFO] ", Sys.time(), " BEGIN CNV calls")
   objs         <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
@@ -180,8 +191,7 @@ run_cnv_calling <- function(rdata_file,
     }
   }
 
-  # ---- GC-extreme / low-mean / high-MAD exon exclusion (mirrors CANOPE's
-  # exon_qc) ---------------------------------------------------------------
+  # ---- GC-extreme / low-mean / high-MAD exon exclusion (mirrors CANOPE's exon_qc) ----
   if (exon_qc) {
     gc_for_exon_qc <- if ("GC" %in% colnames(counts)) as.numeric(counts$GC) else NULL
     if (is.null(gc_for_exon_qc) && !is.null(gc_extreme_filter)) {
@@ -274,26 +284,58 @@ run_cnv_calling <- function(rdata_file,
     if (!is.null(raw_calls) && nrow(raw_calls) > 0) {
       current_cor     <- as.numeric(stats::cor(counts[, sample], ref_counts))
       num_refs        <- length(best_refs)
-      processed_calls <- score_cnv_confidence(raw_calls, bed_file, current_cor, num_refs, ...)
-      processed_calls <- add_within_gene_indices(processed_calls, bed_file)
-      processed_calls <- cbind(Sample = sample, processed_calls)
-      processed_calls$Correlation      <- current_cor
-      processed_calls$N.comp           <- num_refs
-      processed_calls$Comparator.name  <- paste(best_refs, collapse = ", ")
+      
+      # ---- Add global_start/end (needed for terminal-only flagging) ----
+      raw_calls$global_start <- as.integer(raw_calls$start.p)
+      raw_calls$global_end   <- as.integer(raw_calls$end.p)
+      
+      # ---- Flag terminal-only calls (needed for both removal and penalization) ----
+      raw_calls <- flag_terminal_only_calls(raw_calls, bed_file)
+      
+      # ---- Score confidence (may penalize terminal-only) ----
+      processed_calls <- tryCatch({
+        score_cnv_confidence(
+          raw_calls, bed_file, current_cor, num_refs,
+          penalize_terminal_only = penalize_terminal_only,
+          ...
+        )
+      }, error = function(e) {
+        message("[WARNING] Confidence scoring failed for ", sample, ": ", e$message)
+        raw_calls  # fallback: return raw calls without confidence
+      })
+      
+      # ---- Remove terminal-only calls if requested ----
+      if (remove_terminal_only && any(processed_calls$terminal_only, na.rm = TRUE)) {
+        processed_calls <- processed_calls[!processed_calls$terminal_only, ]
+      }
+      
+      # ---- Only proceed if there are calls left ----
+      if (nrow(processed_calls) > 0) {
+        # ---- Add within-gene exon indices and sample info ----
+        processed_calls <- add_within_gene_indices(processed_calls, bed_file)
+        processed_calls <- cbind(Sample = sample, processed_calls)
+        processed_calls$Correlation      <- current_cor
+        processed_calls$N.comp           <- num_refs
+        processed_calls$Comparator.name  <- paste(best_refs, collapse = ", ")
 
-      names(processed_calls)[names(processed_calls) == "start.p"]       <- "Start.p"
-      names(processed_calls)[names(processed_calls) == "end.p"]         <- "End.p"
-      names(processed_calls)[names(processed_calls) == "type"]          <- "Type"
-      names(processed_calls)[names(processed_calls) == "nexons"]        <- "Nexons"
-      names(processed_calls)[names(processed_calls) == "start"]         <- "Start"
-      names(processed_calls)[names(processed_calls) == "end"]           <- "End"
-      names(processed_calls)[names(processed_calls) == "chromosome"]    <- "Chromosome"
-      names(processed_calls)[names(processed_calls) == "bayesfactor"]   <- "BF"
-      names(processed_calls)[names(processed_calls) == "reads.expected"] <- "Reads.expected"
-      names(processed_calls)[names(processed_calls) == "reads.observed"] <- "Reads.observed"
-      names(processed_calls)[names(processed_calls) == "reads.ratio"]   <- "Reads.ratio"
-      processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
-                                            processed_calls$Start, "-", processed_calls$End)
+        # ---- Rename columns for consistency ----
+        names(processed_calls)[names(processed_calls) == "start.p"]       <- "Start.p"
+        names(processed_calls)[names(processed_calls) == "end.p"]         <- "End.p"
+        names(processed_calls)[names(processed_calls) == "type"]          <- "Type"
+        names(processed_calls)[names(processed_calls) == "nexons"]        <- "Nexons"
+        names(processed_calls)[names(processed_calls) == "start"]         <- "Start"
+        names(processed_calls)[names(processed_calls) == "end"]           <- "End"
+        names(processed_calls)[names(processed_calls) == "chromosome"]    <- "Chromosome"
+        names(processed_calls)[names(processed_calls) == "bayesfactor"]   <- "BF"
+        names(processed_calls)[names(processed_calls) == "reads.expected"] <- "Reads.expected"
+        names(processed_calls)[names(processed_calls) == "reads.observed"] <- "Reads.observed"
+        names(processed_calls)[names(processed_calls) == "reads.ratio"]   <- "Reads.ratio"
+        processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
+                                              processed_calls$Start, "-", processed_calls$End)
+      } else {
+        # No calls left after terminal-only removal -> keep empty
+        processed_calls <- data.frame()
+      }
     }
 
     results[[sample]] <- list(
@@ -315,7 +357,7 @@ run_cnv_calling <- function(rdata_file,
   cnv_calls <- if (length(all_calls_list) > 0) do.call(rbind, all_calls_list) else data.frame()
   if (nrow(cnv_calls) > 0) {
     cnv_calls  <- cbind(CNV.ID = seq_len(nrow(cnv_calls)), cnv_calls)
-    exclude_cols <- c("global_start", "global_end")
+    exclude_cols <- c("global_start", "global_end", "terminal_only")
     tsv_cols     <- setdiff(colnames(cnv_calls), exclude_cols)
     utils::write.table(cnv_calls[, tsv_cols], file = output_file,
                        row.names = FALSE, sep = "\t", quote = FALSE)

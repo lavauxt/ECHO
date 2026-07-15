@@ -42,6 +42,8 @@ settings:
   pad_terminal_exons: 300                 # Bases to extend the outward edge of each gene's first/last exon (0 = off); reduces 0/low counts at gene boundaries without overlapping neighbouring targets
   plot_gene_gap: 1                        # Extra x-axis units of blank space between a gene's last exon and the next gene's first exon, in every PDF/report panel (0 = off)
   off_target_gene_pattern: "^HorsROI"     # Regex matching off-target/filler BED entries (own unrelated numbering, interspersed between a gene's real exons); these get a fixed grey tile, no text label, and a blanked axis tick instead of being treated like a real gene. "" or null = off
+  remove_terminal_only: true              # set to true to drop terminal-only calls
+  penalize_terminal_only: false           # set to true to downgrade them to LOW
 
   # QC scoring thresholds for tracking pipeline certainty
   score_high_corr: 0.985

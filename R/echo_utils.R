@@ -939,3 +939,43 @@ detect_problematic_exons <- function(
         problematic = problematic
     )
 }
+
+#' Flag CNV calls that affect only terminal exons of a gene
+#'
+#' @param cnv_calls Data frame of CNV calls (must have global_start/global_end)
+#' @param bed_file BED annotation with exon_number column (added by assign_exon_numbers_per_gene)
+#' @return The same data frame with a new logical column `terminal_only`
+#' @export
+flag_terminal_only_calls <- function(cnv_calls, bed_file) {
+  if (nrow(cnv_calls) == 0) return(cnv_calls)
+  
+  # Ensure bed_file has exon_number
+  if (!"exon_number" %in% colnames(bed_file)) {
+    bed_file <- assign_exon_numbers_per_gene(bed_file)
+  }
+  
+  cnv_calls$terminal_only <- FALSE
+  
+  for (i in seq_len(nrow(cnv_calls))) {
+    start_idx <- as.integer(cnv_calls$global_start[i])
+    end_idx   <- as.integer(cnv_calls$global_end[i])
+    if (is.na(start_idx) || is.na(end_idx)) next
+    
+    affected_exons <- bed_file$exon_number[start_idx:end_idx]
+    if (length(affected_exons) == 0) next
+    
+    genes <- unique(bed_file$gene[start_idx:end_idx])
+    if (length(genes) != 1) next
+    gene <- genes[1]
+    if (is.na(gene) || gene == "") next
+    
+    gene_rows <- which(bed_file$gene == gene)
+    first_exon <- min(bed_file$exon_number[gene_rows], na.rm = TRUE)
+    last_exon  <- max(bed_file$exon_number[gene_rows], na.rm = TRUE)
+    
+    if (all(affected_exons %in% c(first_exon, last_exon))) {
+      cnv_calls$terminal_only[i] <- TRUE
+    }
+  }
+  cnv_calls
+}

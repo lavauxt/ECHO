@@ -92,7 +92,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         exon_mad_quantile          = args$exon_mad_quantile %||% 0.90,
         gc_extreme_filter          = args$gc_extreme_filter %||% c(0.15, 0.85),
         min_exon_mean              = args$min_exon_mean %||% 20,
-        pad_terminal_exons         = args$pad_terminal_exons %||% 0
+        pad_terminal_exons         = args$pad_terminal_exons %||% 0,
+        remove_terminal_only       = args$remove_terminal_only %||% FALSE,
+        penalize_terminal_only     = args$penalize_terminal_only %||% FALSE
       ),
       bed_process            = args$bed_process %||% "NO",
       refseqgene             = args$refseqgene,
@@ -202,6 +204,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg(paste("BED processing mode:", cfg$bed_process))
       log_msg(paste("Genome version:", cfg$genome_version))
       log_msg(paste("Terminal-exon padding:", paste0(cfg$settings$pad_terminal_exons %||% 0, " bp")))
+      log_msg(paste("Remove terminal-only calls:", cfg$settings$remove_terminal_only %||% FALSE))
+      log_msg(paste("Penalize terminal-only calls:", cfg$settings$penalize_terminal_only %||% FALSE))
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO" && !is.null(cfg$off_target_pattern %||% "^HorsROI")) {
         log_msg(paste0("Off-target region handling: pattern = '", cfg$off_target_pattern %||% "^HorsROI",
                        "', handling = '", cfg$off_target_handling %||% "na", "'"))
@@ -328,11 +332,6 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       })
 
       # ---- PCA plot (optional) --------------------------------------------
-      # Wrapped in tryCatch (unlike the required Steps 1-3 above) so a
-      # plotting failure -- e.g. too few informative targets, a missing
-      # ggrepel -- degrades gracefully instead of aborting an otherwise
-      # successful run; mirrors CANOPE's run_canope() resilience pattern,
-      # where every optional post-processing step is individually guarded.
       if (cfg$settings$pca_plot %||% TRUE) {
         tryCatch({
           objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
@@ -345,14 +344,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
           }
           plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
-        }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING"))
+        }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING")
+        )
       }
 
       # ---- Step 2: QC metrics ---------------------------------------------
-      # Softly-failing, like CANOPE's run_canope_qc_metrics() step: this is a
-      # diagnostic side-report, not an input to CNV calling itself, and
-      # generate_report() already degrades gracefully when paths$metrics
-      # doesn't exist (see echo_report.R).
       run_step("Running QC metrics", {
         tryCatch(
           run_qc_metrics(
@@ -388,7 +384,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           qc_zscore              = cfg$settings$qc_zscore %||% 3,
           exon_mad_quantile      = cfg$settings$exon_mad_quantile %||% 0.90,
           gc_extreme_filter      = cfg$settings$gc_extreme_filter %||% c(0.15, 0.85),
-          min_exon_mean          = cfg$settings$min_exon_mean %||% 20
+          min_exon_mean          = cfg$settings$min_exon_mean %||% 20,
+          remove_terminal_only   = cfg$settings$remove_terminal_only %||% FALSE,
+          penalize_terminal_only = cfg$settings$penalize_terminal_only %||% FALSE
         ), cnv_args)
         do.call(run_cnv_calling, cnv_args)
       })
@@ -468,7 +466,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           } else {
             log_msg("Summary RData not found – cannot export VCF.", "WARNING")
           }
-          }, error = function(e) log_msg(paste("VCF export failed:", conditionMessage(e)), "WARNING"))
+          }, error = function(e) log_msg(paste("VCF export failed:", conditionMessage(e)), "WARNING")
+        )
         })
       } else {
         log_msg("VCF export skipped.")

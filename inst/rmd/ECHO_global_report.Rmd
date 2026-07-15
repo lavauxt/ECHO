@@ -581,8 +581,9 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Reference samples",
-              text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                "<br>Observed/Expected: ", round(Ratio, 3)
+              text = paste0("Sample: ", call$Sample, "<br>Gene: ", call$Gene,
+                            "<br>Exon: ", ExonLabel,
+                            "<br>Observed/Expected: ", round(Ratio, 3)
               )
             ),
             size = 3
@@ -592,14 +593,14 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Affected exon(s)",
-              text = paste0("Sample: ", call$Sample, "<br>Exon: ", ExonLabel,
-                "<br>Observed/Expected: ", round(Ratio, 3),
-                "<br>Confidence: ", call$Confidence
+              text = paste0("Sample: ", call$Sample, "<br>Gene: ", call$Gene,
+                            "<br>Exon: ", ExonLabel,
+                            "<br>Observed/Expected: ", round(Ratio, 3),
+                            "<br>Confidence: ", call$Confidence
               )
             ),
             size = 3.5
           ) +
-
           labs(
             y = "Observed / Expected",
             x = NULL,
@@ -657,69 +658,72 @@ if (length(samples) == 0) {
         p_cov_data <- bind_rows(c(ref_rows, list(obs_df)))
 
         p_cov <- ggplot() +
-          geom_point(
-            data = subset(p_cov_data, Group == "Reference samples"),
-            aes(
-              x = Px,
-              y = Count,
-              color = Group,
-              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
-                "<br>Log coverage: ", round(Count, 3)
-              )
-            ),
-            alpha = 0.7,
-            size = 2.5
-          ) +
-          geom_point(
-            data = subset(p_cov_data, Group == "Test sample"),
-            aes(
-              x = Px,
-              y = Count,
-              color = Group,
-              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
-                "<br>Log coverage: ", round(Count, 3)
-              )
-            ),
-            size = 2.5
-          ) +
-          geom_point(
-            data = subset(p_cov_data, Group == "Affected exon(s)"),
-            aes(
-              x = Px,
-              y = Count,
-              color = Group,
-              text = paste0("Sample: ", SampleID, "<br>Exon: ", ExonLabel,
-                "<br>Log coverage: ", round(Count, 3),
-                "<br>Confidence: ", call$Confidence
-              )
-            ),
-            size = 3.5
-          ) +
-          labs(
-            y = "Log(Coverage)",
-            x = NULL
-          ) +
-          theme_bw() +
-          scale_color_manual(
-            values = c(
-              "Reference samples" = "grey50",
-              "Test sample" = "blue",
-              "Affected exon(s)" = "red"
-            ),
-            name = NULL
-          ) +
-          theme(
-            legend.position = "top",
-            axis.text.x = element_text(
-              angle = 45,
-              size = 8,
-              hjust = 1
+        geom_point(
+          data = subset(p_cov_data, Group == "Reference samples"),
+          aes(
+            x = Px,
+            y = Count,
+            color = Group,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+                          "<br>Exon: ", ExonLabel,
+                          "<br>Log coverage: ", round(Count, 3)
             )
-          ) +
-          scale_x_continuous(
-            breaks = plot_data$Px,
-            labels = plot_data$ExonLabel
-          ) 
+          ),
+          alpha = 0.7,
+          size = 2.5
+        ) +
+        geom_point(
+          data = subset(p_cov_data, Group == "Test sample"),
+          aes(
+            x = Px,
+            y = Count,
+            color = Group,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+                          "<br>Exon: ", ExonLabel,
+                          "<br>Log coverage: ", round(Count, 3)
+            )
+          ),
+          size = 2.5
+        ) +
+        geom_point(
+          data = subset(p_cov_data, Group == "Affected exon(s)"),
+          aes(
+            x = Px,
+            y = Count,
+            color = Group,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+                          "<br>Exon: ", ExonLabel,
+                          "<br>Log coverage: ", round(Count, 3),
+                          "<br>Confidence: ", call$Confidence
+            )
+          ),
+          size = 3.5
+        ) +
+        labs(
+          y = "Log(Coverage)",
+          x = NULL
+        ) +
+        theme_bw() +
+        scale_color_manual(
+          values = c(
+            "Reference samples" = "grey50",
+            "Test sample" = "blue",
+            "Affected exon(s)" = "red"
+          ),
+          name = NULL
+        ) +
+        theme(
+          legend.position = "top",
+          axis.text.x = element_text(
+            angle = 45,
+            size = 8,
+            hjust = 1
+          )
+        ) +
+        scale_x_continuous(
+          breaks = plot_data$Px,
+          labels = plot_data$ExonLabel
+        ) 
 
         # Z-score panel: test sample vs. each individual reference sample,
         # all in units of the beta-binomial model's own implied SD (see
@@ -754,21 +758,24 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_z_data, Group == "Reference samples"),
             aes(x = Px, y = Z, group = RefName,
-                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                              "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Test sample"),
             aes(x = Px, y = Z, color = Group,
-                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                              "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             size = 3
           ) +
           geom_point(
             data = subset(p_z_data, Group == "Affected exon(s)"),
             aes(x = Px, y = Z, color = Group,
-                text = paste0("Sample: ", RefName, "<br>Exon: ", ExonLabel,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                              "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
             size = 3.5
