@@ -149,7 +149,9 @@ resolve_reference_fasta <- function(fasta = NULL,
 #' @param bsgenome_cache_dir Character string or NULL. Directory used to
 #'   cache the BSgenome-derived FASTA across runs. Defaults to a per-user
 #'   cache directory. Ignored when \code{fasta_source = "file"}.
-#' @param rbams Character string. Optional TSV file with a \code{bam} column.
+#' @param rbams Character string. Optional path to external reference BAMs,
+#'   either (a) a directory containing \code{.bam} files, or (b) a TSV file
+#'   with a \code{bam} column listing reference BAM paths.
 #' @param data_out Character string. Output \code{.RData} file path.
 #' @param include.chr Logical. Passed to \code{ExomeDepth::getBamCounts}.
 #' @param verbose Logical. Print progress messages.
@@ -235,7 +237,26 @@ run_bam_coverage <- function(
   bams <- character()
   if (!is.null(bamfiles) && file.exists(bamfiles)) bams <- c(bams, readLines(bamfiles))
   if (!is.null(bamdir)   && dir.exists(bamdir))    bams <- c(bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
-  if (!is.null(rbams)    && file.exists(rbams))    bams <- c(utils::read.csv(rbams, header = TRUE, sep = "\t")$bam, bams)
+
+  if (!is.null(rbams)) {
+    # `rbams` accepts either:
+    #   (a) a directory of external reference .bam files, or
+    #   (b) a TSV file with a `bam` column listing reference BAM paths.
+    # NOTE: file.exists() returns TRUE for directories too, so the directory
+    # check must come first -- otherwise a directory path falls through to
+    # read.csv(), which tries to open it as a text connection and fails with
+    # a cryptic "Permission denied" (Windows) rather than a useful message.
+    if (dir.exists(rbams)) {
+      ref_bams <- list.files(rbams, pattern = "\\.bam$", full.names = TRUE)
+      if (verbose) message("[INFO] Found ", length(ref_bams),
+                            " external reference BAM(s) in directory: ", rbams)
+      bams <- c(ref_bams, bams)
+    } else if (file.exists(rbams)) {
+      bams <- c(utils::read.csv(rbams, header = TRUE, sep = "\t")$bam, bams)
+    } else {
+      warning("[WARNING] rbams path not found, skipping external reference BAMs: ", rbams)
+    }
+  }
   bams <- unique(bams[nzchar(bams)])
   if (!length(bams)) stop("[ERROR] No BAM files found")
 
