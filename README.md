@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="ECHO logo" width="350"/>
+</p>
+
 <div align="center">
 
   # ECHO
