@@ -3,8 +3,8 @@
 # =============================================================================
 
 input:
-  bamdir: "./data/KMT2A"
-  bed: "./data/KMT2A/KMT2A.bed"
+  bamdir: "./data/TEST"
+  bed: "./data/TEST/TEST.bed"
   # Option A: use a local FASTA file
   # fasta: "./data/REF/hg19.fa"
   # fasta_source: "file"
@@ -17,14 +17,14 @@ input:
   fasta_source: "BSgenome.Hsapiens.UCSC.hg19"
   # genome_version is not needed here
   # bsgenome_cache_dir: null   # optional
-  rbams: "./data/KMT2A_REF"                             # Optional external reference matrix list path (or null)
+  rbams: null                             # Optional external reference matrix list path (or null)
 
 
 plots: true                               # Generate per‑CNV PDF plots
 
 output:
-  dir: "./result_KMT2A"                    # Target directory path for generated assets
-  prefix: "KMT2A"                          # Output filename base text identification tag
+  dir: "./result_TEST"                    # Target directory path for generated assets
+  prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
   modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'

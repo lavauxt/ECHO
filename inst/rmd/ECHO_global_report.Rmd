@@ -138,15 +138,18 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
         FUN = seq_along)[exon_range]
   }
 
+  gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else if ("GENE" %in% colnames(bed_file)) "GENE" else NULL
+  gene_names <- if (!is.null(gene_col)) bed_file[[gene_col]][exon_range] else rep("Unknown", length(exon_range))
+  
   affected <- exon_range %in% (idx_start:idx_end)
   bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
-
+  
   df <- data.frame(
     Exon = exon_range,
     ExonLabel = exon_labels,
+    Gene = gene_names,  # <--- THIS MUST BE HERE for the tooltips to work
     Px = px,
     GeneGroup = gene_group,
-    
     Observed = test_counts,
     Expected = expected_safe,
     Ratio = ratio,
@@ -155,6 +158,7 @@ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap
     Z = test_z,
     Affected = affected
   )
+
   attr(df, "ref_z_mat") <- ref_z_mat
   attr(df, "bg_calibration") <- bg_calib
   df
@@ -581,7 +585,7 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Reference samples",
-              text = paste0("Sample: ", call$Sample, "<br>Gene: ", call$Gene,
+              text = paste0("Sample: ", call$Sample, "<br>Gene: ", Gene,
                             "<br>Exon: ", ExonLabel,
                             "<br>Observed/Expected: ", round(Ratio, 3)
               )
@@ -593,7 +597,7 @@ if (length(samples) == 0) {
             aes(
               y = Ratio,
               color = "Affected exon(s)",
-              text = paste0("Sample: ", call$Sample, "<br>Gene: ", call$Gene,
+              text = paste0("Sample: ", call$Sample, "<br>Gene: ", Gene,
                             "<br>Exon: ", ExonLabel,
                             "<br>Observed/Expected: ", round(Ratio, 3),
                             "<br>Confidence: ", call$Confidence
@@ -637,6 +641,7 @@ if (length(samples) == 0) {
           data.frame(
             Exon      = exon_range_s,
             Px        = plot_data$Px,
+            Gene      = plot_data$Gene, # <--- ADD THIS
             Count     = log(pmax(params$counts[exon_range_s, r] * scaling, 1)),
             Group     = "Reference samples",
             ExonLabel = plot_data$ExonLabel,
@@ -644,10 +649,10 @@ if (length(samples) == 0) {
             stringsAsFactors = FALSE
           )
         })
-
         obs_df <- data.frame(
           Exon      = plot_data$Exon,
           Px        = plot_data$Px,
+          Gene      = plot_data$Gene, # <--- ADD THIS
           Count     = log(pmax(plot_data$Observed, 1)),
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
           ExonLabel = plot_data$ExonLabel,
@@ -664,7 +669,7 @@ if (length(samples) == 0) {
             x = Px,
             y = Count,
             color = Group,
-            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", Gene,
                           "<br>Exon: ", ExonLabel,
                           "<br>Log coverage: ", round(Count, 3)
             )
@@ -678,7 +683,7 @@ if (length(samples) == 0) {
             x = Px,
             y = Count,
             color = Group,
-            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", Gene,
                           "<br>Exon: ", ExonLabel,
                           "<br>Log coverage: ", round(Count, 3)
             )
@@ -691,7 +696,7 @@ if (length(samples) == 0) {
             x = Px,
             y = Count,
             color = Group,
-            text = paste0("Sample: ", SampleID, "<br>Gene: ", call$Gene,
+            text = paste0("Sample: ", SampleID, "<br>Gene: ", Gene,
                           "<br>Exon: ", ExonLabel,
                           "<br>Log coverage: ", round(Count, 3),
                           "<br>Confidence: ", call$Confidence
@@ -733,6 +738,7 @@ if (length(samples) == 0) {
           data.frame(
             Exon      = plot_data$Exon,
             Px        = plot_data$Px,
+            Gene      = plot_data$Gene, # <--- ADD THIS
             GeneGroup = plot_data$GeneGroup,
             Z         = ref_z_mat[, r],
             Group     = "Reference samples",
@@ -744,6 +750,7 @@ if (length(samples) == 0) {
         z_obs_df <- data.frame(
           Exon      = plot_data$Exon,
           Px        = plot_data$Px,
+          Gene      = plot_data$Gene, # <--- ADD THIS
           GeneGroup = plot_data$GeneGroup,
           Z         = plot_data$Z,
           Group     = ifelse(plot_data$Affected, "Affected exon(s)", "Test sample"),
@@ -758,7 +765,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_z_data, Group == "Reference samples"),
             aes(x = Px, y = Z, group = RefName,
-                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", Gene,
                               "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             colour = "grey60", size = 1.6, alpha = 0.8
@@ -766,7 +773,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_z_data, Group == "Test sample"),
             aes(x = Px, y = Z, color = Group,
-                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", Gene,
                               "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2))),
             size = 3
@@ -774,7 +781,7 @@ if (length(samples) == 0) {
           geom_point(
             data = subset(p_z_data, Group == "Affected exon(s)"),
             aes(x = Px, y = Z, color = Group,
-                text = paste0("Sample: ", RefName, "<br>Gene: ", call$Gene,
+                text = paste0("Sample: ", RefName, "<br>Gene: ", Gene,
                               "<br>Exon: ", ExonLabel,
                               "<br>Z-score: ", round(Z, 2),
                               "<br>Confidence: ", call$Confidence)),
