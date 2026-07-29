@@ -39,130 +39,117 @@ library(htmltools)
 library(ExomeDepth)
 library(kableExtra)
 
-# Helper function to get CNV-specific data for plotting
-get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap = 1) {
-
-  sample <- call_row$Sample
-  idx_start <- if ("global_start" %in% colnames(call_row)) as.numeric(call_row$global_start) else as.numeric(call_row$Start.p)
-  idx_end <- if ("global_end" %in% colnames(call_row)) as.numeric(call_row$global_end) else as.numeric(call_row$End.p)
-
-  ref_samples <- refs[[sample]]
-
-  if (is.null(ref_samples) || length(ref_samples) == 0) {
-    return(NULL)
-  }
-
-  exon_range <- seq(
-    max(1, idx_start - 5),
-    min(nrow(bed_file), idx_end + 5)
-  )
-
-  if (length(exon_range) == 0) {
-    return(NULL)
-  }
-
-  # Gap-inserted x-axis positions, so a gene's last exon and the next
-  # gene's first exon get real blank space between them instead of
-  # sitting flush like ordinary neighbouring exons -- see
-  # compute_gene_gap_positions() (utils.R) for the full rationale. Shared
-  # with plots.R::prepare_plot_data() so PDF and HTML report panels agree.
-  gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
-  px         <- gap_pos$px
-  gene_group <- gap_pos$gene_group
-
-  test_counts <- counts[exon_range, sample]
-
-  ref_counts <- rowSums(
-    counts[exon_range, ref_samples, drop = FALSE]
-  )
-
-  test_median <- median(test_counts)
-  ref_median <- median(ref_counts)
-
-  expected <- ref_counts * (test_median / ref_median)
-  expected_safe <- pmax(expected, 1)
-
-  totals <- test_counts + ref_counts
-
-  p_expected <- expected_safe / pmax(totals, 1)
-  p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
-
-  ratio <- test_counts / expected_safe
-
-  rho <- max(models[[sample]][1], 0.005)
-
-  ci_low <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(
-      0.025,
-      totals[i],
-      rho,
-      p_expected[i]
-    ) / expected_safe[i]
-  }, numeric(1))
-
-  ci_high <- vapply(seq_along(exon_range), function(i) {
-    ECHO:::qbetabinom(
-      0.975,
-      totals[i],
-      rho,
-      p_expected[i]
-    ) / expected_safe[i]
-  }, numeric(1))
-
-  # New: z-score data, same principle as CANOPE's z-score panel (reuse the
-  # model's own already-validated variance rather than inventing a new,
-  # noisy small-sample one) applied to ECHO's actual beta-binomial model.
-  # See plots.R::prepare_plot_data() for the full derivation — this is the
-  # same formula, kept in raw ratio units (Observed/Expected) rather than
-  # counts, since that's what's plotted here.
-  var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
-  var_betabinom <- pmax(var_betabinom, 1)
-  sd_z <- sqrt(var_betabinom)
-  test_z <- (test_counts - expected_safe) / sd_z
-
-  ref_z_mat <- sapply(ref_samples, function(r) {
-    scaling_r    <- test_median / median(counts[exon_range, r])
-    ref_r_scaled <- counts[exon_range, r] * scaling_r
-    (ref_r_scaled - expected_safe) / sd_z
-  })
-  if (is.null(dim(ref_z_mat))) ref_z_mat <- matrix(ref_z_mat, ncol = length(ref_samples))
-  colnames(ref_z_mat) <- ref_samples
-
-  exon_labels <- if ("exon_number" %in% colnames(bed_file) && any(!is.na(bed_file$exon_number))) {
-    bed_file$exon_number[exon_range]
-  } else if ("exon" %in% colnames(bed_file) && any(!is.na(bed_file$exon))) {
-    bed_file$exon[exon_range]
-  } else {
-    ave(seq_len(nrow(bed_file)),
-        bed_file$gene,
-        FUN = seq_along)[exon_range]
-  }
-
-  gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else if ("GENE" %in% colnames(bed_file)) "GENE" else NULL
-  gene_names <- if (!is.null(gene_col)) bed_file[[gene_col]][exon_range] else rep("Unknown", length(exon_range))
-  
-  affected <- exon_range %in% (idx_start:idx_end)
-  bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
-  
-  df <- data.frame(
-    Exon = exon_range,
-    ExonLabel = exon_labels,
-    Gene = gene_names,  # <--- THIS MUST BE HERE for the tooltips to work
-    Px = px,
-    GeneGroup = gene_group,
-    Observed = test_counts,
-    Expected = expected_safe,
-    Ratio = ratio,
-    CI_low = ci_low,
-    CI_high = ci_high,
-    Z = test_z,
-    Affected = affected
-  )
-
-  attr(df, "ref_z_mat") <- ref_z_mat
-  attr(df, "bg_calibration") <- bg_calib
-  df
-}
+ # Helper function to get CNV-specific data for plotting
+ get_cnv_plot_data <- function(call_row, counts, bed_file, models, refs, gene_gap = 1) {
+   sample <- call_row$Sample
+   idx_start <- if ("global_start" %in% colnames(call_row)) as.numeric(call_row$global_start) else as.numeric(call_row$Start.p)
+   idx_end <- if ("global_end" %in% colnames(call_row)) as.numeric(call_row$global_end) else as.numeric(call_row$End.p)
+   ref_samples <- refs[[sample]]
+   if (is.null(ref_samples) || length(ref_samples) == 0) {
+     return(NULL)
+   }
+   exon_range <- seq(
+     max(1, idx_start - 5),
+     min(nrow(bed_file), idx_end + 5)
+   )
+   if (length(exon_range) == 0) {
+     return(NULL)
+   }
+   
+   gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
+   px         <- gap_pos$px
+   gene_group <- gap_pos$gene_group
+   
+   test_counts <- counts[exon_range, sample]
+   ref_counts <- rowSums(
+     counts[exon_range, ref_samples, drop = FALSE]
+   )
+   test_median <- median(test_counts)
+   ref_median <- median(ref_counts)
+   expected <- ref_counts * (test_median / ref_median)
+   expected_safe <- pmax(expected, 1)
+   totals <- test_counts + ref_counts
+   p_expected <- expected_safe / pmax(totals, 1)
+   p_expected <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
+   ratio <- test_counts / expected_safe
+   rho <- max(models[[sample]][1], 0.005)
+   ci_low <- vapply(seq_along(exon_range), function(i) {
+     ECHO:::qbetabinom(
+       0.025,
+       totals[i],
+       rho,
+       p_expected[i]
+     ) / expected_safe[i]
+   }, numeric(1))
+   ci_high <- vapply(seq_along(exon_range), function(i) {
+     ECHO:::qbetabinom(
+       0.975,
+       totals[i],
+       rho,
+       p_expected[i]
+     ) / expected_safe[i]
+   }, numeric(1))
+   
+   var_betabinom <- totals * p_expected * (1 - p_expected) * (1 + (totals - 1) * rho)
+   var_betabinom <- pmax(var_betabinom, 1)
+   sd_z <- sqrt(var_betabinom)
+   test_z <- (test_counts - expected_safe) / sd_z
+   ref_z_mat <- sapply(ref_samples, function(r) {
+     scaling_r    <- test_median / median(counts[exon_range, r])
+     ref_r_scaled <- counts[exon_range, r] * scaling_r
+     (ref_r_scaled - expected_safe) / sd_z
+   })
+   if (is.null(dim(ref_z_mat))) ref_z_mat <- matrix(ref_z_mat, ncol = length(ref_samples))
+   colnames(ref_z_mat) <- ref_samples
+   
+   # --- BULLETPROOF EXON LABEL & GENE NAME EXTRACTION ---
+   # FIX: Define gene_col OUTSIDE the if/else block so it is always available
+   gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else if ("GENE" %in% colnames(bed_file)) "GENE" else NULL
+   
+   # 1. Try to use the pre-computed exon_number if it exists and has no NAs
+   if ("exon_number" %in% colnames(bed_file) && !any(is.na(bed_file$exon_number))) {
+     exon_labels <- bed_file$exon_number[exon_range]
+   } 
+   # 2. Fallback: Compute clean, consecutive per-gene numbers on the fly
+   else if (!is.null(gene_col)) {
+     genes <- bed_file[[gene_col]]
+     valid_rows <- !is.na(genes) & genes != "" & genes != "."
+     exon_labels <- rep(NA_integer_, nrow(bed_file))
+     if (any(valid_rows)) {
+       dt_temp <- data.table::data.table(gene = genes[valid_rows], start = bed_file$start[valid_rows], idx = which(valid_rows))
+       data.table::setorder(dt_temp, gene, start)
+       dt_temp[, num := seq_len(.N), by = "gene"]
+       exon_labels[dt_temp$idx] <- dt_temp$num
+     }
+     exon_labels <- exon_labels[exon_range]
+   } else {
+     exon_labels <- seq_along(exon_range)
+   }
+   # -----------------------------------------------------
+   
+   gene_names <- if (!is.null(gene_col)) bed_file[[gene_col]][exon_range] else rep("Unknown", length(exon_range))
+   
+   affected <- exon_range %in% (idx_start:idx_end)
+   bg_calib <- check_background_calibration(ratio, ci_low, ci_high, affected)
+   
+   df <- data.frame(
+     Exon = exon_range,
+     ExonLabel = exon_labels,
+     Gene = gene_names,
+     Px = px,
+     GeneGroup = gene_group,
+     Observed = test_counts,
+     Expected = expected_safe,
+     Ratio = ratio,
+     CI_low = ci_low,
+     CI_high = ci_high,
+     Z = test_z,
+     Affected = affected
+   )
+   attr(df, "ref_z_mat") <- ref_z_mat
+   attr(df, "bg_calibration") <- bg_calib
+   df
+ }
 ```
 
 <style>
