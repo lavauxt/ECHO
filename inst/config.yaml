@@ -83,4 +83,4 @@ bed_preprocess:
   bed_zero_based: false                   # Set true if input BED file indices track from index 0
   skip_invalid_intervals: true            # Gracefully filter invalid coordinate ranges
   off_target_pattern: "^HorsROI"          # Regex (case-sensitive) identifying off-target/filler intervals (e.g. backbone probes) that are NOT real gene exons; null/"" disables this
-  off_target_handling: "na"               # What to do with rows matching off_target_pattern: "na" (keep interval, exclude from exon numbering), "remove" (drop the rows), "merge" (attach to nearest neighbouring real gene)
+  off_target_handling: "remove"               # What to do with rows matching off_target_pattern: "na" (keep interval, exclude from exon numbering), "remove" (drop the rows), "merge" (attach to nearest neighbouring real gene)
