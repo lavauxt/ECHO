@@ -23,6 +23,8 @@ run_cnv_calling(
   exon_mad_quantile = 0.9,
   gc_extreme_filter = c(0.15, 0.85),
   min_exon_mean = 20,
+  remove_terminal_only = FALSE,
+  penalize_terminal_only = FALSE,
   ...
 )
 }
@@ -52,25 +54,23 @@ run_cnv_calling(
 \item{sample_table}{Optional character string. Path to sample table.}
 
 \item{sample_qc}{Logical. Exclude outlier samples (robust z-score on
-cross-target noise) before calling -- mirrors CANOPE's \code{sample_qc}.
-Default \code{TRUE}.}
+cross-target noise) before calling.}
 
-\item{exon_qc}{Logical. Exclude problematic exons (high cross-sample MAD,
-low mean coverage, or -- using the \code{GC} column that
-\code{ExomeDepth::getBamCounts()} always computes as a side effect of
-coverage extraction -- extreme GC content) before calling. Mirrors
-CANOPE's \code{exon_qc}. Default \code{TRUE}.}
+\item{exon_qc}{Logical. Exclude problematic exons before calling.}
 
 \item{qc_zscore}{Numeric. Robust z-score threshold for \code{sample_qc}.}
 
 \item{exon_mad_quantile}{Numeric. MAD quantile threshold for \code{exon_qc}.}
 
-\item{gc_extreme_filter}{Numeric[2] or \code{NULL}. Min/max GC (fraction,
-0-1) to retain a target under \code{exon_qc}; ignored if the coverage
-RData has no \code{GC} column. Default \code{c(0.15, 0.85)}.}
+\item{gc_extreme_filter}{Numeric[2] or \code{NULL}. Min/max GC fraction to retain.}
 
-\item{min_exon_mean}{Numeric. Minimum mean count (across kept samples) to
-retain a target under \code{exon_qc}.}
+\item{min_exon_mean}{Numeric. Minimum mean count to retain a target.}
+
+\item{remove_terminal_only}{Logical. If TRUE, remove calls that affect only
+first/last exons of a gene (after scoring). Default FALSE.}
+
+\item{penalize_terminal_only}{Logical. If TRUE, force such calls to LOW
+confidence (instead of removing them). Default FALSE.}
 
 \item{...}{Additional parameters passed to \code{score_cnv_confidence}.}
 }

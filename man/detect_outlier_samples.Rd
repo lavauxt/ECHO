@@ -2,20 +2,10 @@
 % Please edit documentation in R/echo_utils.R
 \name{detect_outlier_samples}
 \alias{detect_outlier_samples}
-\title{Detect Outlier Samples (robust z-score on MAD noise)}
+\title{Detect Outlier Samples}
 \usage{
 detect_outlier_samples(counts, pseudocount = 0.5, z_threshold = 3)
 }
-\arguments{
-\item{counts}{Numeric matrix or data frame (targets x samples).}
-
-\item{pseudocount}{Numeric.}
-
-\item{z_threshold}{Numeric. Robust z-score above which a sample is an outlier.}
-}
-\value{
-Data frame: sample, noise_score, robust_z, is_outlier.
-}
 \description{
-Detect Outlier Samples (robust z-score on MAD noise)
+Detect Outlier Samples
 }

@@ -135,7 +135,6 @@ input_df$ExonNum <- NA_integer_
 }
 
 if (bed_process == "REGEN") {
-# ... (REGEN logic remains identical to your original) ...
 stop("REGEN logic omitted for brevity, please keep your existing REGEN block")
 } else if (bed_process == "STANDARD") {
 panel_bed_paths <- NULL
@@ -168,7 +167,6 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      input_start_1based <- if (bed_zero_based) input_df$Start + 1 else input_df$Start
      bed_gr <- GenomicRanges::GRanges(seqnames = input_df$Chr, ranges = IRanges::IRanges(start = input_start_1based, end = input_df$End))
      
-     # FIX: Added OriginalName to GRanges metadata
      panel_gr <- GenomicRanges::GRanges(
        seqnames = all_panels$Chr, ranges = IRanges::IRanges(start = all_panels$Start + 1, end = all_panels$End),
        Gene = all_panels$Gene, ExonNum = all_panels$ExonNum, OriginalName = all_panels$OriginalName
@@ -179,7 +177,6 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      output_start <- GenomicRanges::start(bed_gr[qh])
      if (bed_zero_based) output_start <- output_start - 1
      
-     # FIX: Added OriginalName to df
      df <- data.frame(
        Chr = as.character(GenomicRanges::seqnames(bed_gr[qh])), Start = output_start, End = GenomicRanges::end(bed_gr[qh]),
        Gene = panel_gr$Gene[sh], ExonNum = panel_gr$ExonNum[sh], OriginalName = panel_gr$OriginalName[sh], stringsAsFactors = FALSE
@@ -203,7 +200,6 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      df$exon_number <- NULL
      df$Custom.Exon <- df$ExonNum
    } else {
-     # FIX: Added OriginalName to df fallback 1
      df <- data.frame(
        Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
        Gene = input_df$Gene, ExonNum = input_df$ExonNum, OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
@@ -227,7 +223,6 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      df$Custom.Exon <- df$ExonNum
    }
 } else {
-  # FIX: Added OriginalName to df fallback 2
   df <- data.frame(
     Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
     Gene = input_df$Gene, ExonNum = input_df$ExonNum, OriginalName = input_df$OriginalName, stringsAsFactors = FALSE

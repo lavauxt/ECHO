@@ -6,11 +6,6 @@
 \usage{
 a \%||\% b
 }
-\arguments{
-\item{a}{Primary value.}
-
-\item{b}{Fallback value.}
-}
 \description{
 Null coalescing operator
 }

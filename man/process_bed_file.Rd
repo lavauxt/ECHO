@@ -30,53 +30,6 @@ process_bed_file(
   off_target_handling = c("na", "remove", "merge")
 )
 }
-\arguments{
-\item{input_bed}{Path to input BED file.}
-
-\item{output_bed}{Path to output processed BED file.}
-
-\item{bed_process}{Mode: "STANDARD", "REGEN", or "NO".}
-
-\item{bed_zero_based}{Logical: is the input BED 0-based? Default TRUE.}
-
-\item{unknown_gene}{Keep intervals without gene name? Default FALSE.}
-
-\item{exon_sep}{Character string or list/vector of characters to split gene names (e.g., "[ ()]" or c(" ", "(")). Default " ".}
-
-\item{gene_name_collapse}{Character token used to rejoin kept parts. Default " ".}
-
-\item{customexon}{Add a Custom.Exon column containing exon numbers. Default FALSE.}
-
-\item{auto_exon_number}{If TRUE, assign sequential exon numbers per gene based on genomic order.
-If FALSE, check region_numbering_mode configuration. Default TRUE.}
-
-\item{region_numbering_mode}{If auto_exon_number is FALSE, specifies numbering type:
-"bed_text" (extract from string pattern) or "file_order" (sequential per gene based on local file occurrence).}
-
-\item{gene_name_keep}{Specifies parts to keep after splitting by exon_sep (e.g., "1", "1-2", "1,3").}
-
-\item{panel_files}{Character vector of BED file paths (one per line) or a single file containing paths.}
-
-\item{genome_version}{"hg19" or "hg38" (REGEN mode).}
-
-\item{gene_field_index}{1-based index of the gene name field after splitting (legacy fallback for gene_name_keep).}
-
-\item{off_target_pattern}{Character regex (matched against the parsed
-gene name, case-sensitively) identifying off-target/filler intervals
-such as normalization "backbone" probes -- e.g. \code{"^HorsROI"}
-(the default) or \code{"^(HorsROI|OffTarget|Backbone)$"} for a panel
-using several such labels. \code{NULL} disables this feature (these
-intervals are then treated as an ordinary gene, the pre-existing
-behaviour). See \code{\link{handle_off_target_regions}}.}
-
-\item{off_target_handling}{One of \code{"na"} (default -- keep the
-interval but exclude it from exon numbering/gene grouping),
-\code{"remove"} (drop it entirely), or \code{"merge"} (attach it to
-its nearest neighbouring real gene, so it's numbered as one of that
-gene's own exons). Only used when \code{off_target_pattern} is set.}
-
-\item{...}{other parameters for compatibility.}
-}
 \description{
 Process BED File for CNV Analysis
 }

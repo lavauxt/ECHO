@@ -48,7 +48,9 @@ no local FASTA file needed). Default \code{"file"}.}
 cache the BSgenome-derived FASTA across runs. Defaults to a per-user
 cache directory. Ignored when \code{fasta_source = "file"}.}
 
-\item{rbams}{Character string. Optional TSV file with a \code{bam} column.}
+\item{rbams}{Character string. Optional path to external reference BAMs,
+either (a) a directory containing \code{.bam} files, or (b) a TSV file
+with a \code{bam} column listing reference BAM paths.}
 
 \item{data_out}{Character string. Output \code{.RData} file path.}
 

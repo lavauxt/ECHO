@@ -14,26 +14,6 @@ detect_problematic_exons(
   gc_max = 0.9
 )
 }
-\arguments{
-\item{count_matrix}{Numeric matrix (targets x samples).}
-
-\item{chromosomes}{Optional factor/character vector of chromosome labels.}
-
-\item{mad_quantile}{Numeric. Top quantile of exon MAD to flag.}
-
-\item{min_mean}{Numeric. Minimum mean coverage to retain.}
-
-\item{gc}{Optional numeric vector of GC content (0-1 or 0-100).}
-
-\item{gc_min}{Numeric. Minimum GC fraction.}
-
-\item{gc_max}{Numeric. Maximum GC fraction.}
-}
-\value{
-Data frame: exon (row index), mean, mad, problematic.
-}
 \description{
-Flags exons with high MAD (cross-sample noise), low mean coverage,
-extreme GC content, or non-finite values. Ensures at least one exon per
-chromosome is retained to prevent empty chromosomes.
+Detect Problematic Exons
 }

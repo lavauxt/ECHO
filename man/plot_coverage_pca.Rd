@@ -12,20 +12,6 @@ plot_coverage_pca(
   scale = TRUE
 )
 }
-\arguments{
-\item{counts}{Data frame of read counts (rows = exons, columns = samples).}
-
-\item{sample_names}{Character vector of sample names.}
-
-\item{output_pdf}{Path to save the PCA plot (or NULL for direct display).}
-
-\item{color_by}{Optional vector of sample groups (e.g., gender, batch).}
-
-\item{scale}{Logical, whether to scale the data (recommended).}
-}
-\value{
-Invisibly returns a list with PCA object and variance explained.
-}
 \description{
 Plot PCA of Sample Coverage Profiles
 }

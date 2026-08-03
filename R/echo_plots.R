@@ -28,10 +28,6 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
     }
     if (length(exon_range) == 0) return(NULL)
 
-    # Gap-inserted x-axis positions, so every panel shows a visual break
-    # between a gene's last exon and the next gene's first exon rather
-    # than plotting them as if they were plain neighbouring exons. See
-    # compute_gene_gap_positions() for the full rationale.
     gap_pos    <- compute_gene_gap_positions(bed_file, exon_range, gap = gene_gap)
     px         <- gap_pos$px
     gene_group <- gap_pos$gene_group
@@ -87,19 +83,6 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
         is_affected = factor(exon_range %in% (idx_start:idx_end),
                              levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
 
-    # New: z-score panel, matching CANOPE's design.
-    #
-    # ECHO's calling model is fundamentally different from CANOPE's (a
-    # beta-binomial test/expected ratio, not a per-target NB(mean, var)
-    # HMM), so this isn't a copy-paste of CANOPE's z-score formula — it's
-    # the same *principle* (reuse the model's own already-validated
-    # variance; don't invent a new, noisy small-sample one) applied to
-    # ECHO's actual model. `rho` here is ExomeDepth's fitted overdispersion
-    # parameter (genome-wide, not just this local window), the same
-    # quantity the CI ribbon above is built from. The variance of a
-    # Beta-Binomial(n, p, rho) is n*p*(1-p)*(1+(n-1)*rho) — standard result,
-    # and consistent with the qbetabinom() parameterisation used above
-    # (a = p(1-rho)/rho, b = (1-p)(1-rho)/rho  =>  a+b+1 = 1/rho).
     var_betabinom <- totals * p_expected * (1 - p_expected) *
         (1 + (totals - 1) * max(rho, 0.005))
     var_betabinom <- pmax(var_betabinom, 1)
@@ -122,7 +105,6 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
 
     bg_calib <- check_background_calibration(ratio, mins, maxs, exon_range %in% (idx_start:idx_end))
     
-    # Create the subtitle for CI plot
     ci_subtitle <- if (isTRUE(bg_calib$flag)) {
         sprintf("%d%% of background exons outside CI (%d/%d) \u2014 check region/reference match",
                 round(bg_calib$pct_outside),
@@ -213,10 +195,6 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
         } else pal <- rainbow(n_genes)
     }
     names(pal) <- gene_names
-    # mid/width are computed on the gap-inserted px scale (not raw
-    # exon_range indices) so each gene's tile lines up with that gene's
-    # points/lines in the other panels, and adjacent tiles get real blank
-    # space between them at a gene boundary instead of sitting flush.
     gene_tiles <- data.frame(
         gene  = gene_names,
         mid   = as.numeric(sapply(gene_names, function(g) mean(px[temp$gene == g]))),
@@ -343,7 +321,6 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
                      colnames(bed_file), ignore.case = TRUE, value = TRUE)
     if (length(exon_col) == 0) {
-        # fall back to the legacy "exon" column only if exon_number is absent
         exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
     }
     if (length(exon_col) > 0) {

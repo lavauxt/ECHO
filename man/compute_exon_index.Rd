@@ -2,16 +2,10 @@
 % Please edit documentation in R/echo_utils.R
 \name{compute_exon_index}
 \alias{compute_exon_index}
-\title{Compute exon index for plotting (consistent with add_within_gene_indices)}
+\title{Compute exon index for plotting}
 \usage{
 compute_exon_index(bed_file)
 }
-\arguments{
-\item{bed_file}{BED annotation data frame.}
-}
-\value{
-Integer vector of per-gene exon numbers, one per row.
-}
 \description{
-Compute exon index for plotting (consistent with add_within_gene_indices)
+Compute exon index for plotting
 }

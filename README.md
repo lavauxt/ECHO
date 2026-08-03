@@ -251,35 +251,6 @@ with gene/exon information first.
   well-calibrated interval implies (a sign the real alteration may extend
   further, or that the reference match is poor for this region).
 
-## Why no megadepth backend?
-
-CANOPE offers `coverage_backend = "megadepth"` as a fast alternative to its
-default extraction. ECHO deliberately doesn't mirror this: megadepth's
-`--op sum`/`--op mean` reports a summed or averaged **per-base depth**
-track, not a discrete **read/fragment count**. CANOPE's own custom
-Negative-Binomial-emission HMM estimates its dispersion empirically from
-whatever's fed to it, so it tolerates that substitution. `ExomeDepth`'s
-beta-binomial model doesn't — its Bayes factor and confidence intervals are
-calibrated against genuine `getBamCounts()`-style counts, and silently
-feeding it a depth-sum instead would change the model's implicit
-scale/variance assumptions without any error or warning. So ECHO always
-extracts coverage through `ExomeDepth::getBamCounts()` itself.
-
-## Related project: CANOPE
-
-ECHO has a sibling pipeline, **CANOPE**, which targets the same use case
-but calls CNVs with a custom Hidden Markov Model (Viterbi-decoded,
-Negative-Binomial emissions) instead of ExomeDepth's beta-binomial model —
-CANOPE also ships a `legacy_canoes` engine mode, a faithful port of the
-original published CANOES HMM. The two pipelines share the same overall
-shape (BED preprocessing, BAM coverage/GC extraction, sample/exon QC,
-confidence scoring, VCF export, static PDF plots, and an interactive HTML
-report), and most of that shared scaffolding is kept in sync between them.
-
-See `CANOPE_vs_ECHO_COMPARISON.md` for the full feature-parity matrix
-between the two pipelines, along with a changelog of bugs found and fixed
-and parity features added during the most recent cross-pipeline audit.
-
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).

@@ -36,7 +36,6 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
                                  penalize_terminal_only = FALSE) {
   if (nrow(cnv_calls) == 0) return(cnv_calls)
   
-  # Ensure terminal_only column exists
   if (!"terminal_only" %in% colnames(cnv_calls)) {
     cnv_calls <- flag_terminal_only_calls(cnv_calls, bed_file)
   }
@@ -71,7 +70,6 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
   cnv_calls$Confidence[high_cond] <- "HIGH"
   cnv_calls$Confidence[med_cond]  <- "MEDIUM"
   
-  # ---- Penalize terminal-only calls (if requested) ----
   if (penalize_terminal_only && any(cnv_calls$terminal_only, na.rm = TRUE)) {
     cnv_calls$Confidence[cnv_calls$terminal_only] <- "LOW"
   }
@@ -178,7 +176,6 @@ run_cnv_calling <- function(rdata_file,
     message("[INFO] Mode Y: keeping only male samples (", length(sample_names), " samples)")
   }
 
-  # ---- Outlier sample exclusion (mirrors CANOPE's sample_qc) -------------
   if (sample_qc) {
     sqc  <- detect_outlier_samples(counts[, sample_names, drop = FALSE], z_threshold = qc_zscore)
     excl <- sqc$sample[sqc$is_outlier]
@@ -191,7 +188,6 @@ run_cnv_calling <- function(rdata_file,
     }
   }
 
-  # ---- GC-extreme / low-mean / high-MAD exon exclusion (mirrors CANOPE's exon_qc) ----
   if (exon_qc) {
     gc_for_exon_qc <- if ("GC" %in% colnames(counts)) as.numeric(counts$GC) else NULL
     if (is.null(gc_for_exon_qc) && !is.null(gc_extreme_filter)) {
@@ -285,14 +281,11 @@ run_cnv_calling <- function(rdata_file,
       current_cor     <- as.numeric(stats::cor(counts[, sample], ref_counts))
       num_refs        <- length(best_refs)
       
-      # ---- Add global_start/end (needed for terminal-only flagging) ----
       raw_calls$global_start <- as.integer(raw_calls$start.p)
       raw_calls$global_end   <- as.integer(raw_calls$end.p)
       
-      # ---- Flag terminal-only calls (needed for both removal and penalization) ----
       raw_calls <- flag_terminal_only_calls(raw_calls, bed_file)
       
-      # ---- Score confidence (may penalize terminal-only) ----
       processed_calls <- tryCatch({
         score_cnv_confidence(
           raw_calls, bed_file, current_cor, num_refs,
@@ -301,24 +294,20 @@ run_cnv_calling <- function(rdata_file,
         )
       }, error = function(e) {
         message("[WARNING] Confidence scoring failed for ", sample, ": ", e$message)
-        raw_calls  # fallback: return raw calls without confidence
+        raw_calls  
       })
       
-      # ---- Remove terminal-only calls if requested ----
       if (remove_terminal_only && any(processed_calls$terminal_only, na.rm = TRUE)) {
         processed_calls <- processed_calls[!processed_calls$terminal_only, ]
       }
       
-      # ---- Only proceed if there are calls left ----
       if (nrow(processed_calls) > 0) {
-        # ---- Add within-gene exon indices and sample info ----
         processed_calls <- add_within_gene_indices(processed_calls, bed_file)
         processed_calls <- cbind(Sample = sample, processed_calls)
         processed_calls$Correlation      <- current_cor
         processed_calls$N.comp           <- num_refs
         processed_calls$Comparator.name  <- paste(best_refs, collapse = ", ")
 
-        # ---- Rename columns for consistency ----
         names(processed_calls)[names(processed_calls) == "start.p"]       <- "Start.p"
         names(processed_calls)[names(processed_calls) == "end.p"]         <- "End.p"
         names(processed_calls)[names(processed_calls) == "type"]          <- "Type"
@@ -333,7 +322,6 @@ run_cnv_calling <- function(rdata_file,
         processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
                                               processed_calls$Start, "-", processed_calls$End)
       } else {
-        # No calls left after terminal-only removal -> keep empty
         processed_calls <- data.frame()
       }
     }

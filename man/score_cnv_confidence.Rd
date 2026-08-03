@@ -20,7 +20,8 @@ score_cnv_confidence(
   score_med_ratio_low = 0.6,
   score_med_ratio_high = 1.4,
   score_low_confidence_genes = c("PMS2", "SMN1", "CYP2D6", "HBA1", "HBA2", "STRC",
-    "CYP21A2", "GBA1", "CFTR")
+    "CYP21A2", "GBA1", "CFTR"),
+  penalize_terminal_only = FALSE
 )
 }
 \arguments{
@@ -53,6 +54,9 @@ score_cnv_confidence(
 \item{score_med_ratio_high}{Ratio between low_ratio_high and this -> MEDIUM.}
 
 \item{score_low_confidence_genes}{Character vector of gene symbols always flagged LOW.}
+
+\item{penalize_terminal_only}{Logical. If TRUE, any call flagged as `terminal_only`
+is forced to "LOW" confidence.}
 }
 \value{
 The input \code{cnv_calls} data frame with confidence column added.

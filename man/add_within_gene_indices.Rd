@@ -2,19 +2,10 @@
 % Please edit documentation in R/echo_utils.R
 \name{add_within_gene_indices}
 \alias{add_within_gene_indices}
-\title{Convert global exon indices to within-gene indices (using start-order)}
+\title{Convert global exon indices to within-gene indices}
 \usage{
 add_within_gene_indices(cnv_calls, bed_file)
 }
-\arguments{
-\item{cnv_calls}{Data frame of CNV calls (from ExomeDepth).}
-
-\item{bed_file}{BED annotation data frame (must have columns gene, start).}
-}
-\value{
-The same data frame with updated start.p / end.p (per-gene) and
-  added global_start / global_end columns.
-}
 \description{
-Convert global exon indices to within-gene indices (using start-order)
+Convert global exon indices to within-gene indices
 }

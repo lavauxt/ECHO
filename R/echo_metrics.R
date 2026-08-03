@@ -25,7 +25,6 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
     message("[INFO] Computing QC Metrics")
 
     bed_file <- assign_exon_numbers_per_gene(bed_file)
-    # exon_number is now the authoritative within-gene exon index
     exon_in_gene <- bed_file$exon_number
 
     dt_counts    <- data.table::as.data.table(counts[, sample_names, drop = FALSE])
@@ -36,10 +35,6 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
         max_corr <- setNames(rep(NA_real_, ncol(dt_counts)), names(dt_counts))
         message("[WARNING] Correlation QC skipped: fewer than 2 samples")
     } else {
-        # Spearman (rank-based), matching CANOPE's run_canope_qc_metrics() --
-        # more robust to the outliers/non-linearity typical of coverage data
-        # than the previous default (Pearson), and keeps both pipelines'
-        # QC tables flagging samples on the same statistical basis.
         corr_matrix <- stats::cor(dt_counts, method = "spearman", use = "pairwise.complete.obs")
         max_corr <- apply(corr_matrix, 1, function(x) {
             others <- x[x != 1]
@@ -101,7 +96,6 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
                    bed_file$gene[high_cv])
     }
 
-    # Find chromosome column name dynamically
     chr_col <- intersect(colnames(bed_file), c("chr", "chrom", "seqnames", "chromosome"))[1]
     if (is.na(chr_col) && ncol(bed_file) >= 1) {
         chr_col <- colnames(bed_file)[1]
@@ -123,7 +117,6 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
         message("[WARNING] chrY is not present in the BED file; no calls can be made for chromosome Y.")
         add_metric("All", "All", "Missing Chromosome", "chrY not present in BED file", "All")
     }
-    # ---------------------------------------------------------
 
     final_metrics <- data.frame(m, stringsAsFactors = FALSE)
     if (nrow(final_metrics) == 0)

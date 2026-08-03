@@ -29,8 +29,7 @@ resolve_reference_fasta <- function(fasta = NULL,
                                      bed = NULL,
                                      cache_dir = NULL,
                                      verbose = TRUE) {
-  # If fasta_source is a character string that is not "file" or "bsgenome",
-  # treat it as a BSgenome package name.
+
   if (is.character(fasta_source) && length(fasta_source) == 1 &&
       !fasta_source %in% c("file", "bsgenome")) {
     pkg <- fasta_source
@@ -44,10 +43,8 @@ resolve_reference_fasta <- function(fasta = NULL,
     return(fasta)
   }
 
-  # ---- fasta_source is either "bsgenome" (use genome_version mapping) or "bsgenome_pkg" (direct) ----
   if (fasta_source == "bsgenome_pkg") {
-    # pkg already assigned
-  } else { # fasta_source == "bsgenome"
+  } else { 
     if (is.null(genome_version)) {
       stop("[ERROR] genome_version is required when fasta_source = 'bsgenome'")
     }
@@ -61,7 +58,6 @@ resolve_reference_fasta <- function(fasta = NULL,
     )
   }
 
-  # ---- Validate the package exists ----
   if (!requireNamespace(pkg, quietly = TRUE)) {
     stop("[ERROR] Package '", pkg, "' is required for fasta_source = '", 
          if (fasta_source == "bsgenome") "bsgenome" else "bsgenome_pkg", 
@@ -72,7 +68,6 @@ resolve_reference_fasta <- function(fasta = NULL,
 
   bsgenome        <- getExportedValue(pkg, pkg)
   genome_seqnames <- GenomeInfoDb::seqnames(bsgenome)
-  # Which chromosomes does the BED actually need? (cheap first-column peek)
   chroms_needed <- NULL
   if (!is.null(bed) && file.exists(bed)) {
     bed_chr_col <- tryCatch(data.table::fread(bed, header = FALSE, select = 1L)[[1]],
@@ -117,8 +112,6 @@ resolve_reference_fasta <- function(fasta = NULL,
                           " sequence(s): ", paste(missing_chroms, collapse = ", "))
     new_seqs <- Biostrings::getSeq(bsgenome, names = missing_chroms)
     names(new_seqs) <- missing_chroms
-    # Rebuilding the index from scratch immediately after every write means
-    # the .fai can never end up stale relative to the file's own contents.
     Biostrings::writeXStringSet(new_seqs, filepath = cache_fasta, append = file.exists(cache_fasta))
     if (file.exists(cache_fai)) file.remove(cache_fai)
     Rsamtools::indexFa(cache_fasta)
@@ -206,11 +199,6 @@ run_bam_coverage <- function(
   fai_path    <- paste0(fasta, ".fai")
   needs_index <- !file.exists(fai_path)
   if (!needs_index && file.info(fasta)$mtime > file.info(fai_path)$mtime) {
-    # A .fai older than the FASTA it indexes is a classic, silent cause of
-    # "record N failed" errors deep inside Rsamtools/ExomeDepth: the byte
-    # offsets it stores no longer match the file's actual contents (e.g.
-    # the FASTA was edited, re-wrapped, or its line endings changed after
-    # the index was built). Rebuild rather than trust a stale index.
     if (verbose) message("[WARNING] FASTA index (.fai) is older than the FASTA file itself - ",
                           "it may be stale. Rebuilding index.")
     needs_index <- TRUE
@@ -239,13 +227,6 @@ run_bam_coverage <- function(
   if (!is.null(bamdir)   && dir.exists(bamdir))    bams <- c(bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
 
   if (!is.null(rbams)) {
-    # `rbams` accepts either:
-    #   (a) a directory of external reference .bam files, or
-    #   (b) a TSV file with a `bam` column listing reference BAM paths.
-    # NOTE: file.exists() returns TRUE for directories too, so the directory
-    # check must come first -- otherwise a directory path falls through to
-    # read.csv(), which tries to open it as a text connection and fails with
-    # a cryptic "Permission denied" (Windows) rather than a useful message.
     if (dir.exists(rbams)) {
       ref_bams <- list.files(rbams, pattern = "\\.bam$", full.names = TRUE)
       if (verbose) message("[INFO] Found ", length(ref_bams),
@@ -263,7 +244,6 @@ run_bam_coverage <- function(
   missing_idx <- !vapply(bams, bam_has_index, logical(1))
   if (any(missing_idx)) stop("[ERROR] Missing BAM index for: ", paste(bams[missing_idx], collapse = ", "))
 
-  # ── Sample name extraction ────────────────────────────────────────────────
   if (!is.null(custom_sample_names)) {
     if (length(custom_sample_names) != length(bams)) stop("[ERROR] custom_sample_names length mismatch")
     sample_names <- custom_sample_names
@@ -305,7 +285,6 @@ run_bam_coverage <- function(
   }
   if (any(duplicated(sample_names))) stop("[ERROR] Duplicate sample names after extraction")
 
-  # ── BED loading ──────────────────────────────────────────────────────────
   bed_file <- data.table::fread(bed, header = FALSE)
   if (ncol(bed_file) < 4) stop("[ERROR] BED file must have at least 4 columns (chr, start, end, name)")
 
@@ -357,32 +336,12 @@ run_bam_coverage <- function(
     bed_file <- bed_file[-out_of_bounds, ]
   }
 
-  # ── Terminal-exon padding (optional) ───────────────────────────────────────
-  # Applied here -- after chromosomes are mapped/filtered and coordinates are
-  # clean numerics, but before the reference-sequence extractability check
-  # below -- so the (already boundary-aware) padded coordinates still get
-  # validated against the FASTA/BSgenome sequence for free, and so every
-  # downstream step (CNV calling, plots, VCF, report) sees the padded
-  # windows via the bed_file saved in data_out, consistent with how they
-  # already consume bed_file rather than re-reading the original BED path.
   if (nrow(bed_file) > 0 && !is.null(pad_terminal_exons) && !is.na(pad_terminal_exons) && pad_terminal_exons > 0) {
     bed_file <- pad_gene_terminal_exons(bed_file, padding = pad_terminal_exons,
                                          chr_lengths = fasta_lengths, verbose = verbose)
   }
 
   if (nrow(bed_file) > 0) {
-    # Always test extractability against the reference, regardless of
-    # skip_invalid_intervals. Previously this whole block was gated on
-    # that flag, so when it was FALSE (as in some configs) a single bad
-    # interval would sail through undetected here and only surface much
-    # later as an opaque crash from deep inside ExomeDepth::getBamCounts()
-    # (after that call had already started working through every BAM
-    # file). Running the check unconditionally means bad intervals are
-    # always caught here, cheaply, before the expensive step begins.
-    # skip_invalid_intervals now only controls what happens with what's
-    # found: TRUE drops the offending rows and continues; FALSE stops
-    # with a precise, actionable report instead of letting ExomeDepth's
-    # cryptic "record N failed" reach the user.
     if (verbose) message("[INFO] Validating ", nrow(bed_file), " interval(s) against the reference sequence...")
     keep       <- logical(nrow(bed_file))
     chunk_size <- 5000L
@@ -397,9 +356,6 @@ run_bam_coverage <- function(
         sq <- Rsamtools::scanFa(fa, param = gr)
         BiocGenerics::width(sq) > 0L
       }, error = function(e) {
-        # Fall back to per-row testing only if the whole-chunk call errors
-        # (e.g. one bad interval in the batch), so a single bad row doesn't
-        # cost the vectorized speedup for every other chunk.
         vapply(chunk_idx, function(i) {
           tryCatch({
             sq_i <- Rsamtools::scanFa(fa, param = gr[match(i, chunk_idx)])
@@ -458,10 +414,6 @@ run_bam_coverage <- function(
     msg     <- conditionMessage(e)
     row_num <- suppressWarnings(as.numeric(gsub(".*record ([0-9]+).*", "\\1", msg)))
     if (!is.na(row_num) && row_num <= nrow(bed_file)) {
-      # This is a backstop, not the primary defense: every interval already
-      # passed the scanFa validation above, so reaching here means
-      # ExomeDepth::getBamCounts() used a slightly different/larger window
-      # internally than what was tested (rare, but possible).
       stop("[ERROR] Interval extraction failed for row ", row_num, ": ",
            bed_file$chromosome[row_num], ":", bed_file$start[row_num], "-", bed_file$end[row_num],
            " (unexpected: this interval passed the earlier reference-validation check; ExomeDepth's ",

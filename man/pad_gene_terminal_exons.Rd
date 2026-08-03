@@ -11,59 +11,6 @@ pad_gene_terminal_exons(
   verbose = TRUE
 )
 }
-\arguments{
-\item{bed_file}{data.frame with columns chromosome/Chr, start/Start,
-end/End, gene/Gene (1-based, inclusive coordinates).}
-
-\item{padding}{Integer >= 0. Bases to add to the outward edge of each
-gene's first and last exon. \code{0} (the default) disables padding
-and returns \code{bed_file} unchanged.}
-
-\item{chr_lengths}{Optional named numeric vector (names = chromosome,
-values = contig length) used to cap the last exon's End at the contig
-boundary. If \code{NULL}, no contig-length clamp is applied (only the
-neighbouring-interval clamp).}
-
-\item{verbose}{Logical. Print a one-line summary of how many
-starts/ends were extended and how many sides were clamped short of
-the requested padding. Default \code{TRUE}.}
-}
-\value{
-The same data.frame (original row order and row count
-  preserved), with Start/End adjusted for terminal-exon rows only.
-}
 \description{
-Capture-based coverage often drops off right at the true edge of a
-target interval (probe/bait tiling is rarely perfect exactly at the
-boundary, and reads whose alignment barely spans the edge get soft-
-clipped or excluded). For an internal exon this is usually harmless --
-its neighbours carry the signal -- but for a gene's *first* (lowest-
-coordinate) or *last* (highest-coordinate) exon there is no such
-neighbour on the outward side, so a thin sliver of low/zero coverage
-right at that edge can pull the whole exon's count down and trigger a
-spurious QC flag or CNV call. This function extends only the outward-
-facing edge of those two terminal exons per gene (both edges, for a
-single-exon gene) by \code{padding} bases, giving that boundary the same
-kind of margin an internal exon already has "for free" from its
-neighbour.
-}
-\details{
-"First"/"last" follows the same purely-genomic (chrom, start, end)
-ordering that \code{\link{assign_exon_numbers_per_gene}} uses everywhere
-else in ECHO -- i.e. lowest-coordinate exon is #1 regardless of strand.
-Internal exons (and the inward-facing edge of a terminal exon) are left
-untouched: padding an internal boundary would just eat into the intron
-between two already-covered exons for no benefit.
-
-Padding is applied on a best-effort basis ("if possible"): the function
-never creates an overlap with whatever interval sits next to it on the
-same chromosome (a neighbouring exon of the same gene or of a different
-one), and never pushes a coordinate below 1 or past the contig length
-(when \code{chr_lengths} is supplied). Where the available gap is
-narrower than \code{padding}, that side is extended only as far as the
-gap allows.
-
-Rows whose \code{gene} value is missing/empty or the literal placeholder
-\code{"Unknown"} are left unpadded, since "first/last exon of a gene"
-isn't meaningful for unannotated regions.
+Pad the outer edge of each gene's first and last exon
 }

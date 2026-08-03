@@ -2,34 +2,10 @@
 % Please edit documentation in R/echo_utils.R
 \name{validate_bed_regions}
 \alias{validate_bed_regions}
-\title{Validate a BED file for common structural and coordinate errors}
+\title{Validate a BED file}
 \usage{
 validate_bed_regions(bed_path, verbose = TRUE)
 }
-\arguments{
-\item{bed_path}{Character string. Path to a BED file.}
-
-\item{verbose}{Logical. Print a summary of findings. Default TRUE.}
-}
-\value{
-Invisibly, a named list of diagnostic data frames (empty list
-  if no issues were found).
-}
 \description{
-Lightweight, non-fatal sanity checks run on a BED file before it enters
-the ECHO pipeline: malformed/inverted coordinates, duplicate regions,
-and (when present) a consistency check between the BED's own
-start/end columns and any \code{"_chrN_start_end"}-style coordinate
-suffix embedded in the name column (a convention used by some
-capture-panel design exports, e.g. \code{"..._chr13_32889589_32889829"}).
-That last check compares the embedded 1-based coordinate against
-\code{start + 1} (the standard 0-based -> 1-based conversion). If most
-rows share the exact same non-zero offset, that is reported as a likely
-systematic authoring bug in the BED file (e.g. the export script
-subtracting one base too many) rather than N independent bad rows.
-}
-\details{
-This function never stops the pipeline — only warns — since some
-findings (e.g. multi-segment merged exons) are expected quirks rather
-than fatal errors.
+Validate a BED file
 }

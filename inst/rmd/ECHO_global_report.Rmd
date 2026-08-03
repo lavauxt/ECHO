@@ -102,8 +102,6 @@ library(kableExtra)
    if (is.null(dim(ref_z_mat))) ref_z_mat <- matrix(ref_z_mat, ncol = length(ref_samples))
    colnames(ref_z_mat) <- ref_samples
    
-   # --- BULLETPROOF EXON LABEL & GENE NAME EXTRACTION ---
-   # FIX: Define gene_col OUTSIDE the if/else block so it is always available
    gene_col <- if ("gene" %in% colnames(bed_file)) "gene" else if ("GENE" %in% colnames(bed_file)) "GENE" else NULL
    
    # 1. Try to use the pre-computed exon_number if it exists and has no NAs
@@ -178,15 +176,6 @@ if (!is.null(params$qc_metrics) && is.data.frame(params$qc_metrics) && nrow(para
   missing_chrs <- params$qc_metrics[params$qc_metrics$Type == "Missing Chromosome", ]
   if (nrow(missing_chrs) > 0) {
     for (i in seq_len(nrow(missing_chrs))) {
-      # BUG FIX: this used to be cat(sprintf('\n      <div ...')) with each
-      # HTML line indented to match the surrounding R code. results='asis'
-      # output goes straight into the Markdown source Pandoc then parses,
-      # and Pandoc's Markdown reader treats a line indented 4+ spaces as an
-      # INDENTED CODE BLOCK, not raw HTML — so this rendered as literal,
-      # HTML-escaped text in a <pre><code> block instead of a styled alert
-      # box. Fixed by emitting each line via its own cat() call starting at
-      # column 0 (matching the working style already used successfully
-      # elsewhere in this file, e.g. the confidence_recap chunk below).
       cat('<div class="alert alert-warning" role="alert">\n')
       cat('<h4 class="alert-heading" style="margin-top:0;font-weight:bold;"><i class="fa fa-exclamation-triangle"></i> Pipeline Warning</h4>\n')
       cat(sprintf('<p style="margin-bottom:0;">%s. <strong>Analysis for this chromosome has been skipped automatically.</strong></p>\n',

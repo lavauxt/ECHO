@@ -31,7 +31,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     }
   }
 
-  # Load data into local environment to avoid conflicts
   local_env <- new.env()
   load(summary_rdata, envir = local_env)
   cnv_calls <- local_env$cnv_calls
@@ -42,9 +41,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   gender_map <- local_env$gender_map
   sample_names <- local_env$sample_names   
 
-  # Use fread to handle missing fields gracefully. Guarded (unlike a bare
-  # fread() call) so a missing/failed QC-metrics step degrades the report
-  # gracefully instead of throwing -- mirrors CANOPE's generate_canope_report().
   qc_metrics <- NULL
   if (!is.null(qc_metrics_file) && file.exists(qc_metrics_file)) {
     qc_metrics <- data.table::fread(qc_metrics_file, header = TRUE, fill = TRUE, data.table = FALSE)
@@ -52,7 +48,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     message("[INFO] No QC metrics file supplied/found; report will skip the QC section.")
   }
 
-  # Load sample table if provided and not already in RData
   sample_df <- NULL
   if (!is.null(sample_table) && file.exists(sample_table)) {
     sample_df <- utils::read.table(sample_table, header = TRUE, sep = "\t",
@@ -62,13 +57,11 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
       sample_df <- NULL
     }
   } else if (!is.null(gender_map)) {
-    # Convert gender_map to data frame
     sample_df <- data.frame(sample_name = names(gender_map),
                             gender = gender_map,
                             stringsAsFactors = FALSE)
   }
 
-  # Load external reference BAM list if provided
   ref_bams_df <- NULL
   if (!is.null(ref_bams) && file.exists(ref_bams)) {
     ref_bams_df <- utils::read.table(ref_bams, header = TRUE, sep = "\t",
@@ -86,7 +79,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     template <- system.file("rmd/ECHO_global_report.Rmd", package = "ECHO")
     if (template == "") stop("Global report template not found. Reinstall package.")
     
-    # Determine output file name
     if (!is.null(prefix) && nzchar(prefix)) {
       out_file <- file.path(output_dir, paste0("ECHO_", prefix, "_report.html"))
     } else {

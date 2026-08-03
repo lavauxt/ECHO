@@ -63,10 +63,10 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   chrom_order <- function(chr) {
     stripped <- sub("^chr", "", chr)
     num      <- suppressWarnings(as.integer(stripped))
-    ifelse(is.na(num), Inf, num)   # X/Y/M sort after numbered chromosomes
+    ifelse(is.na(num), Inf, num)   
   }
   key_df <- key_df[order(chrom_order(key_df$Chromosome),
-                         key_df$Chromosome,   # tie-break for X, Y, M
+                         key_df$Chromosome,   
                          key_df$Start,
                          key_df$End,
                          key_df$Type), , drop = FALSE]

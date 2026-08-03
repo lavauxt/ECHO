@@ -2,43 +2,10 @@
 % Please edit documentation in R/echo_utils.R
 \name{check_background_calibration}
 \alias{check_background_calibration}
-\title{Flag Background-Exon Calibration Issues for a CNV Call Window}
+\title{Flag Background-Exon Calibration Issues}
 \usage{
 check_background_calibration(ratio, lo, hi, is_affected, min_n = 5)
 }
-\arguments{
-\item{ratio}{Numeric vector of Observed/Expected for every exon in the
-plotted window (background and affected together).}
-
-\item{lo, hi}{Numeric vectors (same length as \code{ratio}) giving the
-95% predictive interval bounds at each exon.}
-
-\item{is_affected}{Logical vector (same length); \code{TRUE} for exons
-already called as part of this CNV — excluded from the check, since
-those are expected to sit outside the interval.}
-
-\item{min_n}{Minimum number of background exons required before
-flagging (default 5) — below this the percentage is too noisy on its
-own to test meaningfully.}
-}
-\value{
-A list with \code{n_background}, \code{n_outside},
-  \code{pct_outside}, and \code{flag} — \code{flag} is \code{TRUE} when a
-  one-sided binomial test of \code{n_outside} against a 5% null rate is
-  significant at p < 0.05.
-}
 \description{
-Ported from CANOPE (a sibling pipeline sharing this reporting/plotting
-architecture). For a call's plotted window, tests whether the fraction
-of *non-called* ("background") exons whose observed ratio falls outside
-the modelled 95% predictive interval is statistically higher than the
-~5% a well-calibrated interval implies (one-sided binomial test against
-a 5% null). A high fraction here doesn't necessarily mean the interval
-itself is wrong for this sample/region in general — in practice it's
-more often a sign that the real alteration extends beyond the exons
-that got called, that the reference set is a poor match for this
-specific sample/region, or a technical/batch difference between the
-test sample and its references at this locus. It's a per-call
-diagnostic flag, not an automatic correction — it doesn't change the
-call, the interval, or the confidence score.
+Flag Background-Exon Calibration Issues
 }

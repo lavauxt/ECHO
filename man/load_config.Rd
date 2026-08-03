@@ -6,13 +6,6 @@
 \usage{
 load_config(yaml_path)
 }
-\arguments{
-\item{yaml_path}{Character string. Path to a YAML file, or a filename
-resolved via system.file() when not found locally.}
-}
-\value{
-Named list with input, output, and optional settings sections.
-}
 \description{
 Load and validate YAML configuration
 }
