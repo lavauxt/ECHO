@@ -8,7 +8,7 @@ Description: A modular R package for processing BAM files, extracting coverage, 
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
-sImports:
+Imports:
     ExomeDepth,
     utils,
     tools,
@@ -36,11 +36,6 @@ sImports:
     GenomeInfoDb,
     BiocGenerics
 Suggests:
-    AnnotationDbi,
-    GenomicFeatures,
-    GenomicRanges,
-    IRanges,
-    S4Vectors,
     testthat (>= 3.0.0),
     TxDb.Hsapiens.UCSC.hg19.knownGene,
     TxDb.Hsapiens.UCSC.hg38.knownGene,

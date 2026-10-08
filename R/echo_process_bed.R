@@ -66,7 +66,7 @@ exon_pattern <- "(?<![A-Za-z0-9])ex(?:on)?[_-]?([0-9]+)"
 exon_all <- gregexpr(exon_pattern, g_clean, perl = TRUE)
 exon_numbers <- vapply(seq_along(g_clean), function(i) {
     m <- exon_all[[i]]
-    if (length(m) == 0 || m[1] == -1) return(NA_integer_)
+    if (length(m) == 0 || is.na(m[1]) || m[1] == -1) return(NA_integer_)
     cap_start <- attr(m, "capture.start")[, 1]
     cap_len   <- attr(m, "capture.length")[, 1]
     last <- length(m)

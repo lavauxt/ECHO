@@ -13,7 +13,7 @@ test_that("REGEN keeps unmatched intervals and annotates largest overlaps", {
     stringsAsFactors = FALSE
   )
 
-  result <- ECHO:::.annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, c("GENE_A", "GENE_C", "Unknown"))
   expect_true(is.na(result$exon_number[3]))
@@ -26,7 +26,7 @@ test_that("REGEN handles BED and reference chromosome prefixes", {
   input <- data.frame(Chr = "1", Start = 100, End = 110)
   references <- data.frame(Chr = "chr1", Start = 101, End = 110, Gene = "GENE_A")
 
-  result <- ECHO:::.annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, "GENE_A")
 })
@@ -35,7 +35,7 @@ test_that("REGEN converts one-based input back to BED start coordinates", {
   input <- data.frame(Chr = "chr1", Start = 101, End = 110)
   references <- data.frame(Chr = "chr1", Start = 101, End = 110, Gene = "GENE_A")
 
-  result <- ECHO:::.annotate_bed_regen(input, references, bed_zero_based = FALSE)
+  result <- annotate_bed_regen(input, references, bed_zero_based = FALSE)
 
   expect_equal(result$start, 100)
   expect_equal(result$end, 110)
@@ -51,7 +51,7 @@ test_that("equal overlap ties resolve deterministically", {
     Gene = c("GENE_FIRST", "GENE_SECOND")
   )
 
-  result <- ECHO:::.annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, "GENE_FIRST")
 })
@@ -61,7 +61,7 @@ test_that("REGEN rejects invalid coordinates", {
   references <- data.frame(Chr = "chr1", Start = 1, End = 10, Gene = "GENE_A")
 
   expect_error(
-    ECHO:::.annotate_bed_regen(input, references, bed_zero_based = TRUE),
+    annotate_bed_regen(input, references, bed_zero_based = TRUE),
     "invalid coordinates"
   )
 })
