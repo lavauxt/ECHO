@@ -46,8 +46,7 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
     paste(unique(bed_file$gene[start_idx:end_idx]), collapse = " ")
   }, character(1))
   
-  cnv_calls$Start.b <- NULL
-  cnv_calls$End.b   <- NULL
+  cnv_calls <- cnv_calls[, !tolower(names(cnv_calls)) %in% c("start.b", "end.b"), drop = FALSE]
   cnv_calls$Confidence <- "LOW"
   
   high_corr_ok  <- !is.na(current_cor) && current_cor >= score_high_corr
@@ -214,7 +213,6 @@ run_cnv_calling <- function(rdata_file,
     }
   }
 
-  clean_chroms <- sub("^chr", "", counts$chromosome)
   results      <- list()
   ed_objects   <- list()
 
@@ -268,7 +266,7 @@ run_cnv_calling <- function(rdata_file,
         x                      = ed,
         transition.probability = transition.probability,
         expected.CNV.length    = expected.CNV.length,
-        chromosome             = clean_chroms,
+        chromosome             = counts$chromosome,
         start                  = counts$start,
         end                    = counts$end,
         name                   = counts$exon
@@ -355,9 +353,9 @@ run_cnv_calling <- function(rdata_file,
   }
 
   if (save_ed_objects) {
-    save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map, file = out_rdata)
+    save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map, sample_names, file = out_rdata)
   } else {
-    save(counts, cnv_calls, refs, models, bed_file, gender_map, file = out_rdata)
+    save(counts, cnv_calls, refs, models, bed_file, gender_map, sample_names, file = out_rdata)
   }
   message("[INFO] Saved summary RData to: ", out_rdata)
   message("[INFO] ", Sys.time(), " END CNV calls")

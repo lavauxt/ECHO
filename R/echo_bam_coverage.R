@@ -30,10 +30,10 @@ resolve_reference_fasta <- function(fasta = NULL,
                                      cache_dir = NULL,
                                      verbose = TRUE) {
 
-  if (is.character(fasta_source) && length(fasta_source) == 1 &&
-      !fasta_source %in% c("file", "bsgenome")) {
+  direct_pkg <- is.character(fasta_source) && length(fasta_source) == 1 &&
+    !fasta_source %in% c("file", "bsgenome")
+  if (direct_pkg) {
     pkg <- fasta_source
-    fasta_source <- "bsgenome_pkg"   # internal marker
   } else {
     fasta_source <- match.arg(fasta_source)
   }
@@ -43,8 +43,7 @@ resolve_reference_fasta <- function(fasta = NULL,
     return(fasta)
   }
 
-  if (fasta_source == "bsgenome_pkg") {
-  } else { 
+  if (!direct_pkg) {
     if (is.null(genome_version)) {
       stop("[ERROR] genome_version is required when fasta_source = 'bsgenome'")
     }
@@ -59,8 +58,8 @@ resolve_reference_fasta <- function(fasta = NULL,
   }
 
   if (!requireNamespace(pkg, quietly = TRUE)) {
-    stop("[ERROR] Package '", pkg, "' is required for fasta_source = '", 
-         if (fasta_source == "bsgenome") "bsgenome" else "bsgenome_pkg", 
+    stop("[ERROR] Package '", pkg, "' is required for fasta_source = '",
+         if (direct_pkg) pkg else "bsgenome",
          "' but is not installed.\n",
          "  Install with: BiocManager::install(\"", pkg, "\")\n",
          "  Or use fasta_source = 'file' with your own FASTA.")
@@ -97,7 +96,8 @@ resolve_reference_fasta <- function(fasta = NULL,
   }
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
-  cache_fasta <- file.path(cache_dir, paste0("ECHO_ref_", genome_version, "_bsgenome.fa"))
+  cache_tag <- if (direct_pkg) pkg else genome_version
+  cache_fasta <- file.path(cache_dir, paste0("ECHO_ref_", cache_tag, "_bsgenome.fa"))
   cache_fai   <- paste0(cache_fasta, ".fai")
 
   existing_chroms <- character(0)

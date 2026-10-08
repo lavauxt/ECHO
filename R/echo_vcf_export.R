@@ -63,7 +63,9 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   chrom_order <- function(chr) {
     stripped <- sub("^chr", "", chr)
     num      <- suppressWarnings(as.integer(stripped))
-    ifelse(is.na(num), Inf, num)   
+    special <- match(toupper(stripped), c("X", "Y", "M", "MT"))
+    ifelse(!is.na(num), num,
+           ifelse(!is.na(special), 22 + special, Inf))
   }
   key_df <- key_df[order(chrom_order(key_df$Chromosome),
                          key_df$Chromosome,   

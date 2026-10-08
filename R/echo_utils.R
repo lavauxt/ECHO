@@ -199,7 +199,7 @@ dt <- data.table::as.data.table(bed_file)
 dt[, .orig_row := .I]
 data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                      c("chrom", "start", "end", "gene"))
-dt[, .key := paste(chrom, start, end, gene, sep = "\r")]
+dt[, .key := paste(chrom, start, end, gene, sep = "\u241f")]
 dup_rows <- duplicated(dt, by = ".key")
 if (any(dup_rows)) {
     warning(sprintf(
@@ -246,6 +246,7 @@ stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
 n_in <- nrow(bed_file)
 if (n_in == 0) return(bed_file)
 numbered <- assign_exon_numbers_per_gene(bed_file)
+original_exon_number <- if ("exon_number" %in% names(bed_file)) bed_file$exon_number else NULL
 dt <- data.table::as.data.table(numbered)
 dt[, .orig_row := .I]
 data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
@@ -311,6 +312,10 @@ dt[, c(".orig_row", ".chrom_fac", "is_first", "is_last", "exon_number") := NULL]
 data.table::setnames(dt, c("chrom", "start", "end", "gene"),
                      c(chrom_col, start_col, end_col, gene_col))
 out <- as.data.frame(dt)
+if (!is.null(original_exon_number)) {
+    out$exon_number <- original_exon_number
+    out <- out[, names(bed_file), drop = FALSE]
+}
 stopifnot(nrow(out) == n_in)
 if (verbose) {
     message(sprintf(

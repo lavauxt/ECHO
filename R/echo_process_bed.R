@@ -15,6 +15,9 @@ gene_field_index = NULL,
 off_target_pattern = "^HorsROI",
 off_target_handling = c("na", "remove", "merge")) {
 off_target_handling  <- match.arg(off_target_handling)
+if (identical(bed_process, "REGEN")) {
+  stop("REGEN BED processing is not implemented. Use bed_process = 'STANDARD' or 'NO'.")
+}
 parse_keep_indices  <- function(keep_str, max_len) {
 if (is.null(keep_str) || keep_str == "") return(NULL)
 if (is.numeric(keep_str)) return(keep_str)

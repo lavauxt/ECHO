@@ -107,7 +107,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       customexon             = args$customexon %||% FALSE,
       list_genes             = args$list_genes,
       genes_file             = args$genes_file,
-      genome_version         = args$genome_version %||% "hg19",
+      genome_version         = args$genome_version,
       bed_zero_based         = args$bed_zero_based %||% TRUE,
       skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
       off_target_pattern     = args$off_target_pattern %||% "^HorsROI",
@@ -164,12 +164,27 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   auto_regen <- cfg$auto_regen %||% TRUE
   if (auto_regen && !is.null(cfg$input$bed) && is.null(cfg$bed_process)) {
     cfg$bed_process <- "REGEN"
-    log_msg("BED preprocessing auto‑set to 'REGEN' (using TxDb/org.Hs.eg.db)")
+    log_msg("BED preprocessing auto-set to 'REGEN'")
+  }
+  if (identical(cfg$bed_process, "REGEN")) {
+    stop("REGEN BED processing is not implemented. Set bed_process = 'STANDARD' or 'NO'.")
   }
 
+  if (is.null(cfg$genome_version) && !is.null(cfg$settings$genome_version)) {
+    cfg$genome_version <- cfg$settings$genome_version
+  }
   if (is.null(cfg$genome_version)) {
-    if (!is.null(cfg$settings$genome_version)) {
-      cfg$genome_version <- cfg$settings$genome_version
+    source <- cfg$input$fasta_source %||% "file"
+    if (is.character(source) && length(source) == 1L &&
+        grepl("^BSgenome\\.", source, ignore.case = TRUE)) {
+      if (grepl("(^|\\.)hg19($|\\.)", source, ignore.case = TRUE)) {
+        cfg$genome_version <- "hg19"
+      } else if (grepl("(^|\\.)hg38($|\\.)", source, ignore.case = TRUE)) {
+        cfg$genome_version <- "hg38"
+      } else {
+        cfg$genome_version <- "hg19"
+        log_msg("Genome version not inferred from BSgenome package name; defaulting to 'hg19'.")
+      }
     } else if (!is.null(cfg$input$fasta)) {
       fname <- basename(cfg$input$fasta)
       if (grepl("hg19", fname, ignore.case = TRUE)) {
@@ -196,7 +211,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       log_msg(paste("Terminal-exon padding:", paste0(cfg$settings$pad_terminal_exons %||% 0, " bp")))
       log_msg(paste("Remove terminal-only calls:", cfg$settings$remove_terminal_only %||% FALSE))
       log_msg(paste("Penalize terminal-only calls:", cfg$settings$penalize_terminal_only %||% FALSE))
-      if (!is.null(cfg$bed_process) && cfg$bed_process != "NO" && !is.null(cfg$off_target_pattern %||% "^HorsROI")) {
+      if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
         log_msg(paste0("Off-target region handling: pattern = '", cfg$off_target_pattern %||% "^HorsROI",
                        "', handling = '", cfg$off_target_handling %||% "na", "'"))
       }
@@ -419,7 +434,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             })
             if (!is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
               if (!is.null(vcf_output)) {
-                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL)
+                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL,
+                                   reference = cfg$genome_version)
                 log_msg(paste("Combined VCF written to:", basename(vcf_output)))
               }
               if (vcf_per_sample) {
@@ -430,7 +446,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                     dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
                   vcf_file <- file.path(sample_folder,
                                         paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                  export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s)
+                  export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s,
+                                     reference = cfg$genome_version)
                   log_msg(paste("Per-sample VCF written to:", basename(vcf_file)))
                 }
               }
