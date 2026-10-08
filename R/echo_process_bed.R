@@ -1,4 +1,16 @@
 #' Process BED File for CNV Analysis
+#' @param input_bed BED file with at least chromosome, start, and end columns.
+#' @param output_bed Path for the processed BED output.
+#' @param bed_process Processing mode: \code{STANDARD}, \code{REGEN}, or \code{NO}.
+#' @param bed_zero_based Whether BED start coordinates are 0-based.
+#' @param genome_version Genome build; REGEN supports \code{hg19} and \code{hg38}.
+#' @param txdb Optional TxDb object for REGEN; otherwise the matching built-in
+#'   UCSC knownGene TxDb is selected from \code{genome_version}.
+#' @param unknown_gene Retained for compatibility. REGEN always preserves
+#'   unmatched intervals as \code{Unknown}.
+#' @param refseqgene,transcripts_file,gene_list_restrict,chr_list_restrict Legacy
+#'   arguments retained for compatibility; not used by REGEN.
+#' @param exon_sep,gene_name_collapse,customexon,auto_exon_number,region_numbering_mode,gene_name_keep,list_genes,genes_file,panel_files,gene_field_index,off_target_pattern,off_target_handling Additional BED-processing options.
 #' @export
 process_bed_file  <- function(input_bed, output_bed, bed_process = "STANDARD",
 bed_zero_based = TRUE,
@@ -15,26 +27,21 @@ gene_field_index = NULL,
 off_target_pattern = "^HorsROI",
 off_target_handling = c("na", "remove", "merge")) {
 off_target_handling  <- match.arg(off_target_handling)
-if (identical(bed_process, "REGEN")) {
-  stop("REGEN BED processing is not implemented. Use bed_process = 'STANDARD' or 'NO'.")
-}
-parse_keep_indices  <- function(keep_str, max_len) {
-if (is.null(keep_str) || keep_str == "") return(NULL)
-if (is.numeric(keep_str)) return(keep_str)
-keep_str  <- as.character(keep_str)
-if (grepl("-", keep_str)) {
-parts  <- as.numeric(strsplit(keep_str, "-")[[1]])
-if (length(parts) == 2 && !any(is.na(parts))) {
-return(seq(parts[1], min(parts[2], max_len)))
-}
-}
-if (grepl(",", keep_str)) {
-parts  <- as.numeric(strsplit(keep_str, ",")[[1]])
-return(parts[!is.na(parts)])
-}
-idx  <- as.numeric(keep_str)
-if (!is.na(idx)) return(idx)
-return(NULL)
+parse_keep_indices <- function(keep_str, max_len) {
+  if (is.null(keep_str) || keep_str == "") return(NULL)
+  if (is.numeric(keep_str)) return(keep_str)
+  keep_str <- as.character(keep_str)
+  if (grepl("-", keep_str)) {
+    parts <- as.numeric(strsplit(keep_str, "-")[[1]])
+    if (length(parts) == 2 && !any(is.na(parts))) return(seq(parts[1], min(parts[2], max_len)))
+  }
+  if (grepl(",", keep_str)) {
+    parts <- as.numeric(strsplit(keep_str, ",")[[1]])
+    return(parts[!is.na(parts)])
+  }
+  idx <- as.numeric(keep_str)
+  if (!is.na(idx)) return(idx)
+  NULL
 }
 parse_bed_name  <- function(name_vec, exon_sep = " ", gene_field_index = NULL,
 gene_name_keep = NULL, auto_exon = TRUE, gene_name_collapse = " ") {
@@ -109,17 +116,6 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
 list(gene = gene_names, exon = exon_numbers)
 }
 
-select_best_hits <- function(gr1, gr2, hits) {
-qh <- S4Vectors::queryHits(hits)
-sh <- S4Vectors::subjectHits(hits)
-ov <- GenomicRanges::pintersect(gr1[qh], gr2[sh])
-w <- IRanges::width(ov)
-df_hits <- data.frame(q = qh, s = sh, w = w)
-df_hits <- df_hits[order(df_hits$q, -df_hits$w), ]
-df_hits <- df_hits[!duplicated(df_hits$q), ]
-list(q = df_hits$q, s = df_hits$s)
-}
-
 input_df  <- utils::read.table(input_bed, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
 if (ncol(input_df)  < 3) stop("Input BED must have at least 3 columns.")
 colnames(input_df)[1:3]  <- c("Chr", "Start", "End")
@@ -138,7 +134,81 @@ input_df$ExonNum <- NA_integer_
 }
 
 if (bed_process == "REGEN") {
-stop("REGEN logic omitted for brevity, please keep your existing REGEN block")
+if (!requireNamespace("GenomicFeatures", quietly = TRUE)) {
+  stop("[ERROR] Package 'GenomicFeatures' is required for bed_process = 'REGEN'.")
+}
+if (!requireNamespace("GenomicRanges", quietly = TRUE) ||
+    !requireNamespace("IRanges", quietly = TRUE) ||
+    !requireNamespace("S4Vectors", quietly = TRUE)) {
+  stop("[ERROR] GenomicRanges, IRanges, and S4Vectors are required for bed_process = 'REGEN'.")
+}
+
+if (is.null(txdb)) {
+  if (length(genome_version) != 1L || is.na(genome_version) ||
+      !tolower(genome_version) %in% c("hg19", "hg38")) {
+    stop("[ERROR] REGEN requires genome_version = 'hg19' or 'hg38'.")
+  }
+  txdb_package <- if (tolower(genome_version) == "hg19") {
+    "TxDb.Hsapiens.UCSC.hg19.knownGene"
+  } else {
+    "TxDb.Hsapiens.UCSC.hg38.knownGene"
+  }
+  if (!requireNamespace(txdb_package, quietly = TRUE)) {
+    stop("[ERROR] Package '", txdb_package,
+         "' is required for REGEN with genome_version = '", genome_version,
+         "'. Install it with BiocManager::install(\"", txdb_package, "\").")
+  }
+  txdb <- getExportedValue(txdb_package, txdb_package)
+}
+
+ex <- GenomicFeatures::exons(txdb, columns = c("tx_name", "GENEID"))
+if (length(ex) == 0L) stop("[ERROR] The selected TxDb contains no exon annotations.")
+transcripts <- as.character(S4Vectors::unstrsplit(ex$tx_name, sep = ","))
+gene_ids <- as.character(S4Vectors::unstrsplit(ex$GENEID, sep = ","))
+ref_df <- data.frame(
+  Chr = as.character(GenomicRanges::seqnames(ex)),
+  Start = GenomicRanges::start(ex),
+  End = GenomicRanges::end(ex),
+  Transcript = sub(",.*", "", transcripts),
+  GeneID = sub(",.*", "", gene_ids),
+  stringsAsFactors = FALSE
+)
+ref_df <- ref_df[!is.na(ref_df$GeneID) & nzchar(ref_df$GeneID), , drop = FALSE]
+ref_df$Transcript[is.na(ref_df$Transcript)] <- ""
+
+if (any(grepl("^NM_", ref_df$Transcript), na.rm = TRUE)) {
+  ref_df <- ref_df[grepl("^NM_", ref_df$Transcript), , drop = FALSE]
+}
+if (!nrow(ref_df)) stop("[ERROR] No usable transcript exons were found in the selected TxDb.")
+
+if (requireNamespace("org.Hs.eg.db", quietly = TRUE) &&
+    requireNamespace("AnnotationDbi", quietly = TRUE)) {
+  org_db <- getExportedValue("org.Hs.eg.db", "org.Hs.eg.db")
+  mapped_genes <- suppressMessages(AnnotationDbi::mapIds(
+    org_db,
+    keys = unique(ref_df$GeneID),
+    keytype = "ENTREZID",
+    column = "SYMBOL",
+    multiVals = "first"
+  ))
+  ref_df$Gene <- unname(mapped_genes[ref_df$GeneID])
+  missing_symbols <- is.na(ref_df$Gene) | !nzchar(ref_df$Gene)
+  ref_df$Gene[missing_symbols] <- ref_df$GeneID[missing_symbols]
+} else {
+  message("[WARNING] Package 'org.Hs.eg.db' is not installed; using Entrez IDs as gene names.")
+  ref_df$Gene <- ref_df$GeneID
+}
+
+# Stable subject ordering defines which annotation wins equal-overlap ties.
+ref_df <- ref_df[order(ref_df$Chr, ref_df$Start, ref_df$End,
+                       ref_df$Transcript, ref_df$Gene, method = "radix"), , drop = FALSE]
+df <- annotate_bed_regen(input_df, ref_df, bed_zero_based = bed_zero_based)
+names(df)[names(df) == "chromosome"] <- "Chr"
+names(df)[names(df) == "start"] <- "Start"
+names(df)[names(df) == "end"] <- "End"
+names(df)[names(df) == "gene"] <- "Gene"
+names(df)[names(df) == "exon_number"] <- "ExonNum"
+df$Custom.Exon <- df$ExonNum
 } else if (bed_process == "STANDARD") {
 panel_bed_paths <- NULL
 if (!is.null(list_genes) && file.exists(list_genes)) panel_bed_paths <- readLines(list_genes)
@@ -254,7 +324,7 @@ stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")
 
 df$Gene  <- as.character(df$Gene)
 df$Gene  <- vapply(strsplit(df$Gene, ",", fixed = TRUE), function(x) x[1], character(1))
-if (!unknown_gene) {
+if (!unknown_gene && bed_process != "REGEN") {
 df  <- df[!is.na(df$Gene) & df$Gene != "" & df$Gene != ".", ]
 } else {
 df$Gene[is.na(df$Gene) | df$Gene == ""]  <- "Unknown"

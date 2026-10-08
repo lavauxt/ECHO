@@ -166,10 +166,6 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     cfg$bed_process <- "REGEN"
     log_msg("BED preprocessing auto-set to 'REGEN'")
   }
-  if (identical(cfg$bed_process, "REGEN")) {
-    stop("REGEN BED processing is not implemented. Set bed_process = 'STANDARD' or 'NO'.")
-  }
-
   if (is.null(cfg$genome_version) && !is.null(cfg$settings$genome_version)) {
     cfg$genome_version <- cfg$settings$genome_version
   }
@@ -280,7 +276,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           genes_file            = cfg$genes_file %||% NULL,
           panel_files           = cfg$panel_files %||% NULL,
           genome_version        = cfg$genome_version,
-          txdb                  = NULL,
+          txdb                  = cfg$txdb %||% NULL,
           gene_field_index      = gene_field_index,
           off_target_pattern    = cfg$off_target_pattern %||% "^HorsROI",
           off_target_handling   = cfg$off_target_handling %||% "na"

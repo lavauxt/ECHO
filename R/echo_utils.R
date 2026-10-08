@@ -461,7 +461,7 @@ if (verbose) message("[WARNING] BED file has fewer than 3 columns; skipping vali
 return(invisible(list()))
 }
 data.table::setnames(bed, 1:3, c("chrom", "start", "end"))
-if (ncol(bed)  >= 4) data.table::setnames(bed, 4, "name") else bed$name  <- NA_character
+if (ncol(bed)  >= 4) data.table::setnames(bed, 4, "name") else bed$name  <- NA_character_
 issues <- list()
 if (verbose) message("[INFO] Validating BED file: ", bed_path, " (", nrow(bed), " rows)")
 bad_coords <- which(!is.na(bed$start) & !is.na(bed$end) & (bed$end <= bed$start | bed$start < 0))

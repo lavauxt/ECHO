@@ -84,10 +84,10 @@ below.
   with a beta-binomial predictive interval, and a z-score-vs-references
   panel) plus an interactive HTML report with `plotly` panels and `DT`
   tables — no third-party viewer needed.
-* **Flexible BED Annotation:** `STANDARD`/`REGEN`/`NO` preprocessing modes,
-  gene/exon annotation from panel files or an internal RefSeq-like database
-  (`TxDb`/`org.Hs.eg.db`), with `REGEN` auto-selected by default whenever a
-  BED file is supplied and no mode is set explicitly.
+* **Flexible BED Annotation:** `STANDARD`/`REGEN`/`NO` preprocessing modes.
+  `STANDARD` parses BED names or panel files; `REGEN` annotates intervals by
+  largest overlap with UCSC knownGene exons (hg19 or hg38), preferring NM_
+  transcripts when present. Unmatched intervals remain as `Unknown`.
 
 ## Installation
 
@@ -105,8 +105,10 @@ Bioconductor packages `Biostrings`, `Rsamtools`, `GenomeInfoDb`,
 `GenomicRanges`, `IRanges`, `BiocGenerics`.
 
 Optional (only needed for specific features): `BSgenome.Hsapiens.UCSC.*`
-(`fasta_source = "bsgenome"`), `GenomicFeatures` + a `TxDb.Hsapiens.UCSC.*`
-package + `org.Hs.eg.db` (BED `REGEN` mode), `ggrepel` (nicer PCA labels),
+(`fasta_source = "bsgenome"`), `GenomicFeatures` + the matching
+`TxDb.Hsapiens.UCSC.hg19.knownGene` or `TxDb.Hsapiens.UCSC.hg38.knownGene`
+package (BED `REGEN` mode), and `org.Hs.eg.db` for gene symbols (Entrez IDs
+are used when it is unavailable), `ggrepel` (nicer PCA labels),
 and `rmarkdown`, `knitr`, `DT`, `plotly`, `kableExtra` (interactive HTML
 report).
 
