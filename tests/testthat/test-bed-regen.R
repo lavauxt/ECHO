@@ -13,7 +13,7 @@ test_that("REGEN keeps unmatched intervals and annotates largest overlaps", {
     stringsAsFactors = FALSE
   )
 
-  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- ECHO:::annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, c("GENE_A", "GENE_C", "Unknown"))
   expect_true(is.na(result$exon_number[3]))
@@ -26,7 +26,7 @@ test_that("REGEN handles BED and reference chromosome prefixes", {
   input <- data.frame(Chr = "1", Start = 100, End = 110)
   references <- data.frame(Chr = "chr1", Start = 101, End = 110, Gene = "GENE_A")
 
-  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- ECHO:::annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, "GENE_A")
 })
@@ -35,7 +35,7 @@ test_that("REGEN converts one-based input back to BED start coordinates", {
   input <- data.frame(Chr = "chr1", Start = 101, End = 110)
   references <- data.frame(Chr = "chr1", Start = 101, End = 110, Gene = "GENE_A")
 
-  result <- annotate_bed_regen(input, references, bed_zero_based = FALSE)
+  result <- ECHO:::annotate_bed_regen(input, references, bed_zero_based = FALSE)
 
   expect_equal(result$start, 100)
   expect_equal(result$end, 110)
@@ -51,7 +51,7 @@ test_that("equal overlap ties resolve deterministically", {
     Gene = c("GENE_FIRST", "GENE_SECOND")
   )
 
-  result <- annotate_bed_regen(input, references, bed_zero_based = TRUE)
+  result <- ECHO:::annotate_bed_regen(input, references, bed_zero_based = TRUE)
 
   expect_equal(result$gene, "GENE_FIRST")
 })
@@ -61,9 +61,30 @@ test_that("REGEN rejects invalid coordinates", {
   references <- data.frame(Chr = "chr1", Start = 1, End = 10, Gene = "GENE_A")
 
   expect_error(
-    annotate_bed_regen(input, references, bed_zero_based = TRUE),
+    ECHO:::annotate_bed_regen(input, references, bed_zero_based = TRUE),
     "invalid coordinates"
   )
+})
+
+test_that("REGEN preserves unmatched intervals through the exported API", {
+  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg19.knownGene")
+
+  bed_file <- tempfile(fileext = ".bed")
+  output_file <- tempfile(fileext = ".bed")
+  on.exit(unlink(c(bed_file, output_file)))
+  writeLines("chrZZZ\t0\t10", bed_file)
+
+  process_bed_file(
+    bed_file,
+    output_file,
+    bed_process = "REGEN",
+    genome_version = "hg19"
+  )
+
+  result <- utils::read.table(output_file, sep = "\t", header = FALSE,
+                              stringsAsFactors = FALSE)
+  expect_equal(nrow(result), 1L)
+  expect_equal(result[[4]], "Unknown")
 })
 
 test_that("BED validation accepts files with no name column", {
