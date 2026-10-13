@@ -445,13 +445,6 @@ run_bam_coverage <- function(
     counts$exon_number <- bed_file$exon_number
   }
 
-  dup_mask <- duplicated(counts[, c("chromosome", "start", "end", "exon")])
-  if (any(dup_mask)) {
-    message("[WARNING] Removed ", sum(dup_mask), " duplicate target region(s)")
-    counts   <- counts[!dup_mask, , drop = FALSE]
-    bed_file <- bed_file[!dup_mask, ]
-  }
-
   if (nrow(bed_file) != nrow(counts)) stop("[ERROR] bed_file and counts row counts do not match")
   bed_file <- as.data.frame(bed_file)
   counts   <- as.data.frame(counts)

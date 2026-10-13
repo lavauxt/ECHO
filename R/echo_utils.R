@@ -453,21 +453,28 @@ validate_bed_regions  <- function(bed_path, verbose = TRUE) {
 bed  <- tryCatch(data.table::fread(bed_path, header = FALSE, sep = "\t"),
 error = function(e) NULL)
 if (is.null(bed) || nrow(bed) == 0) {
-if (verbose) message("[WARNING] Could not read BED file for validation: ", bed_path)
-return(invisible(list()))
+issues <- list(unreadable_file = bed_path)
+if (verbose) message("[WARNING] Could not read a non-empty BED file for validation: ", bed_path)
+return(invisible(issues))
 }
 if (ncol(bed)  < 3) {
-if (verbose) message("[WARNING] BED file has fewer than 3 columns; skipping validation.")
-return(invisible(list()))
+issues <- list(insufficient_columns = ncol(bed))
+if (verbose) message("[WARNING] BED file has fewer than 3 columns.")
+return(invisible(issues))
 }
 data.table::setnames(bed, 1:3, c("chrom", "start", "end"))
 if (ncol(bed)  >= 4) data.table::setnames(bed, 4, "name") else bed$name  <- NA_character_
 issues <- list()
 if (verbose) message("[INFO] Validating BED file: ", bed_path, " (", nrow(bed), " rows)")
-bad_coords <- which(!is.na(bed$start) & !is.na(bed$end) & (bed$end <= bed$start | bed$start < 0))
+start_num <- suppressWarnings(as.numeric(as.character(bed$start)))
+end_num <- suppressWarnings(as.numeric(as.character(bed$end)))
+bad_coords <- which(!is.finite(start_num) | !is.finite(end_num) |
+                    start_num != floor(start_num) | end_num != floor(end_num) |
+                    end_num <= start_num | start_num < 0)
 if (length(bad_coords)) {
     issues$invalid_coordinates <- as.data.frame(bed[bad_coords, ])
-    if (verbose) message("[WARNING] ", length(bad_coords), " row(s) have end <= start or a negative start.")
+    if (verbose) message("[WARNING] ", length(bad_coords),
+                         " row(s) have non-integer coordinates, end <= start, or a negative start.")
 }
 dup_rows <- which(duplicated(bed[, c("chrom", "start", "end")]))
 if (length(dup_rows)) {

@@ -249,10 +249,12 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                         "' (genome_version = ", cfg$genome_version, "); no local FASTA required."))
       }
 
-      tryCatch(
-        validate_bed_regions(cfg$input$bed, verbose = TRUE),
-        error = function(e) log_msg(paste("BED validation skipped:", conditionMessage(e)), "WARNING")
-      )
+      bed_issues <- validate_bed_regions(cfg$input$bed, verbose = TRUE)
+      fatal_bed_issues <- setdiff(names(bed_issues), "duplicate_regions")
+      if (length(fatal_bed_issues)) {
+        stop("[ERROR] BED validation failed (", paste(fatal_bed_issues, collapse = ", "),
+             "). Correct the BED file before continuing.")
+      }
 
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
         log_msg(paste("Preprocessing BED file using mode:", cfg$bed_process))

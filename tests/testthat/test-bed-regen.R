@@ -56,6 +56,15 @@ test_that("equal overlap ties resolve deterministically", {
   expect_equal(result$gene, "GENE_FIRST")
 })
 
+test_that("empty overlap selection returns no selected hits", {
+  query <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10))
+  subject <- GenomicRanges::GRanges("chr2", IRanges::IRanges(1, 10))
+  hits <- suppressWarnings(GenomicRanges::findOverlaps(query, subject))
+
+  expect_identical(ECHO:::select_best_hits(query, subject, hits),
+                   list(q = integer(), s = integer()))
+})
+
 test_that("REGEN rejects invalid coordinates", {
   input <- data.frame(Chr = "chr1", Start = -1, End = 10)
   references <- data.frame(Chr = "chr1", Start = 1, End = 10, Gene = "GENE_A")
@@ -93,6 +102,89 @@ test_that("BED validation accepts files with no name column", {
   writeLines("chr1\t0\t10", bed_file)
 
   expect_no_error(validate_bed_regions(bed_file, verbose = FALSE))
+})
+
+test_that("BED validation identifies malformed and invalid coordinates", {
+  bed_file <- tempfile(fileext = ".bed")
+  on.exit(unlink(bed_file))
+  writeLines(c(
+    "chr1\t0\t10",
+    "chr1\t5\t5",
+    "chr2\t-1\t10",
+    "chr3\tstart\t20",
+    "chr4\t1.5\t20"
+  ), bed_file)
+
+  issues <- validate_bed_regions(bed_file, verbose = FALSE)
+
+  expect_equal(nrow(issues$invalid_coordinates), 4L)
+})
+
+test_that("panel BED processing preserves input intervals without panel overlaps", {
+  input_bed <- tempfile(fileext = ".bed")
+  panel_bed <- tempfile(fileext = ".bed")
+  output_bed <- tempfile(fileext = ".bed")
+  on.exit(unlink(c(input_bed, panel_bed, output_bed)))
+  writeLines(c("chr1\t0\t10\tGENE_A exon_1", "chr1\t30\t40\tGENE_B exon_1"), input_bed)
+  writeLines("chr1\t0\t10\tGENE_A exon_1", panel_bed)
+
+  process_bed_file(input_bed, output_bed, bed_process = "STANDARD",
+                   panel_files = panel_bed, exon_sep = " ", unknown_gene = TRUE)
+  result <- utils::read.table(output_bed, sep = "\t", header = FALSE,
+                              stringsAsFactors = FALSE)
+
+  expect_equal(nrow(result), 2L)
+  expect_equal(result[[1]], c("chr1", "chr1"))
+  expect_equal(result[[2]], c(0, 30))
+  expect_equal(result[[3]], c(10, 40))
+  expect_equal(result[[4]], c("GENE_A", "Unknown"))
+})
+
+test_that("panel BED processing preserves all intervals when there are no overlaps", {
+  input_bed <- tempfile(fileext = ".bed")
+  panel_bed <- tempfile(fileext = ".bed")
+  output_bed <- tempfile(fileext = ".bed")
+  on.exit(unlink(c(input_bed, panel_bed, output_bed)))
+  writeLines(c("chr1\t0\t10\tGENE_A exon_1", "chr1\t30\t40\tGENE_B exon_1"), input_bed)
+  writeLines("chr2\t0\t10\tOTHER exon_1", panel_bed)
+
+  process_bed_file(input_bed, output_bed, bed_process = "STANDARD",
+                   panel_files = panel_bed, exon_sep = " ")
+  result <- utils::read.table(output_bed, sep = "\t", header = FALSE,
+                              stringsAsFactors = FALSE)
+
+  expect_equal(nrow(result), 2L)
+  expect_equal(result[[2]], c(0, 30))
+  expect_equal(result[[3]], c(10, 40))
+  expect_equal(result[[4]], c("Unknown", "Unknown"))
+})
+
+test_that("BED processing preserves duplicate and unnamed target intervals", {
+  input_bed <- tempfile(fileext = ".bed")
+  output_bed <- tempfile(fileext = ".bed")
+  on.exit(unlink(c(input_bed, output_bed)))
+  writeLines(c("chr1\t0\t10", "chr1\t0\t10"), input_bed)
+
+  suppressWarnings(process_bed_file(input_bed, output_bed, bed_process = "STANDARD",
+                                    bed_zero_based = TRUE))
+  result <- utils::read.table(output_bed, sep = "\t", header = FALSE,
+                              stringsAsFactors = FALSE)
+
+  expect_equal(nrow(result), 2L)
+  expect_equal(result[[1]], c("chr1", "chr1"))
+  expect_equal(result[[2]], c(0, 0))
+  expect_equal(result[[3]], c(10, 10))
+  expect_equal(result[[4]], c("Unknown", "Unknown"))
+})
+
+test_that("BED processing stops rather than dropping invalid intervals", {
+  input_bed <- tempfile(fileext = ".bed")
+  output_bed <- tempfile(fileext = ".bed")
+  on.exit(unlink(c(input_bed, output_bed)))
+  writeLines(c("chr1\t0\t10", "chr1\t5\t5"), input_bed)
+
+  expect_error(process_bed_file(input_bed, output_bed), "invalid_coordinates")
+  expect_false(file.exists(output_bed))
 })
 
 test_that("REGEN reports a missing genome-specific TxDb", {

@@ -116,6 +116,12 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
 list(gene = gene_names, exon = exon_numbers)
 }
 
+bed_issues <- validate_bed_regions(input_bed, verbose = FALSE)
+fatal_bed_issues <- setdiff(names(bed_issues), "duplicate_regions")
+if (length(fatal_bed_issues)) {
+  stop("[ERROR] Input BED validation failed (", paste(fatal_bed_issues, collapse = ", "),
+       "); no intervals were processed.")
+}
 input_df  <- utils::read.table(input_bed, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
 if (ncol(input_df)  < 3) stop("Input BED must have at least 3 columns.")
 colnames(input_df)[1:3]  <- c("Chr", "Start", "End")
@@ -214,8 +220,7 @@ panel_bed_paths <- NULL
 if (!is.null(list_genes) && file.exists(list_genes)) panel_bed_paths <- readLines(list_genes)
 else if (!is.null(genes_file) && file.exists(genes_file)) panel_bed_paths <- readLines(genes_file)
 else if (!is.null(panel_files)) {
-if (length(panel_files) == 1 && file.exists(panel_files[1])) panel_bed_paths <- readLines(panel_files[1])
-else panel_bed_paths <- panel_files
+panel_bed_paths <- panel_files
 }
 if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
    panel_list <- lapply(panel_bed_paths, function(f) {
@@ -244,16 +249,26 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
        seqnames = all_panels$Chr, ranges = IRanges::IRanges(start = all_panels$Start + 1, end = all_panels$End),
        Gene = all_panels$Gene, ExonNum = all_panels$ExonNum, OriginalName = all_panels$OriginalName
      )
-     hits <- GenomicRanges::findOverlaps(bed_gr, panel_gr)
+     common_chromosomes <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),
+                                     unique(as.character(GenomicRanges::seqnames(panel_gr))))
+     hits <- if (length(common_chromosomes)) {
+       GenomicRanges::findOverlaps(bed_gr, panel_gr)
+     } else {
+       NULL
+     }
      sel <- select_best_hits(bed_gr, panel_gr, hits)
      qh <- sel$q; sh <- sel$s
-     output_start <- GenomicRanges::start(bed_gr[qh])
-     if (bed_zero_based) output_start <- output_start - 1
-     
+     output_start <- if (bed_zero_based) input_df$Start else input_df$Start - 1
      df <- data.frame(
-       Chr = as.character(GenomicRanges::seqnames(bed_gr[qh])), Start = output_start, End = GenomicRanges::end(bed_gr[qh]),
-       Gene = panel_gr$Gene[sh], ExonNum = panel_gr$ExonNum[sh], OriginalName = panel_gr$OriginalName[sh], stringsAsFactors = FALSE
+       Chr = input_df$Chr, Start = output_start, End = input_df$End,
+       Gene = rep("Unknown", nrow(input_df)), ExonNum = rep(NA_integer_, nrow(input_df)),
+       OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
      )
+     if (length(qh)) {
+       df$Gene[qh] <- panel_gr$Gene[sh]
+       df$ExonNum[qh] <- panel_gr$ExonNum[sh]
+       df$OriginalName[qh] <- panel_gr$OriginalName[sh]
+     }
      
      names(df)[names(df) == "Chr"] <- "chromosome"
      names(df)[names(df) == "Start"] <- "start"
@@ -324,12 +339,7 @@ stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")
 
 df$Gene  <- as.character(df$Gene)
 df$Gene  <- vapply(strsplit(df$Gene, ",", fixed = TRUE), function(x) x[1], character(1))
-if (!unknown_gene && bed_process != "REGEN") {
-df  <- df[!is.na(df$Gene) & df$Gene != "" & df$Gene != ".", ]
-} else {
-df$Gene[is.na(df$Gene) | df$Gene == ""]  <- "Unknown"
-}
-df  <- unique(df)
+df$Gene[is.na(df$Gene) | df$Gene %in% c("", ".")] <- "Unknown"
 chrom_base  <- c(as.character(1:22), "X", "Y", "M")
 if (any(grepl("^chr", df$Chr))) {
 chrom_levels  <- paste0("chr", chrom_base)

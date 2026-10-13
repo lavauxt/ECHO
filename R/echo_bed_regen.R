@@ -1,4 +1,5 @@
 select_best_hits <- function(gr1, gr2, hits) {
+  if (!length(hits)) return(list(q = integer(), s = integer()))
   qh <- S4Vectors::queryHits(hits)
   sh <- S4Vectors::subjectHits(hits)
   overlap_width <- IRanges::width(GenomicRanges::pintersect(gr1[qh], gr2[sh]))
