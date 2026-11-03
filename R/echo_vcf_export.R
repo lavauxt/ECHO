@@ -76,7 +76,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   make_sample_field <- function(row_df, sv_type) {
     if (nrow(row_df) == 0) return("0/0:2:1.00")
     ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
-    if (is.na(ratio)) ratio <- 1
+    if (!is.finite(ratio)) ratio <- 1
 
     if (sv_type == "DEL" && ratio < 0.3) {
       cn <- 0L; gt <- "1/1"

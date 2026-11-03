@@ -102,8 +102,8 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
     }
 
     if (!is.na(chr_col)) {
-        has_chrX <- any(grepl("^(chr)?X$", bed_file[[chr_col]], ignore.case = TRUE))
-        has_chrY <- any(grepl("^(chr)?Y$", bed_file[[chr_col]], ignore.case = TRUE))
+        has_chrX <- any(grepl("^(chr)?(X|23)$", bed_file[[chr_col]], ignore.case = TRUE))
+        has_chrY <- any(grepl("^(chr)?(Y|24)$", bed_file[[chr_col]], ignore.case = TRUE))
     } else {
         has_chrX <- FALSE
         has_chrY <- FALSE
