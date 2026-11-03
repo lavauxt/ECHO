@@ -113,7 +113,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       off_target_pattern     = args$off_target_pattern %||% "^HorsROI",
       off_target_handling    = args$off_target_handling %||% "na",
       sample_name_collapse   = args$sample_name_collapse %||% sample_name_collapse,
-      panel_files            = args$panel_files %||% panel_files
+      panel_files            = args$panel_files %||% panel_files,
+      auto_regen             = args$auto_regen %||% TRUE
     )
   } else {
     stop("[ERROR] Either config_path or pipeline parameters must be provided.")
@@ -169,7 +170,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   if (is.null(cfg$genome_version) && !is.null(cfg$settings$genome_version)) {
     cfg$genome_version <- cfg$settings$genome_version
   }
-  if (is.null(cfg$genome_version)) {
+    if (is.null(cfg$genome_version)) {
     source <- cfg$input$fasta_source %||% "file"
     if (is.character(source) && length(source) == 1L &&
         grepl("^BSgenome\\.", source, ignore.case = TRUE)) {
@@ -178,21 +179,23 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       } else if (grepl("(^|\\.)hg38($|\\.)", source, ignore.case = TRUE)) {
         cfg$genome_version <- "hg38"
       } else {
-        cfg$genome_version <- "hg19"
-        log_msg("Genome version not inferred from BSgenome package name; defaulting to 'hg19'.")
+        stop("[ERROR] Cannot infer genome_version from BSgenome package '",
+             source, "'. Set genome_version explicitly (supported: hg19, hg38) ",
+             "or use fasta_source = 'file'.")
       }
     } else if (!is.null(cfg$input$fasta)) {
       fname <- basename(cfg$input$fasta)
-      if (grepl("hg19", fname, ignore.case = TRUE)) {
+      if (grepl("hg19|grch37", fname, ignore.case = TRUE)) {
         cfg$genome_version <- "hg19"
-      } else if (grepl("hg38", fname, ignore.case = TRUE)) {
+      } else if (grepl("hg38|grch38", fname, ignore.case = TRUE)) {
         cfg$genome_version <- "hg38"
       } else {
-        cfg$genome_version <- "hg19"
-        log_msg("Genome version not inferred; defaulting to 'hg19'.")
+        stop("[ERROR] Cannot infer genome_version from FASTA filename '",
+             fname, "'. Set genome_version explicitly in the config.")
       }
     } else {
-      cfg$genome_version <- "hg19"
+      stop("[ERROR] genome_version could not be inferred (no FASTA path, ",
+           "no BSgenome package, no genome_version setting).")
     }
   }
 

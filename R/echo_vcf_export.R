@@ -73,8 +73,14 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
                          key_df$End,
                          key_df$Type), , drop = FALSE]
 
+  multi_sample <- length(samples) > 1L
   make_sample_field <- function(row_df, sv_type) {
-    if (nrow(row_df) == 0) return("0/0:2:1.00")
+    if (nrow(row_df) == 0) {
+      # Multi-sample VCF: sample simply has no call here -> homozygous ref.
+      # Single-sample VCF: sample isn't affected by this record -> missing,
+      # not "0/0", because in single-sample mode we only emit called loci.
+      return(if (multi_sample) "0/0:2:1.00" else "./.:.:.")
+    }
     ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
     if (!is.finite(ratio)) ratio <- 1
 

@@ -3,6 +3,8 @@
 #' @param output_bed Path for the processed BED output.
 #' @param bed_process Processing mode: \code{STANDARD}, \code{REGEN}, or \code{NO}.
 #' @param bed_zero_based Whether BED start coordinates are 0-based.
+#' @param bed_zero_based Whether BED start coordinates are 0-based. Applied
+#'   to BOTH the input BED and any panel BEDs supplied via panel_files list_genes or genes_file.
 #' @param genome_version Genome build; REGEN supports \code{hg19} and \code{hg38}.
 #' @param txdb Optional TxDb object for REGEN; otherwise the matching built-in
 #'   UCSC knownGene TxDb is selected from \code{genome_version}.
@@ -122,7 +124,9 @@ if (length(fatal_bed_issues)) {
   stop("[ERROR] Input BED validation failed (", paste(fatal_bed_issues, collapse = ", "),
        "); no intervals were processed.")
 }
-input_df  <- utils::read.table(input_bed, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+input_df  <- utils::read.table(input_bed, sep = "\t", header = FALSE,
+                               stringsAsFactors = FALSE,
+                               fill = TRUE, comment.char = "", quote = "")
 if (ncol(input_df)  < 3) stop("Input BED must have at least 3 columns.")
 colnames(input_df)[1:3]  <- c("Chr", "Start", "End")
 if (ncol(input_df)  >= 4) {
@@ -225,7 +229,9 @@ panel_bed_paths <- panel_files
 if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
    panel_list <- lapply(panel_bed_paths, function(f) {
      if (!file.exists(f)) return(NULL)
-     tmp <- utils::read.table(f, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+        tmp <- utils::read.table(f, sep = "\t", header = FALSE,
+                            stringsAsFactors = FALSE,
+                            fill = TRUE, comment.char = "", quote = "")
      if (ncol(tmp) < 4) return(NULL)
      tmp <- tmp[, 1:4]
      colnames(tmp) <- c("Chr", "Start", "End", "OriginalName")
@@ -245,8 +251,15 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      input_start_1based <- if (bed_zero_based) input_df$Start + 1 else input_df$Start
      bed_gr <- GenomicRanges::GRanges(seqnames = input_df$Chr, ranges = IRanges::IRanges(start = input_start_1based, end = input_df$End))
      
+     panel_start_1based <- if (bed_zero_based) all_panels$Start + 1L else all_panels$Start
+     if (!bed_zero_based) {
+       warning("[WARNING] bed_zero_based = FALSE: panel BEDs will be treated as ",
+               "1-based. If your panel files are UCSC 0-based (the usual case), ",
+               "they will be off by one. Verify panel coordinates.", immediate. = TRUE)
+     }
      panel_gr <- GenomicRanges::GRanges(
-       seqnames = all_panels$Chr, ranges = IRanges::IRanges(start = all_panels$Start + 1, end = all_panels$End),
+       seqnames = all_panels$Chr,
+       ranges   = IRanges::IRanges(start = panel_start_1based, end = all_panels$End),
        Gene = all_panels$Gene, ExonNum = all_panels$ExonNum, OriginalName = all_panels$OriginalName
      )
      common_chromosomes <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),

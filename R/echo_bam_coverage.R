@@ -248,7 +248,10 @@ run_bam_coverage <- function(
     if (length(custom_sample_names) != length(bams)) stop("[ERROR] custom_sample_names length mismatch")
     sample_names <- custom_sample_names
   } else {
-    base_names <- tools::file_path_sans_ext(basename(bams))
+      base_names <- basename(bams)
+      base_names <- sub("\\.(cram|bam)$", "", base_names, ignore.case = TRUE)
+      base_names <- sub("\\.(sort|markdup|dedup|recal|fixmate|rg|merged)$", "",
+      base_names, ignore.case = TRUE)
 
     if (is.null(sample_name_collapse)) {
       sample_name_collapse <- if (nchar(sample_name_delim) == 1 && sample_name_delim != "\\")
@@ -257,15 +260,29 @@ run_bam_coverage <- function(
 
     keep_parts <- function(x, delim, keep_spec, collapse) {
       parts <- strsplit(x, delim)[[1]]
+      n     <- length(parts)
       if (grepl("-", keep_spec)) {
-        idx   <- as.numeric(strsplit(keep_spec, "-")[[1]])
-        parts <- parts[idx[1]:idx[2]]
+        idx <- suppressWarnings(as.numeric(strsplit(keep_spec, "-")[[1]]))
+        idx <- idx[!is.na(idx)]
+        if (length(idx) != 2L) {
+          warning("[WARNING] Malformed sample_name_keep range '", keep_spec,
+                  "' for '", x, "'. Using last part.")
+          return(parts[n])
+        }
+        lo <- max(1L, min(idx[1], n))
+        hi <- max(1L, min(idx[2], n))
+        if (lo > hi) {
+          warning("[WARNING] sample_name_keep range '", keep_spec,
+                  "' exceeds filename '", x, "' (", n, " parts). Using last part.")
+          return(parts[n])
+        }
+        parts <- parts[lo:hi]
       } else {
-        idx   <- as.numeric(keep_spec)
-        if (is.na(idx) || idx < 1L || idx > length(parts)) {
+        idx <- suppressWarnings(as.numeric(keep_spec))
+        if (is.na(idx) || idx < 1L || idx > n) {
           warning("[WARNING] sample_name_keep index ", idx, " out of range for '",
-                  x, "' (", length(parts), " parts). Using last part.")
-          idx <- length(parts)
+                  x, "' (", n, " parts). Using last part.")
+          idx <- n
         }
         parts <- parts[idx]
       }
@@ -441,16 +458,26 @@ run_bam_coverage <- function(
   if ("exon_number" %in% colnames(counts)) keep_cols <- c(keep_cols, "exon_number")
   counts <- counts[, keep_cols, drop = FALSE]
 
-  if ("exon_number" %in% colnames(bed_file)) {
-    counts$exon_number <- bed_file$exon_number
-  }
-
   if (nrow(bed_file) != nrow(counts)) stop("[ERROR] bed_file and counts row counts do not match")
   bed_file <- as.data.frame(bed_file)
   counts   <- as.data.frame(counts)
 
-  bed_file           <- assign_exon_numbers_per_gene(bed_file)
+  # Preserve user-curated exon numbering (col 5 of the BED) under a distinct
+  # column name, because assign_exon_numbers_per_gene() overwrites `exon_number`
+  # with a derived 1..N numbering (needed for terminal_only detection).
+  if ("exon_number" %in% colnames(bed_file) &&
+      any(!is.na(bed_file$exon_number))) {
+    message("[INFO] Preserving user-supplied exon_number from BED column 5 ",
+            "as `exon_label`; derived exon numbering stored as `exon_number`.")
+    bed_file$exon_label <- bed_file$exon_number
+  }
+
+  bed_file <- assign_exon_numbers_per_gene(bed_file)
   counts$exon_number <- bed_file$exon_number
+  if ("exon_label" %in% colnames(bed_file)) {
+    counts$exon_label <- bed_file$exon_label
+    bed_file$exon_label <- NULL
+  }
   if ("GC" %in% colnames(counts)) bed_file$GC <- counts$GC
 
   save(counts, bams, bed_file, sample_names, fasta, name_mapping, file = data_out)

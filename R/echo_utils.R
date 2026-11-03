@@ -74,13 +74,21 @@ df  <- df[!df[[chrom_col]] %in% norm(exclude), ]
 }
 df
 }
+
 #' Quantile function of the Beta-Binomial distribution
+#'
+#' NOTE: uses the large-`size` approximation `qbeta(p, a, b) * size`.
+#' For thin panels with small per-exon read counts the returned intervals
+#' may deviate from the true beta-binomial quantiles. Use
+#' \code{VGAM::qbetabinom.ab()} for exact quantiles if accuracy in that
+#' regime matters.
 #' @noRd
 qbetabinom <- function(p, size, rho, prob) {
 a <- prob * (1 - rho) / rho
 b <- (1 - prob) * (1 - rho) / rho
 qbeta(p, a, b) * size
 }
+
 #' Null coalescing operator
 #' @export
 `%||%`<- function(a, b) {
@@ -107,8 +115,6 @@ end_col   <- if ("end"        %in% names(df)) "end"        else "End"
 gene_col  <- if ("gene"       %in% names(df)) "gene"       else "Gene"
 if (!gene_col %in% names(df)) return(df)
 
-# FIX: Check OriginalName first if available, because parsing may have 
-# destroyed the off-target prefix (e.g. "HorsROI_chr1_123_456" -> gene "123")
 if ("OriginalName" %in% names(df)) {
     name_vals <- as.character(df[["OriginalName"]])
     is_off <- !is.na(name_vals) & grepl(pattern, name_vals, perl = TRUE)
@@ -199,6 +205,8 @@ dt <- data.table::as.data.table(bed_file)
 dt[, .orig_row := .I]
 data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                      c("chrom", "start", "end", "gene"))
+dt[, start := as.numeric(start)]
+dt[, end   := as.numeric(end)]
 dt[, .key := paste(chrom, start, end, gene, sep = "\u241f")]
 dup_rows <- duplicated(dt, by = ".key")
 if (any(dup_rows)) {
@@ -213,7 +221,6 @@ dt_unique[, .chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(c
 data.table::setorder(dt_unique, .chrom_fac, start, end)
 dt_unique[, .chrom_fac := NULL]
 
-# --- FIX: Exclude off-target / NA-gene rows from exon numbering ---
 valid_gene_rows <- !is.na(dt_unique$gene) & dt_unique$gene != "" & dt_unique$gene != "."
 dt_unique[, exon_number := NA_integer_]
 if (any(valid_gene_rows)) {
@@ -346,8 +353,15 @@ data.frame(idx = exon_range, px = px, gene_break = gene_break,
 
 #' Convert global exon indices to within-gene indices
 #' @export
-add_within_gene_indices <- function(cnv_calls, bed_file) {
+aadd_within_gene_indices <- function(cnv_calls, bed_file) {
 if (nrow(cnv_calls) == 0) return(cnv_calls)
+# Guard against double-conversion: once start.p has been rewritten to
+# within-gene indices, it no longer equals global_start.
+if ("global_start" %in% names(cnv_calls) &&
+    any(cnv_calls$global_start != as.integer(cnv_calls$start.p), na.rm = TRUE)) {
+  stop("[ERROR] add_within_gene_indices(): 'start.p' has already been ",
+       "converted to within-gene indices; refusing to convert again.")
+}
 bed_sorted <- assign_exon_numbers_per_gene(bed_file)
 exon_numbers <- bed_sorted$exon_number
 cnv_calls$global_start <- as.integer(cnv_calls$start.p)
