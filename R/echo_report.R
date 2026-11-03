@@ -89,7 +89,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     
     rmarkdown::render(template,
                       params = list(
-                        sample = s,
                         cnv_calls = cnv_calls,
                         qc_metrics = qc_metrics,
                         counts = counts,
