@@ -128,7 +128,6 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
       out_file <- file.path(normalizePath(sample_dir, mustWork = TRUE), basename(out_file))
       rmarkdown::render(template,
                         params = list(
-                          sample = s,
                           cnv_calls = cnv_calls,
                           qc_metrics = qc_metrics,
                           counts = counts,

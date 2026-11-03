@@ -353,7 +353,7 @@ data.frame(idx = exon_range, px = px, gene_break = gene_break,
 
 #' Convert global exon indices to within-gene indices
 #' @export
-aadd_within_gene_indices <- function(cnv_calls, bed_file) {
+add_within_gene_indices <- function(cnv_calls, bed_file) {
 if (nrow(cnv_calls) == 0) return(cnv_calls)
 # Guard against double-conversion: once start.p has been rewritten to
 # within-gene indices, it no longer equals global_start.
