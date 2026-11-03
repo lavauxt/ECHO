@@ -2,8 +2,9 @@
 #' @param input_bed BED file with at least chromosome, start, and end columns.
 #' @param output_bed Path for the processed BED output.
 #' @param bed_process Processing mode: \code{STANDARD}, \code{REGEN}, or \code{NO}.
-#' @param bed_zero_based Whether BED start coordinates are 0-based.
-#'   to BOTH the input BED and any panel BEDs supplied via panel_files list_genes or genes_file.
+#' @param bed_zero_based Whether BED start coordinates are 0-based. Applied
+#'   to BOTH the input BED and any panel BEDs supplied via \code{panel_files},
+#'   \code{list_genes} or \code{genes_file}.
 #' @param genome_version Genome build; REGEN supports \code{hg19} and \code{hg38}.
 #' @param txdb Optional TxDb object for REGEN; otherwise the matching built-in
 #'   UCSC knownGene TxDb is selected from \code{genome_version}.
