@@ -213,7 +213,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       }
 
       paths <- list(
-        rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.Rdata")),
+        rdata   = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_coverage.RData")),
         metrics = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_QC_metrics.tsv")),
         cnvs    = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_CNV_calls.tsv")),
         summary = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_summary.RData")),

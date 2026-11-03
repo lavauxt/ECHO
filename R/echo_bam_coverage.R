@@ -172,7 +172,7 @@ run_bam_coverage <- function(
   genome_version     = NULL,
   bsgenome_cache_dir = NULL,
   rbams    = NULL,
-  data_out = "./ECHO_coverage.Rdata",
+  data_out = "./ECHO_coverage.RData",
   include.chr = FALSE,
   verbose  = TRUE,
   sample_name_delim    = "\\.",
