@@ -27,7 +27,7 @@ output:
   prefix: "TEST"                          # Output filename base text identification tag
 
 settings:
-  modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'
+  modechrom: "A"                          # Analysis profile: 'A' (Autosomes), 'X', 'Y'. ONE class per run: the others are reported as 'NOT analysed' in the QC metrics and the HTML report
   min_corr: 0.98                          # Drop reference components with alignment score below this
   min_cov: 100                            # Minimum read mapping target interval ceiling
   min_total_reads: 300000                 # Library depth filter criteria rule per sample file
@@ -43,6 +43,8 @@ settings:
   pca_plot: true                          # Generate PCA coverage plot (PDF)
   pad_terminal_exons: 300                 # Bases to extend the outward edge of each gene's first/last exon (0 = off); reduces 0/low counts at gene boundaries without overlapping neighbouring targets
   plot_gene_gap: 1                        # Extra x-axis units of blank space between a gene's last exon and the next gene's first exon, in every PDF/report panel (0 = off)
+  report_plotly: "inline"                 # HTML report: "inline" = self-contained file (plotly.js embedded, ~3.6 MB) or "cdn" = smaller file that needs internet to draw the plots
+  report_max_profiles: 500                # HTML report: max number of CNV calls whose coverage profile is embedded (HIGH/MEDIUM first)
   off_target_gene_pattern: "^HorsROI"     # Regex matching off-target/filler BED entries (own unrelated numbering, interspersed between a gene's real exons); these get a fixed grey tile, no text label, and a blanked axis tick instead of being treated like a real gene. "" or null = off
   remove_terminal_only: true              # set to true to drop terminal-only calls
   penalize_terminal_only: false           # set to true to downgrade them to LOW

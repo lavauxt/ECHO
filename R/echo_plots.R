@@ -37,7 +37,9 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
     test_log    <- log(pmax(counts[exon_range, sample], 1))
 
     cov_list <- lapply(ref_samples, function(r) {
-        scaling <- test_median / median(counts[exon_range, r])
+        # max(., 1): a reference with zero median coverage in this window
+        # would otherwise give an infinite scaling factor and NaN plots.
+        scaling <- test_median / max(median(counts[exon_range, r]), 1)
         r_log   <- log(pmax(counts[exon_range, r] * scaling, 1))
         data.frame(exon_idx = exon_range, px = px, gene_group = gene_group,
                    coverage = r_log, group = r,
@@ -59,7 +61,7 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
     ref_counts  <- rowSums(counts[exon_range, ref_samples, drop = FALSE])
     test_counts <- counts[exon_range, sample]
     totals      <- test_counts + ref_counts
-    expected    <- ref_counts * (test_median / ref_median)
+    expected    <- ref_counts * (test_median / max(ref_median, 1))
     expected_safe <- pmax(expected, 1)
     p_expected  <- expected_safe / totals
     p_expected  <- pmin(pmax(p_expected, 1e-6), 1 - 1e-6)
@@ -90,7 +92,7 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
 
     test_z <- (test_counts - expected_safe) / sd_z
     ref_z_list <- lapply(ref_samples, function(r) {
-        scaling_r    <- test_median / median(counts[exon_range, r])
+        scaling_r    <- test_median / max(median(counts[exon_range, r]), 1)
         ref_r_scaled <- counts[exon_range, r] * scaling_r
         (ref_r_scaled - expected_safe) / sd_z
     })
@@ -113,10 +115,32 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
 
     list(cov_data = cov_data, pt_data = pt_data, ci_data = ci_data,
          z_data = z_data, ref_z_list = ref_z_list, bg_calibration = bg_calib,
+         observed = test_counts, expected = expected_safe,
          exon_range = exon_range, px = px, gene_group = gene_group,
          single_chr = single_chr, prev = prev,
          new_chr = new_chr, sample = sample, idx_start = idx_start, idx_end = idx_end,
          ci_subtitle = ci_subtitle)
+}
+
+#' Per-target exon label used on the x axes of the PDF plots and the HTML report
+#'
+#' @param bed_file Target annotation (one row per count-matrix row).
+#' @return Character vector, \code{""} where a target has no exon number.
+#' @noRd
+resolve_exon_index <- function(bed_file) {
+    exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
+                     colnames(bed_file), ignore.case = TRUE, value = TRUE)
+    if (length(exon_col) == 0) {
+        exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
+    }
+    exon_index <- if (length(exon_col) > 0) {
+        bed_file[[exon_col[1]]]
+    } else if (ncol(bed_file) >= 5) {
+        bed_file[[5]]
+    } else {
+        compute_exon_index(bed_file)
+    }
+    ifelse(is.na(exon_index), "", as.character(exon_index))
 }
 
 save_cnv_pdf <- function(p_cov, p_genes, p_ci, p_zscore, file_path) {
@@ -197,8 +221,8 @@ create_gene_tile_plot <- function(bed_file, exon_range, single_chr, prev, new_ch
     names(pal) <- gene_names
     gene_tiles <- data.frame(
         gene  = gene_names,
-        mid   = as.numeric(sapply(gene_names, function(g) mean(px[temp$gene == g]))),
-        width = as.numeric(sapply(gene_names, function(g) sum(temp$gene == g))) - 0.5,
+        mid   = as.numeric(sapply(gene_names, function(g) mean(px[which(temp$gene == g)]))),
+        width = as.numeric(sapply(gene_names, function(g) sum(temp$gene == g, na.rm = TRUE))) - 0.5,
         y     = 1, stringsAsFactors = FALSE)
     if (!single_chr) {
         gene_tiles <- rbind(gene_tiles, data.frame(
@@ -290,9 +314,9 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     log_msg <- function(msg, type = "INFO") {
         if (!is.null(log_file)) cat(paste0("[", type, "] ", Sys.time(), " ", msg, "\n"),
                                     file = log_file, append = TRUE)
-        message(msg)
+        message("[", type, "] ", msg)
     }
-    log_msg("[INFO] BEGIN plot generation")
+    log_msg("BEGIN plot generation")
     objs      <- load_rdata(rdata_file, required = c("cnv_calls", "counts", "bed_file", "models", "refs"))
     cnv_calls <- objs$cnv_calls
     counts    <- objs$counts
@@ -301,7 +325,7 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     refs      <- objs$refs
 
     if (is.null(cnv_calls) || nrow(cnv_calls) == 0) {
-        log_msg("[INFO] No CNV calls to plot.")
+        log_msg("No CNV calls to plot.")
         return(invisible(0))
     }
 
@@ -312,25 +336,13 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     exc      <- if (modechrom == "A") c("chrX", "chrY") else NULL
     cnv_plot <- filter_chromosomes(cnv_calls, include = inc, exclude = exc)
     if (nrow(cnv_plot) == 0) {
-        log_msg("[INFO] No CNV calls remain after chromosome filtering.")
+        log_msg("No CNV calls remain after chromosome filtering.")
         return(invisible(0))
     }
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
 
-    exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
-                     colnames(bed_file), ignore.case = TRUE, value = TRUE)
-    if (length(exon_col) == 0) {
-        exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
-    }
-    if (length(exon_col) > 0) {
-        exon_index <- bed_file[[exon_col[1]]]
-    } else if (ncol(bed_file) >= 5) {
-        exon_index <- bed_file[[5]]
-    } else {
-        exon_index <- compute_exon_index(bed_file)
-    }
-    exon_index <- ifelse(is.na(exon_index), "", as.character(exon_index))
+    exon_index <- resolve_exon_index(bed_file)
 
     n_written <- 0L
 
@@ -339,19 +351,20 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
             call_row <- cnv_plot[i, ]
             sample   <- call_row$Sample
             if (is.null(refs[[sample]]) || !length(refs[[sample]])) {
-                log_msg(paste("[WARNING] Skipping plot for", sample, "(call", i, "): no reference samples"), "WARNING")
+                log_msg(paste("Skipping plot for", sample, "(call", i, "): no reference samples"), "WARNING")
                 next
             }
             if (is.null(models[[sample]]) || length(models[[sample]]) < 1 || is.na(models[[sample]][1])) {
-                log_msg(paste("[WARNING] Skipping plot for", sample, "(call", i, "): missing model parameters"), "WARNING")
+                log_msg(paste("Skipping plot for", sample, "(call", i, "): missing model parameters"), "WARNING")
                 next
             }
             plot_data <- prepare_plot_data(call_row, counts, bed_file, exon_index, models, refs, gene_gap = gene_gap)
             if (is.null(plot_data)) {
-                log_msg(paste("[WARNING] Skipping plot for", sample, "(call", i, "): empty exon window"), "WARNING")
+                log_msg(paste("Skipping plot for", sample, "(call", i, "): empty exon window"), "WARNING")
                 next
             }
-            gene_str   <- sanitize_filename(as.character(call_row$Gene))
+            # Calls spanning many genes would otherwise exceed the 255-char filename limit.
+            gene_str   <- substr(sanitize_filename(as.character(call_row$Gene)), 1, 60)
             sample_dir <- file.path(output_dir, sanitize_filename(plot_data$sample))
             dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
             file_path <- file.path(sample_dir,
@@ -372,12 +385,12 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
                                            plot_data$exon_range, exon_index)
             save_cnv_pdf(p_cov, p_genes, p_ci, p_zscore, file_path)
             n_written <- n_written + 1L
-            log_msg(paste("[INFO] Saved plot:", file_path))
+            log_msg(paste("Saved plot:", file_path))
         }, error = function(e) {
             if (!is.null(grDevices::dev.list())) grDevices::dev.off()
-            log_msg(paste("[ERROR] Failed to plot call", i, ":", e$message), "ERROR")
+            log_msg(paste("Failed to plot call", i, ":", e$message), "ERROR")
         })
     }
-    log_msg(paste("[INFO] END plot generation (", n_written, " PDF(s) written)"))
+    log_msg(paste0("END plot generation (", n_written, " PDF(s) written)"))
     invisible(n_written)
 }

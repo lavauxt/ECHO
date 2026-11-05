@@ -148,8 +148,11 @@ test_that("panel BED processing preserves all intervals when there are no overla
   writeLines(c("chr1\t0\t10\tGENE_A exon_1", "chr1\t30\t40\tGENE_B exon_1"), input_bed)
   writeLines("chr2\t0\t10\tOTHER exon_1", panel_bed)
 
-  process_bed_file(input_bed, output_bed, bed_process = "STANDARD",
-                   panel_files = panel_bed, exon_sep = " ")
+  # a panel on another chromosome is almost always a 'chr' prefix mismatch: warn
+  expect_warning(
+    process_bed_file(input_bed, output_bed, bed_process = "STANDARD",
+                     panel_files = panel_bed, exon_sep = " "),
+    "share no chromosome name")
   result <- utils::read.table(output_bed, sep = "\t", header = FALSE,
                               stringsAsFactors = FALSE)
 

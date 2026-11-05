@@ -112,7 +112,11 @@ resolve_reference_fasta <- function(fasta = NULL,
                           " sequence(s): ", paste(missing_chroms, collapse = ", "))
     new_seqs <- Biostrings::getSeq(bsgenome, names = missing_chroms)
     names(new_seqs) <- missing_chroms
-    Biostrings::writeXStringSet(new_seqs, filepath = cache_fasta, append = file.exists(cache_fasta))
+    # Append only to a cache whose index we could read (existing_chroms is
+    # non-empty). A FASTA without a usable .fai is rewritten from scratch:
+    # appending to it would duplicate sequence names and break indexFa().
+    Biostrings::writeXStringSet(new_seqs, filepath = cache_fasta,
+                                append = length(existing_chroms) > 0L)
     if (file.exists(cache_fai)) file.remove(cache_fai)
     Rsamtools::indexFa(cache_fasta)
   } else if (verbose) {
@@ -223,7 +227,7 @@ run_bam_coverage <- function(
                         " sequence(s) (source: ", fasta_source, ")")
 
   bams <- character()
-  if (!is.null(bamfiles) && file.exists(bamfiles)) bams <- c(bams, readLines(bamfiles))
+  if (!is.null(bamfiles) && file.exists(bamfiles)) bams <- c(bams, trimws(readLines(bamfiles, warn = FALSE)))
   if (!is.null(bamdir)   && dir.exists(bamdir))    bams <- c(bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
 
   if (!is.null(rbams)) {
@@ -301,6 +305,12 @@ run_bam_coverage <- function(
     }
   }
   if (any(duplicated(sample_names))) stop("[ERROR] Duplicate sample names after extraction")
+  reserved_names <- c("chromosome", "start", "end", "exon", "GC", "exon_number", "exon_label")
+  if (any(sample_names %in% reserved_names)) {
+    stop("[ERROR] Sample name(s) clash with reserved column names (",
+         paste(intersect(sample_names, reserved_names), collapse = ", "),
+         "); change sample_name_delim / sample_name_keep or use custom_sample_names.")
+  }
 
   bed_file <- data.table::fread(bed, header = FALSE)
   if (ncol(bed_file) < 4) stop("[ERROR] BED file must have at least 4 columns (chr, start, end, name)")
@@ -418,10 +428,19 @@ run_bam_coverage <- function(
   if (verbose) message("[INFO] BED file cleaned. Final rows: ", nrow(bed_file))
   if (nrow(bed_file) == 0) stop("[ERROR] No valid intervals remain.")
 
+  # ExomeDepth::getBamCounts() follows the BED convention: it expects 0-based
+  # starts and adds 1 itself (IRanges(start = start + 1, end = end)). bed_file
+  # holds 1-based starts at this point (needed for the FASTA checks and the
+  # padding above), so hand ExomeDepth start - 1. Passing the 1-based start
+  # made every target 1 bp too short and shifted every reported Start (and the
+  # VCF POS) by one.
+  bed_for_counts       <- as.data.frame(bed_file)
+  bed_for_counts$start <- bed_for_counts$start - 1
+
   counts <- tryCatch({
     suppressWarnings(
       ExomeDepth::getBamCounts(
-        bed.frame      = as.data.frame(bed_file),
+        bed.frame      = bed_for_counts,
         bam.files      = bams,
         include.chr    = include.chr,
         referenceFasta = fasta
@@ -438,20 +457,29 @@ run_bam_coverage <- function(
     } else stop(e)
   })
 
-  normalised_bams <- vapply(bams, function(b) make.names(basename(b)), character(1))
-  sample_cols     <- intersect(colnames(counts), normalised_bams)
-  if (length(sample_cols) != length(bams))
-    sample_cols <- intersect(colnames(counts), paste0("X", normalised_bams))
-  if (length(sample_cols) != length(bams)) {
-    warning("[WARNING] Sample name matching failed; falling back to column order. Verify sample names.")
+  # One count column per BAM, named make.names(basename(bam)) by data.frame()
+  # (prefixed with "X" when the name starts with a digit). Match each BAM to
+  # its own column, so that the order of `sample_names` can never drift from
+  # the order of the columns.
+  normalised_bams <- unname(vapply(bams, function(b) make.names(basename(b)), character(1)))
+  sample_cols <- vapply(normalised_bams, function(nb) {
+    cand <- c(nb, paste0("X", nb))
+    cand <- cand[cand %in% colnames(counts)]
+    if (length(cand)) cand[1] else NA_character_
+  }, character(1), USE.NAMES = FALSE)
+  if (anyNA(sample_cols) || anyDuplicated(sample_cols)) {
     metadata_cols <- c("chromosome", "start", "end", "exon", "GC", "exon_number")
-    sample_cols   <- setdiff(colnames(counts), metadata_cols)
-    sample_cols   <- sample_cols[order(match(normalised_bams, sample_cols))]
+    positional    <- setdiff(colnames(counts), metadata_cols)
+    if (length(positional) != length(bams)) {
+      stop("[ERROR] Could not match the ", length(bams), " BAM file(s) to the ",
+           length(positional), " count column(s) returned by ExomeDepth::getBamCounts().")
+    }
+    warning("[WARNING] Sample name matching failed; assuming getBamCounts() returned the BAM ",
+            "columns in input order. Verify sample names.")
+    sample_cols <- positional
   }
   name_mapping <- setNames(sample_names, sample_cols)
-  for (old_name in sample_cols) {
-    colnames(counts)[colnames(counts) == old_name] <- name_mapping[old_name]
-  }
+  colnames(counts)[match(sample_cols, colnames(counts))] <- sample_names
 
   keep_cols <- c("chromosome", "start", "end", "exon", sample_names)
   if ("GC" %in% colnames(counts)) keep_cols <- c(keep_cols, "GC")
@@ -461,6 +489,28 @@ run_bam_coverage <- function(
   if (nrow(bed_file) != nrow(counts)) stop("[ERROR] bed_file and counts row counts do not match")
   bed_file <- as.data.frame(bed_file)
   counts   <- as.data.frame(counts)
+
+  # getBamCounts() re-sorts the targets by (chromosome, start + end), which is
+  # not the (start, end) order used above when targets overlap or are nested.
+  # Everything downstream is positional (counts row i <-> bed_file row i), so
+  # align the annotation to the count matrix explicitly instead of trusting
+  # that the two orders agree.
+  strip_chr <- function(x) sub("^chr", "", as.character(x), ignore.case = TRUE)
+  interval_key <- function(chr, start, end) paste(strip_chr(chr), as.numeric(start), as.numeric(end), sep = "\r")
+  occurrence   <- function(k) stats::ave(seq_along(k), k, FUN = seq_along)
+  k_bed <- interval_key(bed_file$chromosome, bed_file$start, bed_file$end)
+  k_cnt <- interval_key(counts$chromosome, counts$start, counts$end)
+  if (!identical(k_bed, k_cnt)) {
+    ord <- match(paste(k_cnt, occurrence(k_cnt)), paste(k_bed, occurrence(k_bed)))
+    if (anyNA(ord)) {
+      stop("[ERROR] The intervals returned by ExomeDepth::getBamCounts() do not correspond to the BED ",
+           "rows (coordinates differ); cannot align the target annotation to the count matrix.")
+    }
+    if (verbose) message("[INFO] Re-ordering the target annotation to follow the count matrix ",
+                         "(ExomeDepth sorts targets by start + end).")
+    bed_file <- bed_file[ord, , drop = FALSE]
+    rownames(bed_file) <- NULL
+  }
 
   # Preserve user-curated exon numbering (col 5 of the BED) under a distinct
   # column name, because assign_exon_numbers_per_gene() overwrites `exon_number`

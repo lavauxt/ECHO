@@ -36,7 +36,11 @@ as.list(env)
 #' @return Logical.
 #' @noRd
 bam_has_index <- function(bam) {
-file.exists(paste0(bam, ".bai")) || file.exists(paste0(bam, ".bam.bai"))
+# Rsamtools accepts both "x.bam.bai" and "x.bai". The old second test looked
+# for "x.bam.bam.bai", which never exists, so BAMs indexed as "x.bai" were
+# wrongly rejected.
+file.exists(paste0(bam, ".bai")) ||
+  file.exists(sub("\\.bam$", ".bai", bam, ignore.case = TRUE))
 }
 #' Normalise a chromosome name to match a reference naming style (vectorised)
 #' @param chr_vec Character vector of chromosome names.
@@ -405,6 +409,10 @@ return(cfg)
 #' @export
 plot_coverage_pca <- function(counts, sample_names, output_pdf = NULL,
 color_by = NULL, scale = TRUE) {
+if (length(sample_names) < 3) {
+warning("PCA needs at least 3 samples (got ", length(sample_names), "); skipped.")
+return(invisible(NULL))
+}
 count_mat <- as.matrix(counts[, sample_names, drop = FALSE])
 log_mat   <- log2(count_mat + 1)
 row_var   <- apply(log_mat, 1, var, na.rm = TRUE)
@@ -417,18 +425,23 @@ log_mat <- log_mat[keep, ]
 pca     <- prcomp(t(log_mat), scale. = scale, center = TRUE)
 var_exp <- summary(pca)$importance[2, ] * 100
 pca_df  <- data.frame(PC1 = pca$x[, 1], PC2 = pca$x[, 2], Sample = sample_names)
+# The grouping column must exist BEFORE ggplot() is called: the plot keeps its
+# own copy of the data, so a column added to pca_df afterwards is never seen
+# ("object 'Group' not found") and the coloured PCA silently failed.
+has_group <- !is.null(color_by) && length(color_by) == nrow(pca_df)
+if (has_group) pca_df$Group <- as.factor(color_by)
 p <- ggplot2::ggplot(pca_df, ggplot2::aes(x = PC1, y = PC2, label = Sample))
-if (!is.null(color_by) && length(color_by) == nrow(pca_df)) {
-    pca_df$Group <- as.factor(color_by)
+if (has_group) {
     p <- p + ggplot2::aes(colour = Group)
-    if (length(unique(color_by)) >= 2) {
-        p <- p + ggplot2::stat_ellipse(ggplot2::aes(colour = Group),
-                                       type = "norm", linetype = "dashed")
+    group_sizes <- table(pca_df$Group)
+    if (sum(group_sizes >= 3) >= 1) {
+        ell_df <- pca_df[pca_df$Group %in% names(group_sizes)[group_sizes >= 3], , drop = FALSE]
+        p <- p + ggplot2::stat_ellipse(data = ell_df, ggplot2::aes(x = PC1, y = PC2, colour = Group),
+                                       inherit.aes = FALSE, type = "norm", linetype = "dashed")
     }
 }
 p <- p +
-    ggplot2::geom_point(size = 3,
-                        colour = if (is.null(color_by)) "steelblue" else NULL) +
+    (if (has_group) ggplot2::geom_point(size = 3) else ggplot2::geom_point(size = 3, colour = "steelblue")) +
     ggplot2::labs(x = paste0("PC1 (", round(var_exp[1], 1), "%)"),
                   y = paste0("PC2 (", round(var_exp[2], 1), "%)"),
                   title = "PCA of Sample Coverage Profiles") +
@@ -447,7 +460,7 @@ if (requireNamespace("ggrepel", quietly = TRUE)) {
 } else {
     p <- p + ggplot2::geom_text(check_overlap = TRUE, size = 3, hjust = -0.2, vjust = 0.5)
 }
-if (is.null(color_by)) {
+if (!has_group) {
     p <- p + ggplot2::theme(legend.position = "none")
 } else {
     p <- p + ggplot2::guides(colour = ggplot2::guide_legend(title = "Group"))
@@ -462,8 +475,16 @@ invisible(list(pca = pca, var_exp = var_exp))
 }
 
 #' Validate a BED file
+#'
+#' @param bed_path Path to the BED file.
+#' @param verbose Print messages.
+#' @param bed_zero_based Logical. With the default \code{TRUE} (UCSC BED), an
+#'   interval is invalid if \code{end <= start} or \code{start < 0}. With
+#'   \code{FALSE} (1-based, closed intervals) a one-base interval
+#'   \code{start == end} is legitimate and only \code{end < start} or
+#'   \code{start < 1} is invalid.
 #' @export
-validate_bed_regions  <- function(bed_path, verbose = TRUE) {
+validate_bed_regions  <- function(bed_path, verbose = TRUE, bed_zero_based = TRUE) {
 bed  <- tryCatch(data.table::fread(bed_path, header = FALSE, sep = "\t"),
 error = function(e) NULL)
 if (is.null(bed) || nrow(bed) == 0) {
@@ -482,13 +503,21 @@ issues <- list()
 if (verbose) message("[INFO] Validating BED file: ", bed_path, " (", nrow(bed), " rows)")
 start_num <- suppressWarnings(as.numeric(as.character(bed$start)))
 end_num <- suppressWarnings(as.numeric(as.character(bed$end)))
+bad_order <- if (isFALSE(bed_zero_based)) {
+    end_num < start_num | start_num < 1
+} else {
+    end_num <= start_num | start_num < 0
+}
 bad_coords <- which(!is.finite(start_num) | !is.finite(end_num) |
                     start_num != floor(start_num) | end_num != floor(end_num) |
-                    end_num <= start_num | start_num < 0)
+                    bad_order)
 if (length(bad_coords)) {
     issues$invalid_coordinates <- as.data.frame(bed[bad_coords, ])
     if (verbose) message("[WARNING] ", length(bad_coords),
-                         " row(s) have non-integer coordinates, end <= start, or a negative start.")
+                         if (isFALSE(bed_zero_based))
+                           " row(s) have non-integer coordinates, end < start, or a start below 1."
+                         else
+                           " row(s) have non-integer coordinates, end <= start, or a negative start.")
 }
 dup_rows <- which(duplicated(bed[, c("chrom", "start", "end")]))
 if (length(dup_rows)) {
@@ -594,11 +623,126 @@ if (length(genes) != 1) next
 gene <- genes[1]
 if (is.na(gene) || gene == "") next
 gene_rows <- which(bed_file$gene == gene)
-first_exon <- min(bed_file$exon_number[gene_rows], na.rm = TRUE)
-last_exon  <- max(bed_file$exon_number[gene_rows], na.rm = TRUE)
-if (all(affected_exons %in% c(first_exon, last_exon))) {
+gene_exons <- bed_file$exon_number[gene_rows]
+gene_exons <- gene_exons[!is.na(gene_exons)]
+if (!length(gene_exons)) next
+first_exon <- min(gene_exons)
+last_exon  <- max(gene_exons)
+# A call that covers EVERY exon of the gene is a whole-gene event, not a
+# boundary artefact. Without this check every call in a gene of one or two
+# exons was "terminal-only" (all its exons are first/last exons), so
+# remove_terminal_only silently discarded whole-gene deletions/duplications.
+covers_whole_gene <- all(gene_exons %in% affected_exons)
+if (!covers_whole_gene && all(affected_exons %in% c(first_exon, last_exon))) {
   cnv_calls$terminal_only[i] <- TRUE
 }
 }
 cnv_calls
+}
+#' Classify chromosome names as autosome / X / Y / other
+#'
+#' Matches exactly what \code{run_cnv_calling()} analyses: autosomes are
+#' \code{1}-\code{22} (with or without a \code{chr} prefix), gonosomes are
+#' \code{X} and \code{Y}; everything else (chrM, alt/decoy contigs...) is
+#' \code{"other"} and is never analysed in any \code{modechrom}.
+#' @param chr Character vector of chromosome names.
+#' @return Character vector: \code{"autosome"}, \code{"X"}, \code{"Y"} or \code{"other"}.
+#' @noRd
+chromosome_class <- function(chr) {
+  s   <- toupper(sub("^chr", "", trimws(as.character(chr)), ignore.case = TRUE))
+  out <- rep("other", length(s))
+  out[grepl("^([1-9]|1[0-9]|2[0-2])$", s)] <- "autosome"
+  out[s == "X"] <- "X"
+  out[s == "Y"] <- "Y"
+  out
+}
+
+#' Which chromosome classes are in the target BED, and which this run analyses
+#'
+#' @param chromosomes Chromosome name of every target.
+#' @param modechrom \code{"A"} (autosomes), \code{"X"} or \code{"Y"}; anything
+#'   else is treated as \code{"A"}, like \code{run_cnv_calling()} does.
+#' @return Data frame with columns \code{class}, \code{label}, \code{targets},
+#'   \code{present} and \code{analysed}.
+#' @noRd
+chromosome_scope <- function(chromosomes, modechrom = "A") {
+  modechrom <- toupper(as.character(modechrom %||% "A")[1])
+  cls       <- chromosome_class(chromosomes)
+  keys      <- c("autosome", "X", "Y", "other")
+  analysed_class <- switch(modechrom, X = "X", Y = "Y", "autosome")
+  scope <- data.frame(
+    class   = keys,
+    label   = c("Autosomes (chr1-22)", "chrX", "chrY", "Other contigs"),
+    targets = vapply(keys, function(k) sum(cls == k), integer(1), USE.NAMES = FALSE),
+    stringsAsFactors = FALSE
+  )
+  scope$present  <- scope$targets > 0L
+  scope$analysed <- scope$class == analysed_class & scope$present
+  scope
+}
+
+#' Warnings about the chromosome scope of a run
+#'
+#' ECHO calls CNVs on ONE chromosome class per run (\code{modechrom}): so every
+#' run leaves the autosomes or the gonosomes (chrX/chrY) unanalysed, and a BED
+#' file may also simply lack a class. Both situations are reported here so they
+#' show up in the QC metrics table and in the HTML report.
+#'
+#' @param scope Output of \code{chromosome_scope()}.
+#' @param modechrom The run's \code{modechrom}.
+#' @return Data frame with columns \code{Type}, \code{Details}, \code{Severity}
+#'   (zero rows when there is nothing to report).
+#' @noRd
+chromosome_scope_warnings <- function(scope, modechrom = "A") {
+  modechrom <- toupper(as.character(modechrom %||% "A")[1])
+  if (!modechrom %in% c("X", "Y")) modechrom <- "A"
+  rows <- list()
+  add  <- function(type, details, severity) {
+    rows[[length(rows) + 1L]] <<- data.frame(Type = type, Details = details,
+                                             Severity = severity, stringsAsFactors = FALSE)
+  }
+  get  <- function(k) scope[scope$class == k, , drop = FALSE]
+  auto <- get("autosome"); x <- get("X"); y <- get("Y"); other <- get("other")
+
+  # 1. Not in the BED at all.
+  if (!auto$present) add("Missing Chromosome", "Autosomes (chr1-22) not present in BED file", "error")
+  if (!x$present)    add("Missing Chromosome", "chrX not present in BED file", "warning")
+  if (!y$present)    add("Missing Chromosome", "chrY not present in BED file", "warning")
+
+  # 2. In the BED but not analysed by this run.
+  mode_label <- switch(modechrom, A = "autosomes", X = "chrX", Y = "chrY")
+  hint <- function(k) switch(k,
+    autosome = "modechrom = 'A'",
+    X = "modechrom = 'X' (needs a sample_table with gender)",
+    Y = "modechrom = 'Y' (male samples only; needs a sample_table with gender)")
+  skipped <- scope[scope$class %in% c("autosome", "X", "Y") & scope$present & !scope$analysed, ,
+                   drop = FALSE]
+  if ("autosome" %in% skipped$class) {
+    add("Analysis scope",
+        sprintf(paste0("Autosomes (chr1-22) NOT analysed in this run (%d targets; modechrom = '%s' ",
+                       "restricts calling to %s): no autosomal CNV is reported. Re-run with %s to analyse them."),
+                auto$targets, modechrom, mode_label, hint("autosome")),
+        "warning")
+  }
+  gon <- skipped[skipped$class %in% c("X", "Y"), , drop = FALSE]
+  if (nrow(gon)) {
+    add("Analysis scope",
+        sprintf(paste0("Gonosomes NOT analysed in this run (modechrom = '%s'): %s. No CNV can be detected ",
+                       "on them; re-run with %s."),
+                modechrom,
+                paste(sprintf("%s (%d targets)", gon$label, gon$targets), collapse = " and "),
+                paste(vapply(gon$class, hint, character(1)), collapse = " and ")),
+        "warning")
+  }
+  if (other$present) {
+    add("Analysis scope",
+        sprintf(paste0("%d target(s) lie on non-canonical contigs (e.g. chrM, alt/decoy sequences); ",
+                       "they are never analysed in any modechrom."), other$targets),
+        "info")
+  }
+  if (!length(rows)) {
+    return(data.frame(Type = character(), Details = character(), Severity = character(),
+                      stringsAsFactors = FALSE))
+  }
+  do.call(rbind, rows)
 }

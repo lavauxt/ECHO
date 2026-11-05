@@ -120,6 +120,25 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     stop("[ERROR] Either config_path or pipeline parameters must be provided.")
   }
 
+  # Fill in settings the config may omit. Without this a missing key reached
+  # the callees as NULL (e.g. `modechrom == "A"` -> "argument is of length zero",
+  # `min_corr = NULL` silently disabling the correlation QC).
+  settings_defaults <- list(
+    modechrom = "A", min_corr = 0.98, min_cov = 100, min_total_reads = 300000,
+    max_exon_cv = 0.5, transition_probability = 1e-4, expected_CNV_length = 50000,
+    n_bins_reduced = 10000, phi_bins = 1, formula = "cbind(test, reference) ~ 1"
+  )
+  if (is.null(cfg$settings)) cfg$settings <- list()
+  for (nm in names(settings_defaults)) {
+    if (is.null(cfg$settings[[nm]])) cfg$settings[[nm]] <- settings_defaults[[nm]]
+  }
+  cfg$settings$modechrom <- toupper(as.character(cfg$settings$modechrom)[1])
+  if (!cfg$settings$modechrom %in% c("A", "X", "Y")) {
+    stop("[ERROR] settings$modechrom must be 'A' (autosomes), 'X' or 'Y' (got '",
+         cfg$settings$modechrom, "').")
+  }
+  cfg$output$prefix <- cfg$output$prefix %||% "ECHO"
+
   if (is.null(plots)) {
     plots <- cfg$plots %||% cfg$settings$plots %||% FALSE
   }
@@ -130,7 +149,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
     gene_field_index <- cfg$bed_preprocess$gene_field_index
   }
 
-  cfg$output$dir <- normalizePath(file.path(getwd(), cfg$output$dir), mustWork = FALSE)
+  # file.path(getwd(), "/abs/dir") produced "<wd>//abs/dir": only prepend the
+  # working directory to relative paths.
+  out_dir <- cfg$output$dir %||% "./result"
+  out_is_absolute <- grepl("^(/|~|[A-Za-z]:[/\\\\]|\\\\\\\\)", out_dir)
+  cfg$output$dir <- normalizePath(
+    if (out_is_absolute) path.expand(out_dir) else file.path(getwd(), out_dir),
+    mustWork = FALSE)
   if (!dir.exists(cfg$output$dir)) {
     dir.create(cfg$output$dir, recursive = TRUE, showWarnings = FALSE)
   }
@@ -141,11 +166,18 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   log_dir <- dirname(log_file)
   if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
+  # log_msg() writes to the file itself; the message handler below captures
+  # everything the pipeline functions emit with message() (QC exclusions, BED
+  # warnings, ...) so that the log -- and the report built from it -- is
+  # complete. `in_log_msg` stops log_msg()'s own message() being logged twice.
+  in_log_msg <- FALSE
   log_msg <- function(msg, type = "INFO") {
     timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     formatted <- paste0("[", type, "] ", timestamp, " ", msg)
+    in_log_msg <<- TRUE
+    on.exit(in_log_msg <<- FALSE, add = TRUE)
     message(formatted)
-    cat(formatted, "\n", file = log_file, append = TRUE)
+    cat(formatted, "\n", file = log_file, append = TRUE, sep = "")
   }
 
   log_msg("ECHO pipeline started")
@@ -170,13 +202,17 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   if (is.null(cfg$genome_version) && !is.null(cfg$settings$genome_version)) {
     cfg$genome_version <- cfg$settings$genome_version
   }
+  # config.yaml documents genome_version under `input:` (option B) as well.
+  if (is.null(cfg$genome_version) && !is.null(cfg$input$genome_version)) {
+    cfg$genome_version <- cfg$input$genome_version
+  }
     if (is.null(cfg$genome_version)) {
     source <- cfg$input$fasta_source %||% "file"
     if (is.character(source) && length(source) == 1L &&
         grepl("^BSgenome\\.", source, ignore.case = TRUE)) {
-      if (grepl("(^|\\.)hg19($|\\.)", source, ignore.case = TRUE)) {
+      if (grepl("(^|\\.)(hg19|grch37)($|\\.)", source, ignore.case = TRUE)) {
         cfg$genome_version <- "hg19"
-      } else if (grepl("(^|\\.)hg38($|\\.)", source, ignore.case = TRUE)) {
+      } else if (grepl("(^|\\.)(hg38|grch38)($|\\.)", source, ignore.case = TRUE)) {
         cfg$genome_version <- "hg38"
       } else {
         stop("[ERROR] Cannot infer genome_version from BSgenome package '",
@@ -197,6 +233,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       stop("[ERROR] genome_version could not be inferred (no FASTA path, ",
            "no BSgenome package, no genome_version setting).")
     }
+  }
+
+  if (is.character(cfg$genome_version) && length(cfg$genome_version) == 1L) {
+    cfg$genome_version <- switch(tolower(cfg$genome_version),
+                                 grch37 = "hg19", grch38 = "hg38", cfg$genome_version)
   }
 
   old_warn <- options(warn = 1)
@@ -252,7 +293,9 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                         "' (genome_version = ", cfg$genome_version, "); no local FASTA required."))
       }
 
-      bed_issues <- validate_bed_regions(cfg$input$bed, verbose = TRUE)
+      bed_zero_based_run <- cfg$bed_zero_based %||% TRUE
+      bed_issues <- validate_bed_regions(cfg$input$bed, verbose = TRUE,
+                                         bed_zero_based = bed_zero_based_run)
       fatal_bed_issues <- setdiff(names(bed_issues), "duplicate_regions")
       if (length(fatal_bed_issues)) {
         stop("[ERROR] BED validation failed (", paste(fatal_bed_issues, collapse = ", "),
@@ -287,6 +330,12 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           off_target_handling   = cfg$off_target_handling %||% "na"
         )
         cfg$input$bed <- processed_bed
+        # process_bed_file() always writes a 0-based BED (it subtracts 1 from
+        # 1-based input), so the coverage step must read it as 0-based
+        # whatever bed_zero_based said about the ORIGINAL file. Reusing the
+        # original flag shifted every target by 1 bp when bed_zero_based was
+        # false.
+        bed_zero_based_run <- TRUE
         log_msg(paste("Processed BED saved to:", processed_bed))
       } else {
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
@@ -321,7 +370,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           sample_name_keep     = sample_name_keep,
           sample_name_collapse = cfg$sample_name_collapse %||% sample_name_collapse,
           custom_sample_names  = custom_sample_names,
-          bed_zero_based       = cfg$bed_zero_based %||% TRUE,
+          bed_zero_based       = bed_zero_based_run,
           skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE,
           pad_terminal_exons   = cfg$settings$pad_terminal_exons %||% 0
         )
@@ -351,7 +400,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             min_corr        = cfg$settings$min_corr,
             min_cov         = cfg$settings$min_cov,
             min_total_reads = cfg$settings$min_total_reads,
-            max_exon_cv     = cfg$settings$max_exon_cv
+            max_exon_cv     = cfg$settings$max_exon_cv,
+            modechrom       = cfg$settings$modechrom
           ),
           error = function(e) log_msg(paste("QC metrics step failed:", conditionMessage(e)), "WARNING")
         )
@@ -392,7 +442,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
               output_dir = paths$plots,
               modechrom  = cfg$settings$modechrom,
               prefix     = cfg$output$prefix,
-              log_file   = log_file,
+              log_file   = NULL,  # its message() output is captured by the handler below
               gene_gap   = cfg$settings$plot_gene_gap %||% 1
             ),
             error = function(e) log_msg(paste("Plot generation failed:", conditionMessage(e)), "WARNING")
@@ -415,7 +465,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
               ref_bams        = ref_bams %||% cfg$input$rbams,
               log_file        = log_file,
               pdf_output      = cfg$settings$pdf_output %||% FALSE,
-              prefix          = cfg$output$prefix
+              prefix          = cfg$output$prefix,
+              coverage_rdata  = paths$rdata
             ),
             error = function(e) log_msg(paste("Report generation failed:", conditionMessage(e)), "WARNING")
           )
@@ -466,11 +517,25 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       }
 
       log_msg("Pipeline finished successfully!")
+    }, message = function(m) {
+      if (in_log_msg) return(invisible(NULL))
+      txt <- sub("\n+$", "", conditionMessage(m))
+      if (!nzchar(trimws(txt))) return(invisible(NULL))
+      ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+      line <- if (grepl("^\\[(INFO|WARNING|ERROR)\\] [0-9]{4}-[0-9]{2}-[0-9]{2} ", txt)) {
+        txt
+      } else if (grepl("^\\[(INFO|WARNING|ERROR)\\]", txt)) {
+        paste0("[", sub("^\\[([A-Z]+)\\].*$", "\\1", txt), "] ", ts, " ",
+               sub("^\\[[A-Z]+\\]\\s*", "", txt))
+      } else {
+        paste0("[INFO] ", ts, " ", txt)
+      }
+      cat(line, "\n", file = log_file, append = TRUE, sep = "")
     }, warning = function(w) {
       if (grepl("sequence levels not in the other", conditionMessage(w))) {
         invokeRestart("muffleWarning")
       }
-      log_msg(conditionMessage(w), "WARNING")
+      log_msg(sub("^\\[WARNING\\]\\s*", "", conditionMessage(w)), "WARNING")
       invokeRestart("muffleWarning")
     })
     invisible(TRUE)

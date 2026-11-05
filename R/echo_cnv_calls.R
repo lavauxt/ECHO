@@ -43,7 +43,9 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
   cnv_calls$Gene <- vapply(seq_len(nrow(cnv_calls)), function(i) {
     start_idx <- max(1L, cnv_calls$start.p[i])
     end_idx   <- min(nrow(bed_file), cnv_calls$end.p[i])
-    paste(unique(bed_file$gene[start_idx:end_idx]), collapse = " ")
+    g <- unique(as.character(bed_file$gene[start_idx:end_idx]))
+    g <- g[!is.na(g) & nzchar(g)]
+    if (length(g)) paste(g, collapse = " ") else "Unknown"
   }, character(1))
   
   cnv_calls <- cnv_calls[, !tolower(names(cnv_calls)) %in% c("start.b", "end.b"), drop = FALSE]
@@ -127,6 +129,10 @@ run_cnv_calling <- function(rdata_file,
                             penalize_terminal_only = FALSE,
                             ...) {
   message("[INFO] ", Sys.time(), " BEGIN CNV calls")
+  modechrom <- toupper(as.character(modechrom %||% "A")[1])
+  if (!modechrom %in% c("A", "X", "Y")) {
+    stop("[ERROR] modechrom must be 'A' (autosomes), 'X' or 'Y' (got '", modechrom, "').")
+  }
   objs         <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
   counts       <- objs$counts
   sample_names <- objs$sample_names
@@ -223,7 +229,13 @@ run_cnv_calling <- function(rdata_file,
     } else {
       this_gender <- gender_map[[sample]]
       if (modechrom == "X") {
-        ref_samples <- names(gender_map[gender_map == this_gender & names(gender_map) != sample])
+        # Same-sex references, restricted to the samples that are actually in
+        # the coverage matrix and survived sample_qc (the sample table may list
+        # more samples than were sequenced, and outliers must be used neither
+        # as test nor as reference).
+        ref_samples <- intersect(
+          names(gender_map[gender_map == this_gender & names(gender_map) != sample]),
+          sample_names)
       } else {
         ref_samples <- sample_names[sample_names != sample]
       }
@@ -292,7 +304,11 @@ run_cnv_calling <- function(rdata_file,
         )
       }, error = function(e) {
         message("[WARNING] Confidence scoring failed for ", sample, ": ", e$message)
-        raw_calls  
+        # Keep the schema identical to scored calls so that rbind() across
+        # samples and the report/VCF code do not break on a missing column.
+        raw_calls$Gene       <- "Unknown"
+        raw_calls$Confidence <- "LOW"
+        raw_calls
       })
       
       if (remove_terminal_only && any(processed_calls$terminal_only, na.rm = TRUE)) {
@@ -334,13 +350,14 @@ run_cnv_calling <- function(rdata_file,
   }
 
   all_calls_list <- lapply(results, function(x) x$calls)
-  all_calls_list <- Filter(Negate(is.null), all_calls_list)
+  all_calls_list <- Filter(function(x) !is.null(x) && nrow(x) > 0, all_calls_list)
   models         <- lapply(results, function(x) x$model)
   names(models)  <- sample_names
   refs           <- lapply(results, function(x) x$refs)
   names(refs)    <- sample_names
 
-  cnv_calls <- if (length(all_calls_list) > 0) do.call(rbind, all_calls_list) else data.frame()
+  cnv_calls <- if (length(all_calls_list) > 0)
+    as.data.frame(data.table::rbindlist(all_calls_list, fill = TRUE)) else data.frame()
   if (nrow(cnv_calls) > 0) {
     cnv_calls  <- cbind(CNV.ID = seq_len(nrow(cnv_calls)), cnv_calls)
     exclude_cols <- c("global_start", "global_end", "terminal_only")

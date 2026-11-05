@@ -118,7 +118,7 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
 list(gene = gene_names, exon = exon_numbers)
 }
 
-bed_issues <- validate_bed_regions(input_bed, verbose = FALSE)
+bed_issues <- validate_bed_regions(input_bed, verbose = FALSE, bed_zero_based = bed_zero_based)
 fatal_bed_issues <- setdiff(names(bed_issues), "duplicate_regions")
 if (length(fatal_bed_issues)) {
   stop("[ERROR] Input BED validation failed (", paste(fatal_bed_issues, collapse = ", "),
@@ -264,6 +264,10 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      )
      common_chromosomes <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),
                                      unique(as.character(GenomicRanges::seqnames(panel_gr))))
+     if (!length(common_chromosomes)) {
+       warning("The BED and the panel file(s) share no chromosome name (a 'chr' prefix ",
+               "mismatch?): every interval will be annotated 'Unknown'.", immediate. = TRUE)
+     }
      hits <- if (length(common_chromosomes)) {
        GenomicRanges::findOverlaps(bed_gr, panel_gr)
      } else {
