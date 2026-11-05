@@ -384,15 +384,24 @@ run_cnv_calling <- function(rdata_file,
                        row.names = FALSE, sep = "\t", quote = FALSE)
     message("[INFO] Saved CNV calls to: ", output_file)
   } else {
-    # Prevent a previous run's calls from being mistaken for this run's result.
-    if (file.exists(output_file)) {
-      if (!file.remove(output_file)) {
-        stop("[ERROR] No CNVs were detected, but the stale CNV output could not be removed: ",
-             output_file)
-      }
-      message("[INFO] Removed stale CNV call file from a previous run: ", output_file)
-    }
-    message("[INFO] No CNVs detected across any samples; no CNV TSV was written.")
+    # A header-only TSV represents a successful run with zero calls. Opening
+    # the file for writing also replaces any calls left by an earlier run.
+    # Keep these columns aligned with the documented ECHO CNV TSV contract.
+    cnv_tsv_columns <- c(
+      "CNV.ID", "Sample", "Chromosome", "Start", "End", "Type", "Nexons",
+      "Start.p", "End.p", "BF", "Reads.expected", "Reads.observed",
+      "Reads.ratio", "Gene", "Confidence", "Correlation", "N.comp",
+      "Comparator.name", "Genomic.ID"
+    )
+    empty_cnv_calls <- as.data.frame(
+      setNames(lapply(cnv_tsv_columns, function(x) character(0)), cnv_tsv_columns),
+      check.names = FALSE
+    )
+    dir.create(dirname(output_file), recursive = TRUE, showWarnings = FALSE)
+    utils::write.table(empty_cnv_calls, file = output_file,
+                       row.names = FALSE, sep = "\t", quote = FALSE)
+    message("[INFO] No CNVs detected across any samples; wrote header-only CNV TSV: ",
+            output_file)
   }
 
   if (save_ed_objects) {

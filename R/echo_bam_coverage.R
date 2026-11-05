@@ -263,6 +263,29 @@ run_bam_coverage <- function(
   if (!length(test_bams)) stop("[ERROR] No analysis BAM files found (bamfiles/bamdir is empty)")
 
   bams <- c(test_bams, reference_bams)
+
+  # ExomeDepth::getBamCounts() identifies its output count columns from
+  # basename(bam), not the full path. Distinct files in different directories
+  # can therefore collide (and one count column can overwrite the other).
+  # Check the same make.names()-normalised keys that R data-frame columns use
+  # before any counting begins. Do not try to repair this after extraction:
+  # by then the overwritten counts cannot be recovered.
+  bam_column_keys <- unname(vapply(bams, function(b) make.names(basename(b)), character(1)))
+  duplicate_keys <- unique(bam_column_keys[
+    duplicated(bam_column_keys) | duplicated(bam_column_keys, fromLast = TRUE)
+  ])
+  if (length(duplicate_keys)) {
+    collision_details <- vapply(duplicate_keys, function(key) {
+      paste0("  ", key, ": ", paste(bams[bam_column_keys == key], collapse = " | "))
+    }, character(1))
+    stop(
+      "[ERROR] BAM filenames collide after ExomeDepth/R column-name normalisation. ",
+      "ExomeDepth uses BAM basenames for count columns, so these files cannot be ",
+      "counted together safely. Rename the files so their basenames are unique:\n",
+      paste(collision_details, collapse = "\n")
+    )
+  }
+
   missing_idx <- !vapply(bams, bam_has_index, logical(1))
   if (any(missing_idx)) stop("[ERROR] Missing BAM index for: ", paste(bams[missing_idx], collapse = ", "))
 

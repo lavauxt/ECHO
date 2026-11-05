@@ -486,44 +486,68 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
             summary_env <- new.env(parent = emptyenv())
             load(paths$summary, envir = summary_env)
             cnv_calls_local <- summary_env$cnv_calls
-            analysis_samples_local <- as.character(summary_env$sample_names %||% character(0))
-            if (!is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
-              if (!is.null(vcf_output)) {
-                export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL,
-                                   reference = cfg$genome_version)
+            if (is.null(cnv_calls_local)) cnv_calls_local <- data.frame()
+            analysis_samples_local <- as.character(
+              summary_env$sample_names %||% character(0)
+            )
+            analysis_samples_local <- unique(
+              analysis_samples_local[!is.na(analysis_samples_local) &
+                                       nzchar(analysis_samples_local)]
+            )
+            n_calls_local <- nrow(cnv_calls_local)
+
+            if (!is.null(vcf_output)) {
+              export_cnvs_to_vcf(
+                cnv_calls_local, vcf_output, sample_name = NULL,
+                reference = cfg$genome_version,
+                sample_names = analysis_samples_local
+              )
+              if (n_calls_local > 0) {
                 log_msg(paste("Combined VCF written to:", basename(vcf_output)))
+              } else {
+                log_msg(paste("Header-only combined VCF written (zero CNVs):",
+                              basename(vcf_output)))
               }
-              if (vcf_per_sample) {
-                samples <- unique(cnv_calls_local$Sample)
-                for (s in samples) {
-                  sample_folder <- file.path(cfg$output$dir, "Plots", sanitize_filename(s))
-                  if (!dir.exists(sample_folder))
-                    dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
-                  vcf_file <- file.path(sample_folder,
-                                        paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                  export_cnvs_to_vcf(cnv_calls_local, vcf_file, sample_name = s,
-                                     reference = cfg$genome_version)
-                  log_msg(paste("Per-sample VCF written to:", basename(vcf_file)))
+            }
+
+            if (vcf_per_sample) {
+              # Remove old per-sample VCFs for this ECHO prefix first, including
+              # files for samples excluded from the current run. Then regenerate
+              # one VCF per current analysis sample, even if it has no records.
+              plots_root <- file.path(cfg$output$dir, "Plots")
+              if (dir.exists(plots_root)) {
+                old_vcfs <- list.files(plots_root, pattern = "\\.vcf$",
+                                       recursive = TRUE, full.names = TRUE)
+                prefix_start <- paste0("ECHO_", cfg$output$prefix, "_")
+                old_vcfs <- old_vcfs[startsWith(basename(old_vcfs), prefix_start)]
+                if (length(old_vcfs) && !all(file.remove(old_vcfs))) {
+                  stop("Could not remove one or more stale per-sample VCF files under: ",
+                       plots_root)
                 }
               }
-            } else {
-              # Do not leave VCFs from a previous run looking like current calls.
-              if (!is.null(vcf_output) && file.exists(vcf_output)) {
-                if (!file.remove(vcf_output)) {
-                  stop("Could not remove stale combined VCF: ", vcf_output)
+
+              for (s in analysis_samples_local) {
+                sample_folder <- file.path(plots_root, sanitize_filename(s))
+                if (!dir.exists(sample_folder))
+                  dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
+                vcf_file <- file.path(sample_folder,
+                                      paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                export_cnvs_to_vcf(
+                  cnv_calls_local, vcf_file, sample_name = s,
+                  reference = cfg$genome_version,
+                  sample_names = s
+                )
+                if (n_calls_local > 0 && "Sample" %in% names(cnv_calls_local) &&
+                    any(cnv_calls_local$Sample == s, na.rm = TRUE)) {
+                  log_msg(paste("Per-sample VCF written:", basename(vcf_file)))
+                } else {
+                  log_msg(paste("Header-only per-sample VCF written (zero CNVs):",
+                                basename(vcf_file)))
                 }
-                log_msg(paste("Removed stale combined VCF:", basename(vcf_output)), "WARNING")
               }
-              if (vcf_per_sample && length(analysis_samples_local)) {
-                for (s in analysis_samples_local) {
-                  stale_vcf <- file.path(cfg$output$dir, "Plots", sanitize_filename(s),
-                                         paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                  if (file.exists(stale_vcf) && !file.remove(stale_vcf)) {
-                    stop("Could not remove stale per-sample VCF: ", stale_vcf)
-                  }
-                }
-              }
-              log_msg("No CNV calls to export to VCF; stale VCF outputs were cleared.")
+            }
+            if (n_calls_local == 0) {
+              log_msg("No CNV calls detected; valid header-only VCF output(s) were written.")
             }
           } else {
             log_msg("Summary RData not found – cannot export VCF.", "WARNING")

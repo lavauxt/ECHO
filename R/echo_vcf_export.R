@@ -1,33 +1,80 @@
 #' Export CNV calls to VCF format
 #'
-#' Converts a data frame of CNV calls (from \code{run_cnv_calling}) into VCF.
-#' When \code{sample_name} is NULL, a single multi-sample VCF is written.
+#' Converts ECHO CNV calls to VCF 4.2. When `sample_name` is NULL, a single
+#' multi-sample VCF is written. `sample_names` can be supplied to retain
+#' analysis samples that have no CNV records in the multi-sample header.
+#' Empty calls are supported: a valid header-only VCF is written instead of
+#' silently returning without creating a file.
 #'
-#' @param cnv_calls Data frame of CNV calls (must contain columns: Sample, Chromosome,
-#'   Start, End, Type, Confidence, etc.)
+#' @param cnv_calls Data frame of CNV calls. For non-empty input it must contain
+#'   `Sample`, `Chromosome`, `Start`, `End`, `Type` and the fields used in INFO.
 #' @param output_vcf Character string. Output VCF file path.
-#' @param sample_name Character string. If provided, write a single-sample VCF.
-#'   If NULL, write a single multi-sample VCF.
-#' @param source Character string. Source description for VCF header.
-#' @param reference Character string. Reference genome assembly (e.g., "hg19").
+#' @param sample_name Optional single sample name. If provided, write a
+#'   single-sample VCF, including a header-only VCF when that sample has no calls.
+#' @param source Character string. Source description for the VCF header.
+#' @param reference Character string. Reference genome assembly (e.g. `hg19`).
+#' @param sample_names Optional character vector of analysis sample names. Used
+#'   to include samples with no calls in a combined VCF header. Ignored when
+#'   `sample_name` is supplied. If omitted, names are inferred from `cnv_calls`.
 #' @return Invisibly returns the written VCF path.
 #' @export
 export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
-                               source = "ECHO", reference = "hg19") {
-  if (is.null(cnv_calls) || nrow(cnv_calls) == 0) {
-    message("[INFO] No CNVs to export.")
-    return(invisible(NULL))
-  }
-  if (!is.null(sample_name)) {
-    cnv_calls <- cnv_calls[cnv_calls$Sample == sample_name, , drop = FALSE]
-    if (nrow(cnv_calls) == 0) {
-      warning("No CNVs found for sample ", sample_name)
-      return(invisible(NULL))
+                               source = "ECHO", reference = "hg19",
+                               sample_names = NULL) {
+  if (is.null(cnv_calls)) cnv_calls <- data.frame()
+  cnv_calls <- as.data.frame(cnv_calls, stringsAsFactors = FALSE,
+                             check.names = FALSE)
+
+  required <- c("Sample", "Chromosome", "Start", "End", "Type")
+  if (nrow(cnv_calls) > 0L) {
+    missing <- setdiff(required, names(cnv_calls))
+    if (length(missing)) {
+      stop("[ERROR] CNV calls are missing required VCF column(s): ",
+           paste(missing, collapse = ", "))
     }
   }
 
-  safe_char <- function(x, default = ".") if (length(x) == 0 || is.na(x) || x == "NA") default else as.character(x)
-  samples   <- sort(unique(as.character(cnv_calls$Sample)))
+  if (!is.null(sample_name)) {
+    if (length(sample_name) != 1L || is.na(sample_name) || !nzchar(sample_name)) {
+      stop("[ERROR] sample_name must be one non-empty sample name or NULL.")
+    }
+    sample_name <- as.character(sample_name)
+    if (nrow(cnv_calls) > 0L) {
+      cnv_calls <- cnv_calls[as.character(cnv_calls$Sample) == sample_name,
+                             , drop = FALSE]
+    }
+    vcf_samples <- sample_name
+  } else if (!is.null(sample_names) && length(sample_names) > 0L) {
+    vcf_samples <- unique(as.character(sample_names))
+  } else if (nrow(cnv_calls) > 0L) {
+    vcf_samples <- sort(unique(as.character(cnv_calls$Sample)))
+  } else {
+    vcf_samples <- character(0)
+  }
+
+  if (anyNA(vcf_samples) || any(!nzchar(vcf_samples)) ||
+      any(grepl("[\\t\\r\\n]", vcf_samples))) {
+    stop("[ERROR] VCF sample names must be non-empty and cannot contain tabs or newlines.")
+  }
+  if (anyDuplicated(vcf_samples)) {
+    stop("[ERROR] VCF sample names must be unique.")
+  }
+  if (nrow(cnv_calls) > 0L) {
+    calls_samples <- unique(as.character(cnv_calls$Sample))
+    absent_samples <- setdiff(calls_samples, vcf_samples)
+    if (length(absent_samples)) {
+      stop("[ERROR] CNV calls contain sample(s) absent from the requested VCF header: ",
+           paste(absent_samples, collapse = ", "))
+    }
+  }
+
+  safe_char <- function(x, default = ".") {
+    if (length(x) == 0L || is.na(x[1]) || as.character(x[1]) == "NA") {
+      default
+    } else {
+      as.character(x[1])
+    }
+  }
 
   header <- c(
     "##fileformat=VCFv4.2",
@@ -47,43 +94,51 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     '##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Estimated copy number state (1=DEL,2=normal,3=DUP)">',
     '##FORMAT=<ID=FR,Number=1,Type=Float,Description="Observed/expected fold change">',
     '##ALT=<ID=DUP,Description="Duplication">',
-    '##ALT=<ID=DEL,Description="Deletion">',
-    paste0("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t",
-           paste(samples, collapse = "\t"))
+    '##ALT=<ID=DEL,Description="Deletion">'
   )
 
-  key_df <- unique(data.frame(
-    Chromosome = as.character(cnv_calls$Chromosome),
-    Start      = as.integer(cnv_calls$Start),
-    End        = as.integer(cnv_calls$End),
-    Type       = as.character(cnv_calls$Type),
-    stringsAsFactors = FALSE
-  ))
+  fixed_columns <- c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")
+  if (length(vcf_samples) > 0L) {
+    header <- c(header, paste(c(fixed_columns, "FORMAT", vcf_samples), collapse = "\t"))
+  } else {
+    # VCFs without sample columns end at INFO; do not emit a FORMAT-only column.
+    header <- c(header, paste(fixed_columns, collapse = "\t"))
+  }
+
+  key_df <- if (nrow(cnv_calls) > 0L) {
+    unique(data.frame(
+      Chromosome = as.character(cnv_calls$Chromosome),
+      Start = as.integer(cnv_calls$Start),
+      End = as.integer(cnv_calls$End),
+      Type = as.character(cnv_calls$Type),
+      stringsAsFactors = FALSE
+    ))
+  } else {
+    data.frame(Chromosome = character(0), Start = integer(0), End = integer(0),
+               Type = character(0), stringsAsFactors = FALSE)
+  }
 
   chrom_order <- function(chr) {
-    stripped <- sub("^chr", "", chr)
-    num      <- suppressWarnings(as.integer(stripped))
+    stripped <- sub("^chr", "", chr, ignore.case = TRUE)
+    num <- suppressWarnings(as.integer(stripped))
     special <- match(toupper(stripped), c("X", "Y", "M", "MT"))
     ifelse(!is.na(num), num,
            ifelse(!is.na(special), 22 + special, Inf))
   }
-  key_df <- key_df[order(chrom_order(key_df$Chromosome),
-                         key_df$Chromosome,   
-                         key_df$Start,
-                         key_df$End,
-                         key_df$Type), , drop = FALSE]
+  if (nrow(key_df) > 0L) {
+    key_df <- key_df[order(chrom_order(key_df$Chromosome), key_df$Chromosome,
+                           key_df$Start, key_df$End, key_df$Type), , drop = FALSE]
+  }
 
-  multi_sample <- length(samples) > 1L
+  multi_sample <- length(vcf_samples) > 1L
   make_sample_field <- function(row_df, sv_type) {
-    if (nrow(row_df) == 0) {
-      # Multi-sample VCF: sample simply has no call here -> homozygous ref.
-      # Single-sample VCF: sample isn't affected by this record -> missing,
-      # not "0/0", because in single-sample mode we only emit called loci.
+    if (nrow(row_df) == 0L) {
+      # Multi-sample VCF: absence of a call at this locus is homozygous reference.
+      # Single-sample VCF: only called loci are emitted, so this is missing.
       return(if (multi_sample) "0/0:2:1.00" else "./.:.:.")
     }
     ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
-    if (!is.finite(ratio)) ratio <- 1
-
+    if (!length(ratio) || !is.finite(ratio)) ratio <- 1
     if (sv_type == "DEL" && ratio < 0.3) {
       cn <- 0L; gt <- "1/1"
     } else if (sv_type == "DEL") {
@@ -96,80 +151,81 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
 
   records <- character(nrow(key_df))
   for (i in seq_len(nrow(key_df))) {
-    key_row  <- key_df[i, ]
-    chrom    <- as.character(key_row[["Chromosome"]])
-    start    <- as.integer(key_row[["Start"]])
-    end      <- as.integer(key_row[["End"]])
-    cnv_type <- tolower(as.character(key_row[["Type"]]))
-    is_dup   <- grepl("dup", cnv_type)
-    alt      <- if (is_dup) "<DUP>" else "<DEL>"
-    sv_type  <- if (is_dup) "DUP" else "DEL"
-    sv_len   <- if (is_dup) end - start + 1L else -(end - start + 1L)
+    key_row <- key_df[i, , drop = FALSE]
+    chrom <- as.character(key_row$Chromosome)
+    start <- as.integer(key_row$Start)
+    end <- as.integer(key_row$End)
+    cnv_type <- tolower(as.character(key_row$Type))
+    is_dup <- grepl("dup", cnv_type)
+    alt <- if (is_dup) "<DUP>" else "<DEL>"
+    sv_type <- if (is_dup) "DUP" else "DEL"
+    sv_len <- if (is_dup) end - start + 1L else -(end - start + 1L)
 
-    row_hits    <- cnv_calls[
+    row_hits <- cnv_calls[
       as.character(cnv_calls$Chromosome) == chrom &
-      as.integer(cnv_calls$Start)        == start &
-      as.integer(cnv_calls$End)          == end   &
-      tolower(as.character(cnv_calls$Type)) == cnv_type, , drop = FALSE]
+        as.integer(cnv_calls$Start) == start &
+        as.integer(cnv_calls$End) == end &
+        tolower(as.character(cnv_calls$Type)) == cnv_type,
+      , drop = FALSE
+    ]
     representative <- row_hits[1, , drop = FALSE]
 
-    id <- if ("CNV.ID" %in% colnames(representative))
+    id <- if ("CNV.ID" %in% names(representative)) {
       paste0("CNV_", representative$`CNV.ID`)
-    else
-      paste0(gsub("^chr", "", chrom), "_", start, "_", end, "_", sv_type)
+    } else {
+      paste0(gsub("^chr", "", chrom, ignore.case = TRUE), "_", start, "_", end, "_", sv_type)
+    }
+    info_items <- c(paste0("SVTYPE=", sv_type), paste0("SVLEN=", sv_len),
+                    paste0("END=", end))
 
-    info_items <- c(
-      paste0("SVTYPE=", sv_type),
-      paste0("SVLEN=", sv_len),
-      paste0("END=", end)
-    )
     conf <- safe_char(representative$Confidence)
     if (conf != ".") info_items <- c(info_items, paste0("CONFIDENCE=", conf))
-
-    if ("Comparator.name" %in% colnames(representative)) {
+    if ("Comparator.name" %in% names(representative)) {
       refs_val <- safe_char(representative$Comparator.name, "")
       if (nzchar(refs_val)) {
-
         refs_val <- gsub(",\\s*", ",", refs_val)
         info_items <- c(info_items, paste0("REFS=", refs_val))
       }
     }
-    if ("Correlation" %in% colnames(representative)) {
-      corr <- representative$Correlation
-      if (!is.na(corr) && corr != "NA") info_items <- c(info_items, paste0("CORR=", corr))
+    if ("Correlation" %in% names(representative)) {
+      corr <- representative$Correlation[1]
+      if (length(corr) && !is.na(corr) && corr != "NA")
+        info_items <- c(info_items, paste0("CORR=", corr))
     }
-    if ("N.comp" %in% colnames(representative)) {
-      ncomp <- representative$`N.comp`
-      if (!is.na(ncomp) && ncomp != "NA") info_items <- c(info_items, paste0("NCOMP=", ncomp))
+    if ("N.comp" %in% names(representative)) {
+      ncomp <- representative$`N.comp`[1]
+      if (length(ncomp) && !is.na(ncomp) && ncomp != "NA")
+        info_items <- c(info_items, paste0("NCOMP=", ncomp))
     }
-    if ("BF" %in% colnames(representative)) {
-      bf <- representative$BF
-      if (!is.na(bf) && bf != "NA") info_items <- c(info_items, paste0("BF=", bf))
+    if ("BF" %in% names(representative)) {
+      bf <- representative$BF[1]
+      if (length(bf) && !is.na(bf) && bf != "NA")
+        info_items <- c(info_items, paste0("BF=", bf))
     }
-    if ("Reads.ratio" %in% colnames(representative)) {
-      ratio <- representative$`Reads.ratio`
-      if (!is.na(ratio) && ratio != "NA")
+    if ("Reads.ratio" %in% names(representative)) {
+      ratio <- representative$`Reads.ratio`[1]
+      if (length(ratio) && !is.na(ratio) && ratio != "NA")
         info_items <- c(info_items, paste0("READS_RATIO=", round(as.numeric(ratio), 2)))
     }
 
-    format_field  <- "GT:CN:FR"
-    sample_fields <- vapply(samples, function(s) {
-      sample_row <- row_hits[row_hits$Sample == s, , drop = FALSE]
+    sample_fields <- vapply(vcf_samples, function(s) {
+      sample_row <- row_hits[as.character(row_hits$Sample) == s, , drop = FALSE]
       make_sample_field(sample_row, sv_type)
     }, character(1))
 
-    records[i] <- paste(chrom, start, id, "N", alt, ".", "PASS",
-                        paste(info_items, collapse = ";"),
-                        format_field,
-                        paste(sample_fields, collapse = "\t"),
-                        sep = "\t")
+    record_fields <- c(chrom, start, id, "N", alt, ".", "PASS",
+                       paste(info_items, collapse = ";"))
+    if (length(vcf_samples) > 0L) {
+      record_fields <- c(record_fields, "GT:CN:FR", sample_fields)
+    }
+    records[i] <- paste(record_fields, collapse = "\t")
   }
 
   dir.create(dirname(output_vcf), showWarnings = FALSE, recursive = TRUE)
-  con <- file(output_vcf, "w")
+  con <- file(output_vcf, open = "wt")
   on.exit(close(con), add = TRUE)
-  writeLines(header,  con)
-  writeLines(records, con)
-  message("[INFO] Wrote ", length(records), " CNV records to ", output_vcf)
+  writeLines(header, con, useBytes = TRUE)
+  if (length(records)) writeLines(records, con, useBytes = TRUE)
+  message("[INFO] Wrote ", length(records), " CNV record(s) to ", output_vcf)
   invisible(output_vcf)
 }
