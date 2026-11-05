@@ -94,11 +94,18 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
         add_metric("All", "All", "Cohort size", msg, "All")
     }
 
-    low_corr <- which(!is.na(max_corr) & max_corr < min_corr)
+    # With >=2 samples, an undefined maximum correlation usually means this
+    # sample has no usable pairwise comparison (e.g. constant/all-missing data).
+    # A one-sample cohort is different: correlation QC is globally skipped.
+    low_corr <- if (ncol(mat) >= 2L) {
+        which(is.na(max_corr) | max_corr < min_corr)
+    } else integer(0)
     if (length(low_corr))
         add_metric(sample_names[low_corr], rep("All", length(low_corr)),
-                   "Whole sample", paste0("Low correlation: ", round(max_corr[low_corr], 2),
-                                          " (< ", min_corr, ")"),
+                   "Whole sample", ifelse(is.na(max_corr[low_corr]),
+                       "Undefined correlation: no usable pairwise comparison",
+                       paste0("Low correlation: ", round(max_corr[low_corr], 2),
+                              " (< ", min_corr, ")")),
                    rep("All", length(low_corr)))
 
     low_med <- which(sample_median < min_cov)

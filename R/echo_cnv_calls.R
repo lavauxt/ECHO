@@ -53,26 +53,29 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
   
   high_corr_ok  <- !is.na(current_cor) && current_cor >= score_high_corr
   high_refs_ok  <- num_refs >= score_high_refs
-  ratio_high_ok <- cnv_calls$reads.ratio <= score_high_ratio_low |
-                   cnv_calls$reads.ratio >= score_high_ratio_high
+  ratio <- as.numeric(cnv_calls$reads.ratio)
+  ratio_high_ok <- !is.na(ratio) &
+    (ratio <= score_high_ratio_low | ratio >= score_high_ratio_high)
   
-  med_corr_ok    <- !is.na(current_cor) && current_cor >= score_med_corr
-  med_refs_ok    <- num_refs >= score_med_refs
-  ratio_not_low  <- cnv_calls$reads.ratio <= score_low_ratio_low |
-                    cnv_calls$reads.ratio >= score_low_ratio_high
+  med_corr_ok <- !is.na(current_cor) && current_cor >= score_med_corr
+  med_refs_ok <- num_refs >= score_med_refs
+  ratio_medium_ok <- !is.na(ratio) &
+    ((ratio >= score_med_ratio_low & ratio <= score_low_ratio_low) |
+     (ratio >= score_low_ratio_high & ratio <= score_med_ratio_high))
   
   gene_flagged <- vapply(cnv_calls$Gene, function(g_str) {
     any(trimws(unlist(strsplit(g_str, "[ ,]"))) %in% score_low_confidence_genes)
   }, logical(1))
   
   high_cond <- !gene_flagged & high_corr_ok & high_refs_ok & ratio_high_ok
-  med_cond  <- !gene_flagged & !high_cond & med_corr_ok & med_refs_ok & ratio_not_low
+  med_cond  <- !gene_flagged & !high_cond & med_corr_ok & med_refs_ok & ratio_medium_ok
   
   cnv_calls$Confidence[high_cond] <- "HIGH"
   cnv_calls$Confidence[med_cond]  <- "MEDIUM"
   
-  if (penalize_terminal_only && any(cnv_calls$terminal_only, na.rm = TRUE)) {
-    cnv_calls$Confidence[cnv_calls$terminal_only] <- "LOW"
+  terminal_idx <- which(!is.na(cnv_calls$terminal_only) & cnv_calls$terminal_only)
+  if (penalize_terminal_only && length(terminal_idx)) {
+    cnv_calls$Confidence[terminal_idx] <- "LOW"
   }
   
   return(cnv_calls)
@@ -135,7 +138,14 @@ run_cnv_calling <- function(rdata_file,
   }
   objs         <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
   counts       <- objs$counts
-  sample_names <- objs$sample_names
+  sample_names <- as.character(objs$sample_names)
+  reference_sample_names <- as.character(objs$reference_sample_names %||% character(0))
+  candidate_sample_names <- unique(c(sample_names, reference_sample_names))
+  missing_count_cols <- setdiff(candidate_sample_names, colnames(counts))
+  if (length(missing_count_cols)) {
+    stop("[ERROR] Sample columns missing from coverage counts: ",
+         paste(missing_count_cols, collapse = ", "))
+  }
   bed_file     <- objs$bed_file
 
   if (modechrom == "X") {
@@ -170,26 +180,34 @@ run_cnv_calling <- function(rdata_file,
       stop("[ERROR] sample_table must have 'sample_name' and 'gender'")
     gender_df$gender <- toupper(substr(gender_df$gender, 1, 1))
     gender_map <- setNames(gender_df$gender, gender_df$sample_name)
-    missing    <- setdiff(sample_names, names(gender_map))
-    if (length(missing) > 0) stop("[ERROR] Missing gender for samples: ", paste(missing, collapse = ", "))
+    missing <- setdiff(candidate_sample_names, names(gender_map))
+    if (length(missing) > 0) {
+      stop("[ERROR] Missing gender for analysis/reference samples: ",
+           paste(missing, collapse = ", "))
+    }
   }
 
   if (modechrom == "Y") {
     male_samples <- names(gender_map[gender_map == "M"])
     sample_names <- intersect(sample_names, male_samples)
-    if (length(sample_names) == 0) stop("[ERROR] No male samples for mode Y")
-    message("[INFO] Mode Y: keeping only male samples (", length(sample_names), " samples)")
+    reference_sample_names <- intersect(reference_sample_names, male_samples)
+    candidate_sample_names <- unique(c(sample_names, reference_sample_names))
+    if (length(sample_names) == 0) stop("[ERROR] No male analysis samples for mode Y")
+    message("[INFO] Mode Y: keeping ", length(sample_names), " male analysis sample(s) and ",
+            length(reference_sample_names), " male external reference sample(s)")
   }
 
   if (sample_qc) {
-    sqc  <- detect_outlier_samples(counts[, sample_names, drop = FALSE], z_threshold = qc_zscore)
+    sqc  <- detect_outlier_samples(counts[, candidate_sample_names, drop = FALSE], z_threshold = qc_zscore)
     excl <- sqc$sample[sqc$is_outlier]
     if (length(excl) > 0) {
       message(sprintf("[WARNING] sample_qc: excluding %d outlier sample(s) from calling (used neither as test nor reference): %s",
                        length(excl), paste(excl, collapse = ", ")))
       sample_names <- setdiff(sample_names, excl)
+      reference_sample_names <- setdiff(reference_sample_names, excl)
+      candidate_sample_names <- setdiff(candidate_sample_names, excl)
       if (length(sample_names) == 0)
-        stop("[ERROR] sample_qc excluded every sample; relax qc_zscore or set sample_qc = FALSE.")
+        stop("[ERROR] sample_qc excluded every analysis sample; relax qc_zscore or set sample_qc = FALSE.")
     }
   }
 
@@ -200,7 +218,7 @@ run_cnv_calling <- function(rdata_file,
               "run_bam_coverage() to pick it up); skipping the GC-extreme check.")
     }
     eqc <- detect_problematic_exons(
-      counts[, sample_names, drop = FALSE],
+      counts[, candidate_sample_names, drop = FALSE],
       chromosomes  = counts$chromosome,
       mad_quantile = exon_mad_quantile,
       min_mean     = min_exon_mean,
@@ -225,7 +243,7 @@ run_cnv_calling <- function(rdata_file,
   for (sample in sample_names) {
     message("[INFO] Processing sample: ", sample)
     if (modechrom == "A") {
-      ref_samples <- sample_names[sample_names != sample]
+      ref_samples <- candidate_sample_names[candidate_sample_names != sample]
     } else {
       this_gender <- gender_map[[sample]]
       if (modechrom == "X") {
@@ -235,9 +253,9 @@ run_cnv_calling <- function(rdata_file,
         # as test nor as reference).
         ref_samples <- intersect(
           names(gender_map[gender_map == this_gender & names(gender_map) != sample]),
-          sample_names)
+          candidate_sample_names)
       } else {
-        ref_samples <- sample_names[sample_names != sample]
+        ref_samples <- candidate_sample_names[candidate_sample_names != sample]
       }
     }
 
@@ -366,13 +384,23 @@ run_cnv_calling <- function(rdata_file,
                        row.names = FALSE, sep = "\t", quote = FALSE)
     message("[INFO] Saved CNV calls to: ", output_file)
   } else {
-    message("[INFO] No CNVs detected across any samples.")
+    # Prevent a previous run's calls from being mistaken for this run's result.
+    if (file.exists(output_file)) {
+      if (!file.remove(output_file)) {
+        stop("[ERROR] No CNVs were detected, but the stale CNV output could not be removed: ",
+             output_file)
+      }
+      message("[INFO] Removed stale CNV call file from a previous run: ", output_file)
+    }
+    message("[INFO] No CNVs detected across any samples; no CNV TSV was written.")
   }
 
   if (save_ed_objects) {
-    save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map, sample_names, file = out_rdata)
+    save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map,
+         sample_names, reference_sample_names, file = out_rdata)
   } else {
-    save(counts, cnv_calls, refs, models, bed_file, gender_map, sample_names, file = out_rdata)
+    save(counts, cnv_calls, refs, models, bed_file, gender_map,
+         sample_names, reference_sample_names, file = out_rdata)
   }
   message("[INFO] Saved summary RData to: ", out_rdata)
   message("[INFO] ", Sys.time(), " END CNV calls")

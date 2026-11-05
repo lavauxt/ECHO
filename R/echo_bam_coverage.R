@@ -155,7 +155,9 @@ resolve_reference_fasta <- function(fasta = NULL,
 #' @param sample_name_delim Character string. Regex delimiter to split filenames.
 #' @param sample_name_keep Character string. Which parts to keep (e.g., "1", "1-2").
 #' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL.
-#' @param custom_sample_names Optional character vector.
+#' @param custom_sample_names Optional character vector, one name per analysis
+#'   BAM. Reference BAMs use filename-derived names; REF_ is added only if a
+#'   reference name collides with an analysis sample name.
 #' @param bed_zero_based Logical. If TRUE, BED start coordinates are 0-based.
 #' @param skip_invalid_intervals Logical. If TRUE, validate each interval against FASTA.
 #' @param pad_terminal_exons Integer >= 0. Bases to extend the outward-facing
@@ -226,45 +228,57 @@ run_bam_coverage <- function(
   if (verbose) message("[INFO] FASTA contains ", length(fasta_chroms),
                         " sequence(s) (source: ", fasta_source, ")")
 
-  bams <- character()
-  if (!is.null(bamfiles) && file.exists(bamfiles)) bams <- c(bams, trimws(readLines(bamfiles, warn = FALSE)))
-  if (!is.null(bamdir)   && dir.exists(bamdir))    bams <- c(bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
+  # Keep analysis BAMs separate from reference-only BAMs. External references
+  # contribute counts to ExomeDepth reference selection but must never become
+  # test samples or receive their own CNV calls.
+  test_bams <- character()
+  if (!is.null(bamfiles) && length(bamfiles) == 1L && file.exists(bamfiles)) {
+    test_bams <- c(test_bams, trimws(readLines(bamfiles, warn = FALSE)))
+  }
+  if (!is.null(bamdir) && length(bamdir) == 1L && dir.exists(bamdir)) {
+    test_bams <- c(test_bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
+  }
+  test_bams <- unique(test_bams[!is.na(test_bams) & nzchar(test_bams)])
 
+  reference_bams <- character()
   if (!is.null(rbams)) {
-    if (dir.exists(rbams)) {
-      ref_bams <- list.files(rbams, pattern = "\\.bam$", full.names = TRUE)
-      if (verbose) message("[INFO] Found ", length(ref_bams),
-                            " external reference BAM(s) in directory: ", rbams)
-      bams <- c(ref_bams, bams)
-    } else if (file.exists(rbams)) {
-      bams <- c(utils::read.csv(rbams, header = TRUE, sep = "\t")$bam, bams)
+    if (length(rbams) == 1L && dir.exists(rbams)) {
+      reference_bams <- list.files(rbams, pattern = "\\.bam$", full.names = TRUE)
+      if (verbose) message("[INFO] Found ", length(reference_bams),
+                           " external reference BAM(s) in directory: ", rbams)
+    } else if (length(rbams) == 1L && file.exists(rbams)) {
+      ref_table <- utils::read.delim(rbams, header = TRUE, stringsAsFactors = FALSE,
+                                     check.names = FALSE)
+      if (!"bam" %in% names(ref_table)) {
+        stop("[ERROR] External reference BAM list must contain a 'bam' column: ", rbams)
+      }
+      reference_bams <- trimws(as.character(ref_table$bam))
     } else {
       warning("[WARNING] rbams path not found, skipping external reference BAMs: ", rbams)
     }
   }
-  bams <- unique(bams[nzchar(bams)])
-  if (!length(bams)) stop("[ERROR] No BAM files found")
+  reference_bams <- unique(reference_bams[!is.na(reference_bams) & nzchar(reference_bams)])
+  # A path supplied in both sources is an analysis BAM, not a reference-only BAM.
+  reference_bams <- setdiff(reference_bams, test_bams)
+  if (!length(test_bams)) stop("[ERROR] No analysis BAM files found (bamfiles/bamdir is empty)")
 
+  bams <- c(test_bams, reference_bams)
   missing_idx <- !vapply(bams, bam_has_index, logical(1))
   if (any(missing_idx)) stop("[ERROR] Missing BAM index for: ", paste(bams[missing_idx], collapse = ", "))
 
-  if (!is.null(custom_sample_names)) {
-    if (length(custom_sample_names) != length(bams)) stop("[ERROR] custom_sample_names length mismatch")
-    sample_names <- custom_sample_names
-  } else {
-      base_names <- basename(bams)
-      base_names <- sub("\\.(cram|bam)$", "", base_names, ignore.case = TRUE)
-      base_names <- sub("\\.(sort|markdup|dedup|recal|fixmate|rg|merged)$", "",
-      base_names, ignore.case = TRUE)
-
-    if (is.null(sample_name_collapse)) {
-      sample_name_collapse <- if (nchar(sample_name_delim) == 1 && sample_name_delim != "\\")
-        sample_name_delim else "."
-    }
-
+  if (is.null(sample_name_collapse)) {
+    sample_name_collapse <- if (nchar(sample_name_delim) == 1 && sample_name_delim != "\\")
+      sample_name_delim else "."
+  }
+  derive_sample_names <- function(paths) {
+    if (!length(paths)) return(character(0))
+    base_names <- basename(paths)
+    base_names <- sub("\\.(cram|bam)$", "", base_names, ignore.case = TRUE)
+    base_names <- sub("\\.(sort|markdup|dedup|recal|fixmate|rg|merged)$", "",
+                      base_names, ignore.case = TRUE)
     keep_parts <- function(x, delim, keep_spec, collapse) {
       parts <- strsplit(x, delim)[[1]]
-      n     <- length(parts)
+      n <- length(parts)
       if (grepl("-", keep_spec)) {
         idx <- suppressWarnings(as.numeric(strsplit(keep_spec, "-")[[1]]))
         idx <- idx[!is.na(idx)]
@@ -273,8 +287,7 @@ run_bam_coverage <- function(
                   "' for '", x, "'. Using last part.")
           return(parts[n])
         }
-        lo <- max(1L, min(idx[1], n))
-        hi <- max(1L, min(idx[2], n))
+        lo <- max(1L, min(idx[1], n)); hi <- max(1L, min(idx[2], n))
         if (lo > hi) {
           warning("[WARNING] sample_name_keep range '", keep_spec,
                   "' exceeds filename '", x, "' (", n, " parts). Using last part.")
@@ -292,24 +305,53 @@ run_bam_coverage <- function(
       }
       paste(parts, collapse = collapse)
     }
-
-    sample_names <- vapply(base_names, function(fname) {
-      keep_parts(fname, sample_name_delim, sample_name_keep, sample_name_collapse)
-    }, character(1))
-    names(sample_names) <- NULL
-
-    if (verbose) {
-      message("[INFO] Extracted sample names using delimiter: ", sample_name_delim,
-              ", keeping part(s): ", sample_name_keep,
-              ", collapse: ", sample_name_collapse)
-    }
+    out <- vapply(base_names, keep_parts, character(1),
+                  delim = sample_name_delim, keep_spec = sample_name_keep,
+                  collapse = sample_name_collapse)
+    unname(out)
   }
-  if (any(duplicated(sample_names))) stop("[ERROR] Duplicate sample names after extraction")
+
+  if (!is.null(custom_sample_names)) {
+    if (length(custom_sample_names) != length(test_bams)) {
+      stop("[ERROR] custom_sample_names must contain one name per analysis BAM (",
+           length(test_bams), "), not per external reference BAM.")
+    }
+    sample_names <- as.character(custom_sample_names)
+  } else {
+    sample_names <- derive_sample_names(test_bams)
+  }
+  reference_sample_names <- derive_sample_names(reference_bams)
+  if (anyDuplicated(reference_sample_names)) {
+    duplicate_refs <- unique(reference_sample_names[duplicated(reference_sample_names)])
+    stop("[ERROR] External reference BAMs produce duplicate sample names: ",
+         paste(duplicate_refs, collapse = ", "),
+         ". Adjust sample_name_delim/sample_name_keep so each reference has a unique name.")
+  }
+  ref_name_collisions <- reference_sample_names %in% sample_names
+  if (any(ref_name_collisions)) {
+    warning("[WARNING] External reference sample names collide with analysis samples; ",
+            "adding REF_ to: ", paste(reference_sample_names[ref_name_collisions], collapse = ", "),
+            ". For mode X/Y, use these REF_-prefixed names in sample_table.")
+    reference_sample_names[ref_name_collisions] <- paste0("REF_", reference_sample_names[ref_name_collisions])
+  }
+  all_bam_sample_names <- c(sample_names, reference_sample_names)
+  if (anyNA(all_bam_sample_names) || any(!nzchar(all_bam_sample_names))) {
+    stop("[ERROR] Sample names cannot be NA or empty.")
+  }
+  if (anyDuplicated(sample_names)) stop("[ERROR] Duplicate analysis sample names after extraction")
+  if (anyDuplicated(all_bam_sample_names)) stop("[ERROR] Sample name collision between analysis and reference BAMs")
   reserved_names <- c("chromosome", "start", "end", "exon", "GC", "exon_number", "exon_label")
-  if (any(sample_names %in% reserved_names)) {
+  if (any(all_bam_sample_names %in% reserved_names)) {
     stop("[ERROR] Sample name(s) clash with reserved column names (",
-         paste(intersect(sample_names, reserved_names), collapse = ", "),
+         paste(intersect(all_bam_sample_names, reserved_names), collapse = ", "),
          "); change sample_name_delim / sample_name_keep or use custom_sample_names.")
+  }
+  if (verbose) {
+    message("[INFO] Identified ", length(sample_names), " analysis sample(s) and ",
+            length(reference_sample_names), " external reference sample(s).")
+    message("[INFO] Sample names extracted using delimiter: ", sample_name_delim,
+            ", keeping part(s): ", sample_name_keep,
+            ", collapse: ", sample_name_collapse)
   }
 
   bed_file <- data.table::fread(bed, header = FALSE)
@@ -459,8 +501,8 @@ run_bam_coverage <- function(
 
   # One count column per BAM, named make.names(basename(bam)) by data.frame()
   # (prefixed with "X" when the name starts with a digit). Match each BAM to
-  # its own column, so that the order of `sample_names` can never drift from
-  # the order of the columns.
+  # its own column, so that analysis and reference names cannot drift from
+  # the order of the BAMs/columns.
   normalised_bams <- unname(vapply(bams, function(b) make.names(basename(b)), character(1)))
   sample_cols <- vapply(normalised_bams, function(nb) {
     cand <- c(nb, paste0("X", nb))
@@ -478,10 +520,10 @@ run_bam_coverage <- function(
             "columns in input order. Verify sample names.")
     sample_cols <- positional
   }
-  name_mapping <- setNames(sample_names, sample_cols)
-  colnames(counts)[match(sample_cols, colnames(counts))] <- sample_names
+  name_mapping <- setNames(all_bam_sample_names, sample_cols)
+  colnames(counts)[match(sample_cols, colnames(counts))] <- all_bam_sample_names
 
-  keep_cols <- c("chromosome", "start", "end", "exon", sample_names)
+  keep_cols <- c("chromosome", "start", "end", "exon", all_bam_sample_names)
   if ("GC" %in% colnames(counts)) keep_cols <- c(keep_cols, "GC")
   if ("exon_number" %in% colnames(counts)) keep_cols <- c(keep_cols, "exon_number")
   counts <- counts[, keep_cols, drop = FALSE]
@@ -530,7 +572,8 @@ run_bam_coverage <- function(
   }
   if ("GC" %in% colnames(counts)) bed_file$GC <- counts$GC
 
-  save(counts, bams, bed_file, sample_names, fasta, name_mapping, file = data_out)
+  save(counts, bams, bed_file, sample_names, reference_sample_names,
+       fasta, name_mapping, file = data_out)
   if (verbose) message("[INFO] ", Sys.time(), " END bam coverage calculation")
   invisible(NULL)
 }

@@ -688,7 +688,7 @@ report_json <- function(x) {
   json <- as.character(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", na = "null",
                                         digits = 6, force = TRUE))
   json <- gsub("</", "<\\/", json, fixed = TRUE)
-  gsub("<!--", "<\\!--", json, fixed = TRUE)
+  gsub("<!--", "\\u003c!--", json, fixed = TRUE)
 }
 
 #' Location of the plotly.js bundle shipped with the plotly R package

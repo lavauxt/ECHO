@@ -292,6 +292,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "End"] <- "end"
      names(df)[names(df) == "Gene"] <- "gene"
      df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+     user_exon_labels <- df$ExonNum
      df <- assign_exon_numbers_per_gene(df)
      if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
        warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
@@ -301,7 +302,9 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "start"] <- "Start"
      names(df)[names(df) == "end"] <- "End"
      names(df)[names(df) == "gene"] <- "Gene"
-     df$ExonNum <- df$exon_number
+     df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
+       user_exon_labels
+     } else df$exon_number
      df$exon_number <- NULL
      df$Custom.Exon <- df$ExonNum
    } else {
@@ -314,6 +317,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "End"] <- "end"
      names(df)[names(df) == "Gene"] <- "gene"
      df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+     user_exon_labels <- df$ExonNum
      df <- assign_exon_numbers_per_gene(df)
      if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
        warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
@@ -323,7 +327,9 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "start"] <- "Start"
      names(df)[names(df) == "end"] <- "End"
      names(df)[names(df) == "gene"] <- "Gene"
-     df$ExonNum <- df$exon_number
+     df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
+       user_exon_labels
+     } else df$exon_number
      df$exon_number <- NULL
      df$Custom.Exon <- df$ExonNum
    }
@@ -337,6 +343,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
   names(df)[names(df) == "End"] <- "end"
   names(df)[names(df) == "Gene"] <- "gene"
   df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+  user_exon_labels <- df$ExonNum
   df <- assign_exon_numbers_per_gene(df)
   if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
     warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
@@ -346,7 +353,9 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
   names(df)[names(df) == "start"] <- "Start"
   names(df)[names(df) == "end"] <- "End"
   names(df)[names(df) == "gene"] <- "Gene"
-  df$ExonNum <- df$exon_number
+  df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
+    user_exon_labels
+  } else df$exon_number
   df$exon_number <- NULL
   df$Custom.Exon <- df$ExonNum
 }

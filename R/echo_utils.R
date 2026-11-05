@@ -196,7 +196,7 @@ if (verbose) {
 df
 }
 
-#' Assign sequential exon numbers within each gene
+#' Assign sequential exon numbers within each chromosome/gene locus
 #' @noRd
 assign_exon_numbers_per_gene  <- function(bed_file) {
 chrom_col  <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
@@ -228,7 +228,7 @@ dt_unique[, .chrom_fac := NULL]
 valid_gene_rows <- !is.na(dt_unique$gene) & dt_unique$gene != "" & dt_unique$gene != "."
 dt_unique[, exon_number := NA_integer_]
 if (any(valid_gene_rows)) {
-    dt_unique[valid_gene_rows, exon_number := seq_len(.N), by = "gene"]
+    dt_unique[valid_gene_rows, exon_number := seq_len(.N), by = .(chrom, gene)]
 }
 # ------------------------------------------------------------------
 
@@ -263,7 +263,7 @@ dt[, .orig_row := .I]
 data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                      c("chrom", "start", "end", "gene"))
 dt[, is_first := exon_number == 1L]
-dt[, is_last  := exon_number == max(exon_number), by = "gene"]
+dt[, is_last  := exon_number == max(exon_number), by = .(chrom, gene)]
 no_gene <- is.na(dt$gene) | dt$gene %in% c("", ".", "Unknown")
 dt[no_gene, c("is_first", "is_last") := FALSE]
 chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
@@ -622,7 +622,8 @@ genes <- unique(bed_file$gene[start_idx:end_idx])
 if (length(genes) != 1) next
 gene <- genes[1]
 if (is.na(gene) || gene == "") next
-gene_rows <- which(bed_file$gene == gene)
+chr_col <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
+gene_rows <- which(bed_file$gene == gene & bed_file[[chr_col]] == bed_file[[chr_col]][start_idx])
 gene_exons <- bed_file$exon_number[gene_rows]
 gene_exons <- gene_exons[!is.na(gene_exons)]
 if (!length(gene_exons)) next

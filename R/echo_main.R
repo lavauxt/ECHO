@@ -66,7 +66,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         modechrom                  = args$modechrom %||% "A",
         min_corr                   = args$min_corr %||% 0.98,
         min_cov                    = args$min_cov %||% 100,
-        min_total_reads            = args$min_total_reads %||% 5e6,
+        min_total_reads            = args$min_total_reads %||% 300000,
         max_exon_cv                = args$max_exon_cv %||% 0.5,
         transition_probability     = args$transition_prob %||% args$transition_probability %||% 1e-4,
         expected_CNV_length        = args$expected_CNV_length %||% 50000,
@@ -119,6 +119,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   } else {
     stop("[ERROR] Either config_path or pipeline parameters must be provided.")
   }
+
+  # A formal argument overrides the YAML/variadic value and must be used by
+  # coverage extraction as well as by the report.
+  if (!is.null(ref_bams)) cfg$input$rbams <- ref_bams
 
   # Fill in settings the config may omit. Without this a missing key reached
   # the callees as NULL (e.g. `modechrom == "A"` -> "argument is of length zero",
@@ -479,11 +483,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         run_step("Exporting CNVs to VCF", {
           tryCatch({
           if (file.exists(paths$summary)) {
-            cnv_calls_local <- local({
-              env <- new.env()
-              load(paths$summary, envir = env)
-              env$cnv_calls
-            })
+            summary_env <- new.env(parent = emptyenv())
+            load(paths$summary, envir = summary_env)
+            cnv_calls_local <- summary_env$cnv_calls
+            analysis_samples_local <- as.character(summary_env$sample_names %||% character(0))
             if (!is.null(cnv_calls_local) && nrow(cnv_calls_local) > 0) {
               if (!is.null(vcf_output)) {
                 export_cnvs_to_vcf(cnv_calls_local, vcf_output, sample_name = NULL,
@@ -504,7 +507,23 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                 }
               }
             } else {
-              log_msg("No CNV calls to export to VCF.")
+              # Do not leave VCFs from a previous run looking like current calls.
+              if (!is.null(vcf_output) && file.exists(vcf_output)) {
+                if (!file.remove(vcf_output)) {
+                  stop("Could not remove stale combined VCF: ", vcf_output)
+                }
+                log_msg(paste("Removed stale combined VCF:", basename(vcf_output)), "WARNING")
+              }
+              if (vcf_per_sample && length(analysis_samples_local)) {
+                for (s in analysis_samples_local) {
+                  stale_vcf <- file.path(cfg$output$dir, "Plots", sanitize_filename(s),
+                                         paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
+                  if (file.exists(stale_vcf) && !file.remove(stale_vcf)) {
+                    stop("Could not remove stale per-sample VCF: ", stale_vcf)
+                  }
+                }
+              }
+              log_msg("No CNV calls to export to VCF; stale VCF outputs were cleared.")
             }
           } else {
             log_msg("Summary RData not found – cannot export VCF.", "WARNING")

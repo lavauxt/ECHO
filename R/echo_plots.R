@@ -128,7 +128,7 @@ prepare_plot_data <- function(call_row, counts, bed_file, exon_index, models, re
 #' @return Character vector, \code{""} where a target has no exon number.
 #' @noRd
 resolve_exon_index <- function(bed_file) {
-    exon_col <- grep("^(exon_number|custom\\.exon|exonnum)$",
+    exon_col <- grep("^(exon_label|exon_number|custom\\.exon|exonnum)$",
                      colnames(bed_file), ignore.case = TRUE, value = TRUE)
     if (length(exon_col) == 0) {
         exon_col <- grep("^exon$", colnames(bed_file), ignore.case = TRUE, value = TRUE)
@@ -342,7 +342,14 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
 
-    exon_index <- resolve_exon_index(bed_file)
+    exon_index <- if ("exon_label" %in% colnames(counts) &&
+                      length(counts$exon_label) == nrow(bed_file)) {
+        label <- as.character(counts$exon_label)
+        label[is.na(label)] <- ""
+        label
+    } else {
+        resolve_exon_index(bed_file)
+    }
 
     n_written <- 0L
 
