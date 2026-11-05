@@ -329,34 +329,6 @@ shown in the report's *Samples* tab).
   well-calibrated interval implies (a sign the real alteration may extend
   further, or that the reference match is poor for this region).
 
-## Changes in 0.2.0 (review and fixes)
-
-**Behaviour changes worth knowing about**
-
-* **Coordinates.** ECHO passed 1-based starts to `ExomeDepth::getBamCounts()`,
-  which expects 0-based starts and adds 1 itself: every target was counted
-  one base to the right. Fixed. With `bed_zero_based: false` the preprocessed
-  BED (always 0-based) was shifted a second time. Fixed. Counts, and
-  therefore calls, can change slightly compared with 0.1.0.
-* **Row alignment.** `getBamCounts()` re-sorts overlapping targets; counts are
-  now matched back to the BED by interval, and the run stops if they cannot be.
-* **`remove_terminal_only`.** A call covering *every* exon of a one- or two-exon
-  gene was always "terminal-only" and silently dropped; whole-gene events are
-  now kept.
-* **QC.** `run_qc_metrics()` no longer drops perfectly correlated pairs
-  (a duplicated sample gave `NA`); unannotated targets are labelled
-  `chr:start-end` instead of `NA:NA`; new `Severity` column and scope rows.
-* **Mode X.** Reference samples are intersected with the samples that
-  survived QC.
-
-**Other fixes:** coloured PCA (gender) always failed; `output$dir` given as an
-absolute path; missing `settings` entries gave `NULL` arguments;
-`genome_version` under `input:` was ignored; the BAM-index check only accepted
-one of the two `.bai` conventions; cached FASTA appended without a readable
-`.fai`; `NA`/unknown genes in calls, plots and VCF; very long gene lists
-overflowing file names; every sub-function message is now written to the
-pipeline log (the report's warnings are built from it).
-
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
