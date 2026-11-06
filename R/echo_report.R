@@ -48,7 +48,8 @@
 #'   \code{run_bam_coverage()}); used to list samples that were excluded
 #'   before CNV calling.
 #'
-#' @details Optional \code{settings}: \code{report_plotly} (\code{"inline"},
+#' @details The off-target pattern is read from \code{config$off_target_pattern}
+#'   (default \code{"^HorsROI"}). Optional \code{settings}: \code{report_plotly} (\code{"inline"},
 #'   default, or \code{"cdn"} for a ~3.6 MB smaller file that needs internet to
 #'   draw plots) and \code{report_max_profiles} (default \code{500}): maximum
 #'   number of calls for which the per-call coverage profile is embedded
@@ -73,7 +74,10 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
     message("[WARNING] pdf_output is no longer supported by the interactive report; ",
             "use the browser's Print dialog (all tabs are expanded when printing).")
 
-  rd <- load_report_inputs(summary_rdata, qc_metrics_file, coverage_rdata, sample_table, ref_bams)
+  # off_target_pattern lives at the top level of the config (bed_preprocess);
+  # the report used to read a settings key that nothing ever set.
+  off_pattern <- (config$off_target_pattern %||% settings$off_target_pattern) %nz% "^HorsROI"
+  rd <- load_report_inputs(summary_rdata, qc_metrics_file, coverage_rdata, sample_table, ref_bams, off_pattern)
 
   if (global) {
     out_file <- file.path(output_dir, if (!is.null(prefix) && nzchar(prefix))
@@ -109,7 +113,7 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
 #' Load and normalise everything the report needs
 #' @noRd
 load_report_inputs <- function(summary_rdata, qc_metrics_file, coverage_rdata,
-                               sample_table, ref_bams) {
+                               sample_table, ref_bams, off_target_pattern = "^HorsROI") {
   env <- new.env()
   load(summary_rdata, envir = env)
   need <- c("counts", "bed_file", "sample_names")
@@ -118,55 +122,19 @@ load_report_inputs <- function(summary_rdata, qc_metrics_file, coverage_rdata,
 
   cnv_calls <- env$cnv_calls
   if (is.null(cnv_calls)) cnv_calls <- data.frame()
-  bed_file <- as.data.frame(env$bed_file, stringsAsFactors = FALSE)
-  # The processed BED uses exported column names such as Chr, Gene and
-  # Custom.Exon, whereas older report code expected lowercase `gene`.
-  # Normalize aliases here so the HTML report uses the same annotations as
-  # the PDF plots and extracted BED.
-  find_bed_col <- function(candidates) {
-    hit <- match(tolower(candidates), tolower(colnames(bed_file)))
-    hit <- hit[!is.na(hit)]
-    if (length(hit)) colnames(bed_file)[hit[1]] else NA_character_
-  }
-
-  chr_col <- find_bed_col(c("chromosome", "chr", "chrom", "seqnames"))
-  if (is.na(chr_col)) stop("[ERROR] bed_file has no chromosome column.")
-  if (!identical(chr_col, "chromosome")) bed_file$chromosome <- bed_file[[chr_col]]
-
-  gene_col <- find_bed_col(c("gene", "gene_symbol", "symbol"))
-  if (is.na(gene_col)) {
-    bed_file$gene <- NA_character_
-  } else if (!identical(gene_col, "gene")) {
-    bed_file$gene <- bed_file[[gene_col]]
-  }
-  bed_file$gene <- trimws(as.character(bed_file$gene))
-  bed_file$gene[is.na(bed_file$gene) | !nzchar(bed_file$gene) |
-                  bed_file$gene %in% c(".", "NA")] <- "Unknown"
-
-  exon_col <- find_bed_col(c("exon_number", "custom.exon", "exonnum", "exon"))
-  if (!is.na(exon_col) && !identical(exon_col, "exon_number")) {
-    bed_file$exon_number <- bed_file[[exon_col]]
-  }
-
-  # HorsROI targets are retained by design, but are not numbered exons.
-  is_hors_roi <- !is.na(bed_file$gene) &
-    grepl("^HorsROI$", bed_file$gene, ignore.case = TRUE)
-  if ("exon_number" %in% colnames(bed_file)) {
-    bed_file$exon_number[is_hors_roi] <- NA
-  }
-  if ("Custom.Exon" %in% colnames(bed_file)) {
-    bed_file$Custom.Exon[is_hors_roi] <- NA
-  }
-  if ("ExonNum" %in% colnames(bed_file)) {
-    bed_file$ExonNum[is_hors_roi] <- NA
-  }
+  # Same annotation (gene labels, HorsROI flag, exon labels) as the PDF plots.
+  bed_file <- normalize_target_annotation(env$bed_file, off_target_pattern)
 
   analysed <- as.character(env$sample_names)
   all_samples <- analysed
+  # The summary BED only holds the chromosome class that was called (and the
+  # targets kept by exon QC); the chromosome scope needs the full BED.
+  all_chromosomes <- bed_file$chromosome
   if (!is.null(coverage_rdata) && file.exists(coverage_rdata)) {
-    cov_names <- tryCatch(load_rdata(coverage_rdata, required = "sample_names")$sample_names,
-                          error = function(e) NULL)
-    if (length(cov_names)) all_samples <- unique(c(as.character(cov_names), analysed))
+    cov <- tryCatch(load_rdata(coverage_rdata, required = "sample_names"), error = function(e) NULL)
+    if (length(cov$sample_names)) all_samples <- unique(c(as.character(cov$sample_names), analysed))
+    full_chr <- cov$bed_file$chromosome %||% cov$bed_file$Chr
+    if (length(full_chr)) all_chromosomes <- as.character(full_chr)
   }
   all_samples <- all_samples[all_samples %in% colnames(env$counts)]
   analysed    <- analysed[analysed %in% all_samples]
@@ -217,7 +185,7 @@ load_report_inputs <- function(summary_rdata, qc_metrics_file, coverage_rdata,
 
   list(cnv_calls = cnv_calls, counts = env$counts, bed_file = bed_file,
        models = env$models, refs = env$refs, analysed = analysed, all_samples = all_samples,
-       qc = qc, sample_df = sdf, ref_bams = rb)
+       all_chromosomes = all_chromosomes, qc = qc, sample_df = sdf, ref_bams = rb)
 }
 
 # ----------------------------------------------------------------------------
@@ -249,6 +217,23 @@ chr_scope_label <- function(modechrom) {
   switch(modechrom, X = "chrX", Y = "chrY", "autosomes")
 }
 
+#' Targets per chromosome (in BED order) and whether this run analyses them
+#' @noRd
+chrom_table <- function(chr_vec, modechrom) {
+  chr_vec <- as.character(chr_vec)
+  if (!length(chr_vec)) {
+    return(data.frame(chromosome = character(), targets = integer(), first = integer(), last = integer(),
+                      class = character(), analysed = logical(), stringsAsFactors = FALSE))
+  }
+  ch <- unique(chr_vec)
+  ii <- split(seq_along(chr_vec), factor(chr_vec, levels = ch))
+  out <- data.frame(chromosome = ch, targets = lengths(ii), first = vapply(ii, min, integer(1)),
+                    last = vapply(ii, max, integer(1)), class = chromosome_class(ch),
+                    stringsAsFactors = FALSE, row.names = NULL)
+  out$analysed <- out$class == switch(modechrom, X = "X", Y = "Y", "autosome")
+  out
+}
+
 #' Build the full JSON payload of the report
 #' @noRd
 build_report_payload <- function(rd, settings, config, log_file, prefix, focus = NULL) {
@@ -269,7 +254,7 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   )
 
   # ---- chromosome scope --------------------------------------------------
-  scope      <- chromosome_scope(bed_file$chromosome, modechrom)
+  scope      <- chromosome_scope(rd$all_chromosomes %||% bed_file$chromosome, modechrom)
   scope_rows <- chromosome_scope_warnings(scope, modechrom)
   qc <- rd$qc
   if (is.null(qc)) {
@@ -289,20 +274,13 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   }
   qc$Severity[!qc$Severity %in% c("error", "warning", "info")] <- "warning"
 
-  chr_vec <- as.character(bed_file$chromosome)
-  chr_ord <- unique(chr_vec)
-  chr_df <- do.call(rbind, lapply(chr_ord, function(ch) {
-    ii <- which(chr_vec == ch)
-    data.frame(chromosome = ch, targets = length(ii), first = min(ii), last = max(ii),
-               class = chromosome_class(ch), stringsAsFactors = FALSE)
-  }))
-  chr_df$analysed <- chr_df$class == switch(modechrom, X = "X", Y = "Y", "autosome")
+  chr_df     <- chrom_table(bed_file$chromosome, modechrom)                  # landscape (call index space)
+  chr_all_df <- chrom_table(rd$all_chromosomes %||% bed_file$chromosome, modechrom)  # full BED
 
   # ---- per-sample metrics -------------------------------------------------
   mat <- as.matrix(counts[, all_samples, drop = FALSE])
   storage.mode(mat) <- "double"
-  med_depth   <- if (requireNamespace("matrixStats", quietly = TRUE))
-    matrixStats::colMedians(mat, na.rm = TRUE) else apply(mat, 2, stats::median, na.rm = TRUE)
+  med_depth   <- unname(col_medians(mat))
   total_reads <- colSums(mat, na.rm = TRUE)
   cor_mat <- NULL
   max_corr <- rep(NA_real_, length(all_samples))
@@ -374,16 +352,16 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   cnv_df <- NULL
   windows_limited <- FALSE
   if (has_calls) {
-    exon_index <- resolve_exon_index(bed_file)
+    labels  <- target_axis_labels(bed_file, counts)
     calls_h <- harmonise_chr_prefix(bed_file, calls)
     rank <- match(calls$Confidence, c("HIGH", "MEDIUM", "LOW"), nomatch = 4L)
     todo <- order(rank, calls$CNV.ID)
     if (length(todo) > max_profiles) { windows_limited <- TRUE; todo <- todo[seq_len(max_profiles)] }
     for (i in todo) {
       w <- tryCatch({
-        pd <- prepare_plot_data(calls_h[i, , drop = FALSE], counts, bed_file, exon_index, models, refs,
-                                gene_gap = settings$plot_gene_gap %||% 1)
-        if (is.null(pd)) NULL else window_from_plot_data(pd, bed_file, exon_index)
+        pd <- prepare_plot_data(calls_h[i, , drop = FALSE], counts, bed_file, models, refs,
+                                gene_gap = settings$plot_gene_gap %||% 1, labels = labels)
+        if (is.null(pd)) NULL else window_from_plot_data(pd)
       }, error = function(e) {
         message("[WARNING] Report: coverage profile unavailable for CNV.ID ", calls$CNV.ID[i], ": ", conditionMessage(e))
         NULL
@@ -418,8 +396,7 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     corr <- list(names = I(all_samples[ord]),
                  z = lapply(seq_len(nrow(cm)), function(i) I(round(unname(cm[i, ]), 3))))
   }
-  exon_med <- if (requireNamespace("matrixStats", quietly = TRUE))
-    matrixStats::rowMedians(mat, na.rm = TRUE) else apply(mat, 1, stats::median, na.rm = TRUE)
+  exon_med <- row_medians(mat)
   lm <- log10(pmax(exon_med[is.finite(exon_med)], 1))
   depth_hist <- NULL
   if (length(lm) > 1) {
@@ -428,12 +405,10 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     depth_hist <- list(mid = I(round(hh$mids, 3)), counts = I(hh$counts))
   }
 
-  # ---- alerts ---------------------------------------------------------------------
-  alerts <- build_report_alerts(qc, scope_rows, analysed, all_samples, samples_df, cnv_df, calib,
-                                modechrom, thresholds, log_file, qc_available = !is.null(rd$qc))
-
-  # ---- log, settings, scoring ----------------------------------------------------------
+  # ---- log, alerts, settings, scoring ----------------------------------------------
   log_info <- read_report_log(log_file)
+  alerts <- build_report_alerts(qc, scope_rows, analysed, all_samples, cnv_df, calib,
+                                modechrom, thresholds, log_info, qc_available = !is.null(rd$qc))
   settings_kv <- report_settings_kv(settings, modechrom)
   scoring <- report_scoring(settings)
 
@@ -449,13 +424,12 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     n_calls = if (has_calls) nrow(calls) else 0L,
     focus = if (is.null(focus)) NULL else focus,
     scope_incomplete = scope_incomplete, qc_available = !is.null(rd$qc),
-    off_target_pattern = settings$off_target_gene_pattern %nz% "",
     windows_limited = windows_limited, windows_limit = max_profiles
   )
 
   payload <- list(
     meta = meta, thresholds = thresholds,
-    scope = rep_table(scope), chr = rep_table(chr_df),
+    scope = rep_table(scope), chr = rep_table(chr_df), chr_all = rep_table(chr_all_df),
     alerts = alerts, qc = rep_table(qc), samples = rep_table(samples_df),
     cnvs = if (is.null(cnv_df)) rep_empty_table(c("ID", "Sample", "Chr", "Start", "End", "Gene", "Type",
                                                   "Confidence")) else rep_table(cnv_df),
@@ -474,26 +448,19 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   payload
 }
 
-#' One call's plotting window -> compact JSON-ready list
+#' One call's plotting window (from prepare_plot_data()) -> compact JSON-ready list
 #' @noRd
-window_from_plot_data <- function(pd, bed_file, exon_index) {
-  er <- pd$exon_range
-  cd <- pd$cov_data
-  ref_names <- names(pd$ref_z_list)
-  test <- cd$coverage[cd$group == "Test sample"]
-  ref_cov <- lapply(ref_names, function(r) I(round(cd$coverage[cd$group == r], 3)))
-  genes <- as.character(bed_file$gene[er]); genes[is.na(genes)] <- ""
+window_from_plot_data <- function(pd) {
+  r <- function(x, d = 3) I(round(unname(x), d))
   list(
     flag = isTRUE(pd$bg_calibration$flag),
     window = list(
-      px = I(round(pd$px, 3)), xlab = I(exon_index[er]), gene = I(genes),
-      gene_group = I(as.integer(pd$gene_group)),
-      affected = I(er %in% (pd$idx_start:pd$idx_end)),
-      test = I(round(test, 3)), ref_names = I(ref_names), ref_cov = ref_cov,
-      ratio = I(round(pd$ci_data$ratio, 3)), lo = I(round(pd$ci_data$lo, 3)), hi = I(round(pd$ci_data$hi, 3)),
-      observed = I(round(pd$observed, 1)), expected = I(round(pd$expected, 1)),
-      z = I(round(pd$z_data$z, 3)),
-      ref_z = unname(lapply(pd$ref_z_list, function(v) I(round(unname(v), 3)))),
+      px = r(pd$px), xlab = I(pd$xlab), gene = I(pd$gene), off = I(pd$off),
+      gene_group = I(as.integer(pd$gene_group)), affected = I(pd$affected),
+      test = r(pd$test_log), ref_names = I(names(pd$ref_log)), ref_cov = unname(lapply(pd$ref_log, r)),
+      ratio = r(pd$ratio), lo = r(pd$lo), hi = r(pd$hi),
+      observed = r(pd$observed, 1), expected = r(pd$expected, 1),
+      z = r(pd$z), ref_z = unname(lapply(pd$ref_z, r)),
       subtitle = pd$ci_subtitle
     )
   )
@@ -526,8 +493,8 @@ report_pca <- function(mat, sample_names, sample_df) {
 
 #' Alerts shown at the top of the tabs
 #' @noRd
-build_report_alerts <- function(qc, scope_rows, analysed, all_samples, samples_df, cnv_df, calib,
-                                modechrom, thresholds, log_file, qc_available = TRUE) {
+build_report_alerts <- function(qc, scope_rows, analysed, all_samples, cnv_df, calib,
+                                modechrom, thresholds, log_info, qc_available = TRUE) {
   out <- list()
   add <- function(kind, severity, title, text, tab = "qc", samples = NULL) {
     out[[length(out) + 1L]] <<- list(kind = kind, severity = severity, title = title, text = text,
@@ -595,8 +562,7 @@ build_report_alerts <- function(qc, scope_rows, analysed, all_samples, samples_d
                   "cnvs", unique(cnv_df$Sample[calib == "check"]))
   }
   # log
-  lg <- read_report_log(log_file)
-  nw <- length(lg$warnings)
+  nw <- length(log_info$warnings)
   if (nw) add("run", "info", paste0(nw, " warning/error line(s) in the pipeline log"), "See the Run tab.", "run")
   out
 }
@@ -698,18 +664,6 @@ restrict_payload_to_sample <- function(p, s) {
 # ----------------------------------------------------------------------------
 
 #' @noRd
-report_asset_path <- function(name) {
-  p <- system.file("report", name, package = "ECHO")
-  if (!nzchar(p)) {
-    for (cand in c(file.path("inst", "report", name), file.path("..", "..", "inst", "report", name))) {
-      if (file.exists(cand)) { p <- cand; break }
-    }
-  }
-  if (!nzchar(p) || !file.exists(p)) stop("[ERROR] Report asset '", name, "' not found; reinstall ECHO.")
-  p
-}
-
-#' @noRd
 read_utf8 <- function(path) {
   raw <- readBin(path, "raw", file.size(path))
   txt <- rawToChar(raw)
@@ -742,8 +696,8 @@ report_plotly_js <- function() {
 
 #' @noRd
 write_report_html <- function(payload, out_file, settings = list()) {
-  css <- read_utf8(report_asset_path("echo_report.css"))
-  js  <- read_utf8(report_asset_path("echo_report.js"))
+  css <- report_css()
+  js  <- report_js()
   mode <- tolower(as.character(settings$report_plotly %||% "inline")[1])
   plotly_tag <- NULL
   if (mode != "cdn") {

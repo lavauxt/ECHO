@@ -40,13 +40,7 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
     cnv_calls <- flag_terminal_only_calls(cnv_calls, bed_file)
   }
   
-  cnv_calls$Gene <- vapply(seq_len(nrow(cnv_calls)), function(i) {
-    start_idx <- max(1L, cnv_calls$start.p[i])
-    end_idx   <- min(nrow(bed_file), cnv_calls$end.p[i])
-    g <- unique(as.character(bed_file$gene[start_idx:end_idx]))
-    g <- g[!is.na(g) & nzchar(g)]
-    if (length(g)) paste(g, collapse = " ") else "Unknown"
-  }, character(1))
+  cnv_calls$Gene <- genes_in_targets(bed_file$gene, cnv_calls$start.p, cnv_calls$end.p)
   
   cnv_calls <- cnv_calls[, !tolower(names(cnv_calls)) %in% c("start.b", "end.b"), drop = FALSE]
   cnv_calls$Confidence <- "LOW"
@@ -148,28 +142,17 @@ run_cnv_calling <- function(rdata_file,
   }
   bed_file     <- objs$bed_file
 
-  if (modechrom == "X") {
-    message("[INFO] Mode X: restricting to chromosome X")
-    chr_x    <- if (any(grepl("^chrX", bed_file$chromosome))) "chrX" else "X"
-    keep_idx <- which(bed_file$chromosome == chr_x)
-    if (length(keep_idx) == 0) stop("[ERROR] No chrX intervals found")
-    bed_file <- bed_file[keep_idx, ]
-    counts   <- counts[keep_idx, ]
-  } else if (modechrom == "Y") {
-    message("[INFO] Mode Y: restricting to chromosome Y")
-    chr_y    <- if (any(grepl("^chrY", bed_file$chromosome))) "chrY" else "Y"
-    keep_idx <- which(bed_file$chromosome == chr_y)
-    if (length(keep_idx) == 0) stop("[ERROR] No chrY intervals found")
-    bed_file <- bed_file[keep_idx, ]
-    counts   <- counts[keep_idx, ]
-  } else {
-    message("[INFO] Mode A: autosomes only (excluding X and Y)")
-    autosomes <- if (any(grepl("^chr", bed_file$chromosome))) paste0("chr", 1:22) else as.character(1:22)
-    keep_idx  <- which(bed_file$chromosome %in% autosomes)
-    if (length(keep_idx) == 0) stop("[ERROR] No autosomal intervals found")
-    bed_file <- bed_file[keep_idx, ]
-    counts   <- counts[keep_idx, ]
+  # Same classification as the QC metrics and the report (chromosome_class()).
+  mode_class <- switch(modechrom, X = "X", Y = "Y", "autosome")
+  message("[INFO] ", switch(modechrom, X = "Mode X: restricting to chromosome X",
+                            Y = "Mode Y: restricting to chromosome Y",
+                            "Mode A: autosomes only (excluding X and Y)"))
+  keep_idx <- which(chromosome_class(bed_file$chromosome) == mode_class)
+  if (length(keep_idx) == 0) {
+    stop("[ERROR] No ", switch(modechrom, X = "chrX", Y = "chrY", "autosomal"), " intervals found")
   }
+  bed_file <- bed_file[keep_idx, ]
+  counts   <- counts[keep_idx, ]
 
   gender_map <- NULL
   if (modechrom %in% c("X", "Y")) {
@@ -239,6 +222,7 @@ run_cnv_calling <- function(rdata_file,
 
   results      <- list()
   ed_objects   <- list()
+  no_result    <- list(calls = data.frame(), model = NULL, refs = character(0))
 
   for (sample in sample_names) {
     message("[INFO] Processing sample: ", sample)
@@ -261,7 +245,7 @@ run_cnv_calling <- function(rdata_file,
 
     if (length(ref_samples) == 0) {
       message("[WARNING] No reference samples available for ", sample, ". Skipping.")
-      results[[sample]] <- list(calls = data.frame(), model = NULL, refs = character(0))
+      results[[sample]] <- no_result
       next
     }
 
@@ -285,7 +269,7 @@ run_cnv_calling <- function(rdata_file,
 
     if (length(best_refs) == 0) {
       message("[WARNING] Model selected 0 references for ", sample)
-      results[[sample]] <- list(calls = data.frame(), model = NULL, refs = character(0))
+      results[[sample]] <- no_result
       next
     }
 
@@ -340,17 +324,12 @@ run_cnv_calling <- function(rdata_file,
         processed_calls$N.comp           <- num_refs
         processed_calls$Comparator.name  <- paste(best_refs, collapse = ", ")
 
-        names(processed_calls)[names(processed_calls) == "start.p"]       <- "Start.p"
-        names(processed_calls)[names(processed_calls) == "end.p"]         <- "End.p"
-        names(processed_calls)[names(processed_calls) == "type"]          <- "Type"
-        names(processed_calls)[names(processed_calls) == "nexons"]        <- "Nexons"
-        names(processed_calls)[names(processed_calls) == "start"]         <- "Start"
-        names(processed_calls)[names(processed_calls) == "end"]           <- "End"
-        names(processed_calls)[names(processed_calls) == "chromosome"]    <- "Chromosome"
-        names(processed_calls)[names(processed_calls) == "bayesfactor"]   <- "BF"
-        names(processed_calls)[names(processed_calls) == "reads.expected"] <- "Reads.expected"
-        names(processed_calls)[names(processed_calls) == "reads.observed"] <- "Reads.observed"
-        names(processed_calls)[names(processed_calls) == "reads.ratio"]   <- "Reads.ratio"
+        rename <- c(start.p = "Start.p", end.p = "End.p", type = "Type", nexons = "Nexons",
+                    start = "Start", end = "End", chromosome = "Chromosome", bayesfactor = "BF",
+                    reads.expected = "Reads.expected", reads.observed = "Reads.observed",
+                    reads.ratio = "Reads.ratio")
+        hit <- names(processed_calls) %in% names(rename)
+        names(processed_calls)[hit] <- rename[names(processed_calls)[hit]]
         processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
                                               processed_calls$Start, "-", processed_calls$End)
       } else {

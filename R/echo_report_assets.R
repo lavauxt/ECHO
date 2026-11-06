@@ -1,4 +1,204 @@
-/* ECHO interactive report -- client-side app.
+# ECHO interactive report -- embedded front-end (CSS + JS).
+# Kept in the package code so the report needs no installed asset file
+# (requires R >= 4.0 for raw strings). Written into every HTML report.
+
+#' Dark-theme design tokens (used twice: OS preference and explicit choice)
+#' @noRd
+REPORT_CSS_DARK <- paste(
+  "color-scheme: dark; --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;",
+  "--muted: #898781; --grid: #2c2c2a; --axis: #383835; --ring: rgba(255, 255, 255, 0.10);",
+  "--accent: #3987e5; --accent-ink: #0b0b0b; --accent-soft: #1c2a3d; --good: #0ca30c; --warn: #fab219;",
+  "--bad: #f08080; --bad-soft: #3a1c1c; --warn-soft: #3a2f12; --info-soft: #1c2a3d;")
+
+#' Stylesheet of the HTML report
+#' @noRd
+report_css <- function() gsub("{{DARK}}", paste0("    ", REPORT_CSS_DARK), REPORT_CSS, fixed = TRUE)
+
+#' Client-side application of the HTML report
+#' @noRd
+report_js <- function() REPORT_JS
+
+REPORT_CSS <- r"---(/* ECHO interactive report -- design tokens, layout and components.
+   Layout and tokens follow the SPARKS unified report: categorical hues are
+   applied by JS in fixed order; chrome (surface / ink / grid) swaps between
+   light and dark. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --accent-soft: #e7f0fc;
+  --good: #006300;
+  --warn: #8a5a00;
+  --bad: #c42b2b;
+  --bad-soft: #fdeaea;
+  --warn-soft: #fff3d6;
+  --info-soft: #e7f0fc;
+  --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+{{DARK}}
+  }
+}
+:root[data-theme="dark"] {
+{{DARK}}
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--page); color: var(--text);
+  font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 18px; } h3 { font-size: 14px; }
+code, pre { font-family: var(--mono); font-size: 12px; }
+pre { margin: 0; padding: 12px; overflow: auto; background: var(--page);
+      border: 1px solid var(--ring); border-radius: 8px; max-height: 420px; }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+
+/* ---- Header & tabs ---- */
+.top { background: var(--surface); border-bottom: 1px solid var(--ring); }
+.top-inner { max-width: 1440px; margin: 0 auto; padding: 14px 16px 0; }
+.title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.title-row h1 { font-size: 20px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+         border-radius: 999px; background: var(--accent-soft); color: var(--text-2);
+         font-size: 12px; border: 1px solid var(--ring); }
+.spacer { flex: 1; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; margin-top: 10px; }
+.tab { appearance: none; border: 0; background: none; color: var(--text-2); font: inherit;
+       padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent;
+       white-space: nowrap; border-radius: 6px 6px 0 0; }
+.tab:hover { background: var(--accent-soft); color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+main { max-width: 1440px; margin: 0 auto; padding: 16px; }
+.panel[hidden] { display: none; }
+
+/* ---- Cards, grids, controls ---- */
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: var(--radius);
+        padding: 14px; min-width: 0; }
+.card > header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.card > header .hint { margin-left: auto; }
+.grid { display: grid; gap: 12px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g-main { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); min-width: 0; max-width: 100%; }
+.field.inline { flex-direction: row; align-items: center; gap: 6px; }
+select, input[type="text"], input[type="number"], input[type="search"] {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--axis);
+  border-radius: 6px; padding: 5px 8px; min-width: 120px; max-width: 280px; }
+input[type="range"] { accent-color: var(--accent); }
+button.btn { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+             border: 1px solid var(--axis); background: var(--surface); color: var(--text); }
+button.btn:hover { background: var(--accent-soft); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.plot { width: 100%; min-height: 360px; }
+.plot.tall { min-height: 560px; } .plot.short { min-height: 280px; }
+.empty { padding: 28px 12px; text-align: center; color: var(--muted); }
+
+/* ---- Stat tiles ---- */
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: var(--radius); padding: 12px 14px; }
+.tile .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.tile .l { color: var(--text-2); font-size: 12px; }
+
+/* ---- Tables ---- */
+.tbl-wrap { overflow: auto; border: 1px solid var(--ring); border-radius: 8px; max-height: 520px; }
+table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.tbl th, .tbl td { padding: 5px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+.tbl th { position: sticky; top: 0; background: var(--surface); cursor: pointer; user-select: none;
+          font-weight: 600; color: var(--text-2); border-bottom: 1px solid var(--axis); z-index: 1; }
+.tbl th[aria-sort="ascending"]::after { content: " \25B2"; font-size: 9px; }
+.tbl th[aria-sort="descending"]::after { content: " \25BC"; font-size: 9px; }
+.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl tbody tr:hover { background: var(--accent-soft); }
+.tbl-bar { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.pager { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+
+.note { font-size: 12px; color: var(--muted); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 12.5px; }
+.kv dt { color: var(--text-2); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) { .g-main, .g2 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) { main { padding: 12px; } }
+@media print {
+  .tabs, .toolbar, .btn { display: none !important; }
+  .panel[hidden] { display: block !important; }
+  .card { break-inside: avoid; }
+}
+
+/* ---- ECHO additions ---- */
+.badge.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); font-weight: 600; cursor: pointer; }
+.badge.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); font-weight: 600; cursor: pointer; }
+.badge.ok { color: var(--good); }
+.sample-pick { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.sample-pick select { min-width: 160px; }
+
+/* alerts */
+.alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius);
+         border: 1px solid var(--ring); border-left-width: 5px; background: var(--surface); font-size: 13px; }
+.alert .ic { font-weight: 700; flex: none; width: 18px; text-align: center; }
+.alert .body { min-width: 0; overflow-wrap: anywhere; }
+.alert .ttl { font-weight: 600; }
+.alert.error { border-left-color: var(--bad); background: var(--bad-soft); }
+.alert.error .ic, .alert.error .ttl { color: var(--bad); }
+.alert.warning { border-left-color: var(--warn); background: var(--warn-soft); }
+.alert.warning .ic, .alert.warning .ttl { color: var(--warn); }
+.alert.info { border-left-color: var(--accent); background: var(--info-soft); }
+.alert.info .ic, .alert.info .ttl { color: var(--accent); }
+.alert a { cursor: pointer; }
+
+/* chips / status */
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+        border: 1px solid var(--ring); background: var(--page); color: var(--text-2); white-space: nowrap; }
+.chip.error, .chip.fail { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+.chip.warning, .chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.chip.info { color: var(--accent); border-color: var(--accent); background: var(--info-soft); }
+.chip.ok, .chip.HIGH { color: var(--good); border-color: var(--good); }
+.chip.MEDIUM { color: var(--warn); border-color: var(--warn); }
+.chip.LOW { color: var(--muted); }
+.chip.DEL { color: var(--bad); border-color: var(--bad); }
+.chip.DUP { color: var(--accent); border-color: var(--accent); }
+.tile.warn { border-color: var(--warn); } .tile.warn .v { color: var(--warn); }
+.tile.bad { border-color: var(--bad); } .tile.bad .v { color: var(--bad); }
+.tile.ok .v { color: var(--good); }
+.scope { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 12px; }
+.scope .tile .l { margin-top: 2px; }
+.tbl tbody tr.pick { cursor: pointer; }
+.tbl tbody tr.sel { background: var(--accent-soft); outline: 1px solid var(--accent); }
+.tbl td.wrap { white-space: normal; min-width: 260px; max-width: 520px; }
+.seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+.seg button { font: inherit; border: 0; background: var(--surface); color: var(--text-2); padding: 4px 10px; cursor: pointer;
+              border-right: 1px solid var(--axis); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.detail-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; margin-bottom: 8px; }
+.detail-head h2 { font-size: 16px; }
+.plot.strip { min-height: 70px; height: 70px; }
+.plot.mid { min-height: 240px; }
+.pill-list { display: flex; flex-wrap: wrap; gap: 6px; }
+@media print { .sample-pick, .seg { display: none !important; } }
+)---"
+
+REPORT_JS <- r"---(/* ECHO interactive report -- client-side app.
    Reads the JSON blob in #echo-data, builds one lazily-rendered panel per tab and
    draws every figure with the inlined plotly.js. No server and no network access
    are needed. Architecture follows the SPARKS unified report. */
@@ -35,7 +235,6 @@
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
   function range(n) { var a = new Array(n); for (var i = 0; i < n; i++) a[i] = i; return a; }
   function uniq(a) { return a.filter(function (v, i) { return a.indexOf(v) === i; }); }
-  function sum(a) { return a.reduce(function (s, v) { return s + (isFinite(v) ? v : 0); }, 0); }
   function fmtInt(n) { return Number(n).toLocaleString('en-US'); }
   function fmt(v) {
     if (v === null || v === undefined || (typeof v === 'number' && !isFinite(v))) return '';
@@ -178,7 +377,7 @@
     var sortCol = opts.sort ? opts.sort[0] : null, sortDir = opts.sort ? opts.sort[1] : 'asc';
     var types = {}; tb.cols.forEach(function (c) { types[c] = colType(tb, c); });
     var idx = range(n);
-    var search = h('input', { type: 'search', placeholder: 'Filter rows…', 'aria-label': 'Filter rows' });
+    var search = h('input', { type: 'search', placeholder: 'Filter rows\u2026', 'aria-label': 'Filter rows' });
     var count = h('span', { class: 'muted small' });
     var pager = h('span', { class: 'pager' });
     var tbody = h('tbody'), thead = h('thead');
@@ -246,9 +445,9 @@
       count.textContent = fmtInt(idx.length) + (idx.length === n ? '' : ' of ' + fmtInt(n)) + ' rows';
       var pages = Math.max(1, Math.ceil(idx.length / pageSize));
       clear(pager);
-      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '‹', 'aria-label': 'Previous page', disabled: page === 0, onclick: function () { page--; draw(); } }));
+      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '\u2039', 'aria-label': 'Previous page', disabled: page === 0, onclick: function () { page--; draw(); } }));
       pager.appendChild(h('span', { class: 'small', text: (page + 1) + ' / ' + pages }));
-      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '›', 'aria-label': 'Next page', disabled: page >= pages - 1, onclick: function () { page++; draw(); } }));
+      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '\u203a', 'aria-label': 'Next page', disabled: page >= pages - 1, onclick: function () { page++; draw(); } }));
     }
     var timer = null;
     search.addEventListener('input', function () {
@@ -279,7 +478,7 @@
   function sevChip(v) { return v ? chip(v, v) : ''; }
 
   // ------------------------------------------------------------------ alerts
-  var SEV_ICON = { error: '✖', warning: '▲', info: 'ℹ' };
+  var SEV_ICON = { error: '\u2716', warning: '\u25b2', info: '\u2139' };
   var SEV_ORDER = { error: 0, warning: 1, info: 2 };
   function activeAlerts(kinds, minSev) {
     var s = sel();
@@ -299,7 +498,7 @@
         h('div', { class: 'body' },
           h('div', { class: 'ttl', text: a.title }),
           h('div', { text: a.text }),
-          (withLinks !== false && a.tab && a.tab !== active) ? h('a', { href: '#tab=' + a.tab, text: 'Details →', onclick: function (e) { e.preventDefault(); nav(a.tab); } }) : null));
+          (withLinks !== false && a.tab && a.tab !== active) ? h('a', { href: '#tab=' + a.tab, text: 'Details \u2192', onclick: function (e) { e.preventDefault(); nav(a.tab); } }) : null));
     }));
   }
 
@@ -317,8 +516,6 @@
     return function (i) { var s = sel(); if (!s) return true; var v = tbl.data[key || 'Sample'][i]; return v === s || v === 'All'; };
   }
   function sampleOnly(tbl) { return function (i) { var s = sel(); return !s || tbl.data.Sample[i] === s; }; }
-  function n_calls() { var C = DATA.cnvs, s = sel(); return s ? col(C, 'Sample').filter(function (x) { return x === s; }).length : C.n; }
-  function shortList(a, k) { return a.length <= k ? a.join(', ') : a.slice(0, k).join(', ') + ' … (+' + (a.length - k) + ')'; }
 
   // ---- Overview
   tab('overview', 'Overview', function () { return true; }, function (root) {
@@ -398,7 +595,7 @@
         return { type: 'scatter', mode: 'markers', name: ty === 'DEL' ? 'Deletion' : 'Duplication',
           x: ii.map(function (i) { return C.data.gidx[i]; }),
           y: ii.map(function (i) { return C.data.Ratio[i] > 0 ? Math.log2(C.data.Ratio[i]) : null; }),
-          text: ii.map(function (i) { return C.data.Sample[i] + '<br>' + C.data.Gene[i] + ' (' + C.data.Genomic[i] + ')<br>' + C.data.Confidence[i] + ' · ratio ' + fmt(C.data.Ratio[i]); }),
+          text: ii.map(function (i) { return C.data.Sample[i] + '<br>' + C.data.Gene[i] + ' (' + C.data.Genomic[i] + ')<br>' + C.data.Confidence[i] + ' \u00b7 ratio ' + fmt(C.data.Ratio[i]); }),
           hoverinfo: 'text',
           marker: { color: ty === 'DEL' ? sem.del : sem.dup, symbol: ty === 'DEL' ? 'triangle-down' : 'triangle-up',
             size: ii.map(function (i) { return Math.min(22, 8 + 2 * Math.sqrt(C.data.Nexons[i] || 1)); }), line: { width: 1, color: c.surface } } };
@@ -466,12 +663,12 @@
       tv = tableView(tblHost, Q, { filename: 'echo_qc_flags', pageSize: 20, wrap: ['Details'],
         sort: ['Severity', 'asc'], render: { Severity: function (v) { return sevChip(v); }, Details: function (v) { return v; } } });
       apply();
-      root.appendChild(h('div', { style: { marginTop: '12px' } }, card('QC flags', 'Whole sample · Whole exon · Exon variability · Cohort size · Missing Chromosome · Analysis scope', host)));
+      root.appendChild(h('div', { style: { marginTop: '12px' } }, card('QC flags', 'Whole sample \u00b7 Whole exon \u00b7 Exon variability \u00b7 Cohort size \u00b7 Missing Chromosome \u00b7 Analysis scope', host)));
     }
   });
 
   function chromBars(div) {
-    var CH = DATA.chr;
+    var CH = DATA.chr_all || DATA.chr;
     if (!CH.n) { showNote(div, 'No targets.'); return; }
     plot(div, function (t) {
       var sem = SEM[t];
@@ -584,7 +781,7 @@
     var C = DATA.cnvs, id = String(C.data.ID[i]), W = DATA.windows[id];
     clear(host);
     var head = h('div', { class: 'detail-head' },
-      h('h2', { text: C.data.Sample[i] + ' · ' + C.data.Gene[i] }),
+      h('h2', { text: C.data.Sample[i] + ' \u00b7 ' + C.data.Gene[i] }),
       chip(C.data.Type[i], C.data.Type[i]), confChip(C.data.Confidence[i]),
       h('span', { class: 'muted', text: C.data.Genomic[i] }));
     var kv = h('dl', { class: 'kv' });
@@ -610,66 +807,73 @@
     host.scrollIntoView && host.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
-  function winAxis(W, t) {
+  function winAxis(W) {
     var px = W.px, lo = Math.min.apply(null, px) - 0.8, hi = Math.max.apply(null, px) + 0.8;
     return { tickmode: 'array', tickvals: px, ticktext: W.xlab, tickangle: -45, range: [lo, hi], showgrid: false };
   }
+  // hover name of target j: 'exon 3', or the off-target label ('HorsROI')
+  function targetName(W, j) { return W.off && W.off[j] ? W.xlab[j] : 'exon ' + (W.xlab[j] || ''); }
+  // reference points + test sample (unaffected / affected) for one panel
+  function windowTraces(W, t, y, refY, tip, refSize) {
+    var sem = SEM[t], rx = [], ry = [], rt = [];
+    refY.forEach(function (vals, r) { vals.forEach(function (v, j) { rx.push(W.px[j]); ry.push(v); rt.push(W.ref_names[r] + '<br>' + targetName(W, j)); }); });
+    var pts = function (keep) { var ii = range(W.px.length).filter(function (j) { return !!W.affected[j] === keep; });
+      return { x: ii.map(function (j) { return W.px[j]; }), y: ii.map(function (j) { return y[j]; }), text: ii.map(tip) }; };
+    var ni = pts(false), ai = pts(true);
+    var hov = refY.length ? 'text+y' : 'text';
+    return [
+      { type: 'scatter', mode: 'markers', name: 'Reference samples', x: rx, y: ry, text: rt, hoverinfo: 'text+y', marker: { color: sem.ref, size: refSize, opacity: 0.7 } },
+      { type: 'scatter', mode: 'markers', name: 'Test sample', x: ni.x, y: ni.y, text: ni.text, hoverinfo: hov, marker: { color: sem.test, size: 8 } },
+      { type: 'scatter', mode: 'markers', name: 'Affected exon(s)', x: ai.x, y: ai.y, text: ai.text, hoverinfo: hov, marker: { color: sem.hit, size: 11, symbol: 'diamond' } }
+    ];
+  }
   function winPlots(W, strip, cov, ci, z) {
-    var px = W.px, aff = W.affected;
-    var offRe = null; try { if (META.off_target_pattern) offRe = new RegExp(META.off_target_pattern); } catch (e) { offRe = null; }
-    // gene track
+    var px = W.px;
+    // gene track: one block per gene run / off-target interval, every block labelled
     plot(strip, function (t) {
-      var cc = catColors(8, t), shapes = [], ann = [], k = 0, start = 0;
+      var cc = catColors(8, t), c = CHROME[t], shapes = [], ann = [], k = 0, start = 0;
       for (var i = 1; i <= px.length; i++) {
         if (i === px.length || W.gene_group[i] !== W.gene_group[start]) {
-          var g = W.gene[start] || '', off = offRe && offRe.test(g);
-          shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: px[start] - 0.5, x1: px[i - 1] + 0.5, y0: 0.05, y1: 0.95, fillcolor: off ? CHROME[t].axis : cc[k % 8], line: { width: 0 }, opacity: 0.9 });
-          if (!off && g) ann.push({ x: (px[start] + px[i - 1]) / 2, y: 0.5, xref: 'x', yref: 'paper', text: g, showarrow: false, font: { color: '#ffffff', size: 12 } });
-          k++; start = i;
+          var g = W.gene[start] || '', off = !!(W.off && W.off[start]), n = i - start;
+          var vert = n === 1 || (n === 2 && g.length > 5);
+          shapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: px[start] - 0.5, x1: px[i - 1] + 0.5, y0: 0.05, y1: 0.95, fillcolor: off ? c.axis : cc[k % 8], line: { width: 0 }, opacity: 0.9 });
+          if (g) ann.push({ x: (px[start] + px[i - 1]) / 2, y: 0.5, xref: 'x', yref: 'paper', text: g, showarrow: false, textangle: vert ? -90 : 0,
+            font: { color: off ? c.text : '#ffffff', size: vert ? 10 : 12 } });
+          if (!off) k++;
+          start = i;
         }
       }
-      var L = baseLayout(t, { shapes: shapes, annotations: ann, xaxis: Object.assign(winAxis(W, t), { showticklabels: false }), yaxis: { visible: false }, margin: { l: 56, r: 16, t: 4, b: 4 } });
+      var L = baseLayout(t, { shapes: shapes, annotations: ann, xaxis: Object.assign(winAxis(W), { showticklabels: false }), margin: { l: 56, r: 16, t: 4, b: 4 } });
       L.yaxis = { visible: false, range: [0, 1], fixedrange: true };
       return { data: [{ type: 'scatter', x: [px[0]], y: [0.5], mode: 'markers', marker: { opacity: 0 }, hoverinfo: 'skip' }], layout: L, config: { staticPlot: true } };
     });
     // coverage
     plot(cov, function (t) {
-      var sem = SEM[t], data = [];
-      var rx = [], ry = [], rt = [];
-      W.ref_names.forEach(function (nm, r) { W.ref_cov[r].forEach(function (v, j) { rx.push(px[j]); ry.push(v); rt.push(nm + '<br>exon ' + (W.xlab[j] || '')); }); });
-      data.push({ type: 'scatter', mode: 'markers', name: 'Reference samples', x: rx, y: ry, text: rt, hoverinfo: 'text+y', marker: { color: sem.ref, size: 6, opacity: 0.7 } });
-      var ni = range(px.length).filter(function (j) { return !aff[j]; }), ai = range(px.length).filter(function (j) { return aff[j]; });
-      data.push({ type: 'scatter', mode: 'markers', name: 'Test sample', x: ni.map(function (j) { return px[j]; }), y: ni.map(function (j) { return W.test[j]; }), text: ni.map(function (j) { return 'exon ' + W.xlab[j]; }), hoverinfo: 'text+y', marker: { color: sem.test, size: 8 } });
-      data.push({ type: 'scatter', mode: 'markers', name: 'Affected exon(s)', x: ai.map(function (j) { return px[j]; }), y: ai.map(function (j) { return W.test[j]; }), text: ai.map(function (j) { return 'exon ' + W.xlab[j]; }), hoverinfo: 'text+y', marker: { color: sem.hit, size: 11, symbol: 'diamond' } });
-      return { data: data, layout: baseLayout(t, { ylab: 'log(coverage)', legend: true, xaxis: winAxis(W, t) }) };
+      var data = windowTraces(W, t, W.test, W.ref_cov, function (j) { return targetName(W, j); }, 6);
+      return { data: data, layout: baseLayout(t, { ylab: 'log(coverage)', legend: true, xaxis: winAxis(W) }) };
     });
-    // observed / expected
+    // observed / expected with the 95% interval (one ribbon per block)
     plot(ci, function (t) {
-      var sem = SEM[t], data = [], gs = uniq(W.gene_group);
-      gs.forEach(function (g, k) {
+      var data = [];
+      uniq(W.gene_group).forEach(function (g, k) {
         var ii = range(px.length).filter(function (j) { return W.gene_group[j] === g; });
-        data.push({ type: 'scatter', mode: 'lines', x: ii.map(function (j) { return px[j]; }), y: ii.map(function (j) { return W.lo[j]; }), line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
-        data.push({ type: 'scatter', mode: 'lines', x: ii.map(function (j) { return px[j]; }), y: ii.map(function (j) { return W.hi[j]; }), line: { width: 0 }, fill: 'tonexty', fillcolor: CHROME[t].grid, name: '95% interval', showlegend: k === 0, hoverinfo: 'skip' });
+        // a one-target block gets a short flat band (a ribbon through one point is invisible)
+        var xs = ii.length === 1 ? [px[ii[0]] - 0.3, px[ii[0]] + 0.3] : ii.map(function (j) { return px[j]; });
+        var band = function (v) { return ii.length === 1 ? [v[ii[0]], v[ii[0]]] : ii.map(function (j) { return v[j]; }); };
+        data.push({ type: 'scatter', mode: 'lines', x: xs, y: band(W.lo), line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+        data.push({ type: 'scatter', mode: 'lines', x: xs, y: band(W.hi), line: { width: 0 }, fill: 'tonexty', fillcolor: CHROME[t].grid, name: '95% interval', showlegend: k === 0, hoverinfo: 'skip' });
       });
-      var ni = range(px.length).filter(function (j) { return !aff[j]; }), ai = range(px.length).filter(function (j) { return aff[j]; });
-      var tip = function (j) { return 'exon ' + W.xlab[j] + '<br>observed ' + fmt(W.observed[j]) + '<br>expected ' + fmt(W.expected[j]) + '<br>ratio ' + fmt(W.ratio[j]) + ' [' + fmt(W.lo[j]) + ' – ' + fmt(W.hi[j]) + ']'; };
-      data.push({ type: 'scatter', mode: 'markers', name: 'Observed', x: ni.map(function (j) { return px[j]; }), y: ni.map(function (j) { return W.ratio[j]; }), text: ni.map(tip), hoverinfo: 'text', marker: { color: sem.test, size: 9 } });
-      data.push({ type: 'scatter', mode: 'markers', name: 'Affected', x: ai.map(function (j) { return px[j]; }), y: ai.map(function (j) { return W.ratio[j]; }), text: ai.map(tip), hoverinfo: 'text', marker: { color: sem.hit, size: 11, symbol: 'diamond' } });
-      var L = baseLayout(t, { ylab: 'Observed / expected', legend: true, xaxis: winAxis(W, t),
+      var tip = function (j) { return targetName(W, j) + '<br>observed ' + fmt(W.observed[j]) + '<br>expected ' + fmt(W.expected[j]) + '<br>ratio ' + fmt(W.ratio[j]) + ' [' + fmt(W.lo[j]) + ' \u2013 ' + fmt(W.hi[j]) + ']'; };
+      var pts = windowTraces(W, t, W.ratio, [], tip, 0).slice(1);
+      pts[0].name = 'Observed'; pts[0].marker.size = 9; pts[1].name = 'Affected';
+      var L = baseLayout(t, { ylab: 'Observed / expected', legend: true, xaxis: winAxis(W),
         shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1, line: { color: CHROME[t].axis, width: 1, dash: 'dash' } }] });
-      return { data: data, layout: L };
+      return { data: data.concat(pts), layout: L };
     });
     // z-score
     plot(z, function (t) {
-      var sem = SEM[t], rx = [], ry = [], rt = [];
-      W.ref_names.forEach(function (nm, r) { W.ref_z[r].forEach(function (v, j) { rx.push(px[j]); ry.push(v); rt.push(nm + '<br>exon ' + (W.xlab[j] || '')); }); });
-      var ni = range(px.length).filter(function (j) { return !aff[j]; }), ai = range(px.length).filter(function (j) { return aff[j]; });
-      var data = [
-        { type: 'scatter', mode: 'markers', name: 'Reference samples', x: rx, y: ry, text: rt, hoverinfo: 'text+y', marker: { color: sem.ref, size: 5, opacity: 0.7 } },
-        { type: 'scatter', mode: 'markers', name: 'Test sample', x: ni.map(function (j) { return px[j]; }), y: ni.map(function (j) { return W.z[j]; }), text: ni.map(function (j) { return 'exon ' + W.xlab[j]; }), hoverinfo: 'text+y', marker: { color: sem.test, size: 8 } },
-        { type: 'scatter', mode: 'markers', name: 'Affected exon(s)', x: ai.map(function (j) { return px[j]; }), y: ai.map(function (j) { return W.z[j]; }), text: ai.map(function (j) { return 'exon ' + W.xlab[j]; }), hoverinfo: 'text+y', marker: { color: sem.hit, size: 11, symbol: 'diamond' } }
-      ];
-      var L = baseLayout(t, { ylab: 'Z-score', legend: true, xaxis: winAxis(W, t),
+      var data = windowTraces(W, t, W.z, W.ref_z, function (j) { return targetName(W, j); }, 5);
+      var L = baseLayout(t, { ylab: 'Z-score', legend: true, xaxis: winAxis(W),
         shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 0, y1: 0, line: { color: CHROME[t].axis, width: 1, dash: 'dash' } }] });
       return { data: data, layout: L };
     });
@@ -679,8 +883,8 @@
   tab('cohort', 'Cohort', function () { return DATA.pca || DATA.corr || (DATA.depth_hist && DATA.depth_hist.counts.length); }, function (root) {
     var p1 = plotBox('tall'), p2 = plotBox('tall'), p3 = plotBox('short');
     var cards = [];
-    if (DATA.pca) cards.push(card('PCA of coverage profiles', DATA.pca.n_samples + ' samples · ' + fmtInt(DATA.pca.n_rows) + ' targets (log2 counts)', p1));
-    if (DATA.corr) cards.push(card('Sample–sample correlation', 'Spearman, targets of all chromosomes in the BED', p2));
+    if (DATA.pca) cards.push(card('PCA of coverage profiles', DATA.pca.n_samples + ' samples \u00b7 ' + fmtInt(DATA.pca.n_rows) + ' targets (log2 counts)', p1));
+    if (DATA.corr) cards.push(card('Sample\u2013sample correlation', 'Spearman, targets of all chromosomes in the BED', p2));
     if (cards.length) root.appendChild(h('div', { class: 'grid g2' }, cards));
     if (!DATA.pca) root.appendChild(h('div', { style: { marginTop: '12px' } }, card('PCA of coverage profiles', null, emptyNote('PCA needs at least 3 samples with variable coverage.'))));
     if (DATA.depth_hist && DATA.depth_hist.counts.length)
@@ -708,7 +912,7 @@
       var L = baseLayout(t, { xaxis: { type: 'category', tickangle: -45, showgrid: false }, yaxis: { type: 'category', autorange: 'reversed', showgrid: false }, margin: { l: 90, r: 16, t: 16, b: 90 } });
       return { data: [{ type: 'heatmap', x: Cm.names, y: Cm.names, z: Cm.z, zmin: Math.min(0.9, isFinite(lo) ? lo : 0.9), zmax: 1,
         colorscale: SEQ.map(function (c, i) { return [i / (SEQ.length - 1), c]; }), colorbar: { thickness: 10, len: 0.6, title: { text: 'r' } },
-        hovertemplate: '%{y} × %{x}<br>r = %{z:.3f}<extra></extra>' }], layout: L };
+        hovertemplate: '%{y} \u00d7 %{x}<br>r = %{z:.3f}<extra></extra>' }], layout: L };
     });
   }
   function depthHist(div) {
@@ -716,7 +920,7 @@
     plot(div, function (t) {
       var sem = SEM[t];
       var data = [{ type: 'bar', x: Hh.mid, y: Hh.counts, marker: { color: Hh.mid.map(function (m) { return TH.min_cov !== null && TH.min_cov !== undefined && Math.pow(10, m) < TH.min_cov ? sem.bad : sem.dup; }) },
-        hovertemplate: 'median depth ≈ %{customdata:.0f}<br>%{y} targets<extra></extra>', customdata: Hh.mid.map(function (m) { return Math.pow(10, m); }) }];
+        hovertemplate: 'median depth \u2248 %{customdata:.0f}<br>%{y} targets<extra></extra>', customdata: Hh.mid.map(function (m) { return Math.pow(10, m); }) }];
       var thr = Math.log10(Math.max(TH.min_cov || 1, 1));
       var hi = Math.ceil(Math.max.apply(null, Hh.mid) + 0.05), tv = range(hi + 1);
       var L = baseLayout(t, { xlab: 'Median depth per target (log scale)', ylab: 'Targets',
@@ -746,7 +950,7 @@
       blocks.push(card('Confidence score', null, hh));
     }
     blocks.push(card('Reading the plots', null, h('div', null,
-      h('p', { text: 'Each CNV call shows the test sample against its selected reference samples over the affected exons ± 5 neighbouring targets. Coverage is shown on a log scale after scaling each reference to the median coverage of the test sample in the window.' }),
+      h('p', { text: 'Each CNV call shows the test sample against its selected reference samples over the affected exons \u00b1 5 neighbouring targets. Coverage is shown on a log scale after scaling each reference to the median coverage of the test sample in the window.' }),
       h('p', { text: 'Observed / expected is the test count divided by the count expected from the reference aggregate; the grey ribbon is the 95% interval of the beta-binomial model (overdispersion phi fitted by ExomeDepth). The z-score uses the model\'s own standard deviation, so reference samples should scatter around 0.'}),
       h('p', { text: 'If more background exons than expected fall outside the interval, the call is flagged "check" (poorly calibrated reference set).' }))));
     if (DATA.sample_table && DATA.sample_table.n) { var h1 = h('div'); tableView(h1, DATA.sample_table, { filename: 'echo_sample_table', pageSize: 15 }); blocks.push(card('Sample table', null, h1)); }
@@ -797,18 +1001,18 @@
     var box = $('#badges'); if (!box) return; clear(box);
     var nErr = activeAlerts(null, 'error').length, nWarn = activeAlerts(null, 'warning').length - nErr;
     box.appendChild(h('span', { class: 'badge', text: META.prefix ? META.prefix : 'ECHO' }));
-    box.appendChild(h('span', { class: 'badge', text: 'modechrom ' + META.modechrom + ' · ' + META.modechrom_label }));
+    box.appendChild(h('span', { class: 'badge', text: 'modechrom ' + META.modechrom + ' \u00b7 ' + META.modechrom_label }));
     if (META.genome_version) box.appendChild(h('span', { class: 'badge', text: META.genome_version }));
     if (META.focus) box.appendChild(h('span', { class: 'badge', text: 'single-sample report' }));
-    if (nErr) box.appendChild(h('button', { class: 'badge bad', type: 'button', text: '✖ ' + plural(nErr, 'error'), title: 'Open QC & warnings', onclick: function () { nav('qc'); } }));
-    if (nWarn > 0) box.appendChild(h('button', { class: 'badge warn', type: 'button', text: '▲ ' + plural(nWarn, 'warning'), title: 'Open QC & warnings', onclick: function () { nav('qc'); } }));
-    if (!nErr && nWarn <= 0) box.appendChild(h('span', { class: 'badge ok', text: '✔ no warnings' }));
+    if (nErr) box.appendChild(h('button', { class: 'badge bad', type: 'button', text: '\u2716 ' + plural(nErr, 'error'), title: 'Open QC & warnings', onclick: function () { nav('qc'); } }));
+    if (nWarn > 0) box.appendChild(h('button', { class: 'badge warn', type: 'button', text: '\u25b2 ' + plural(nWarn, 'warning'), title: 'Open QC & warnings', onclick: function () { nav('qc'); } }));
+    if (!nErr && nWarn <= 0) box.appendChild(h('span', { class: 'badge ok', text: '\u2714 no warnings' }));
   }
   function init() {
     applyThemeAttr();
     document.title = META.title;
     $('#title').textContent = META.title;
-    $('#generated').textContent = META.generated + (META.version ? ' · ECHO ' + META.version : '');
+    $('#generated').textContent = META.generated + (META.version ? ' \u00b7 ECHO ' + META.version : '');
     var tabsEl = $('#tabs'), main = $('#panels');
     var avail = TABS.filter(function (t) { return t.available(); });
     avail.forEach(function (t, i) {
@@ -859,3 +1063,4 @@
   function refreshAll() { $$('.panel').forEach(function (p) { refreshVisible(p); }); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
+)---"

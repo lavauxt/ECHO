@@ -61,22 +61,24 @@ below.
 * **Gene-Boundary Spacing in Plots:** `plot_gene_gap` (default `1`) inserts
   blank x-axis space between a gene's last exon and the next gene's first
   exon in every PDF and HTML-report panel, so a window that spans more
-  than one gene doesn't read as one continuous, unbroken feature.
+  than one gene doesn't read as one continuous, unbroken feature. A run of
+  consecutive off-target (HorsROI) intervals forms one block, spaced the
+  same way.
 * **Off-Target/Filler Region Handling:** BED panels sometimes include
   normalization "backbone" probes that are never a real gene exon (often
   named things like `HorsROI`). Rows whose parsed gene name matches
   `off_target_pattern` (default `"^HorsROI"`; set to `null`/`""` to
-  disable) are handled per `off_target_handling`: `"na"` (default — kept,
-  but excluded from exon numbering/gene grouping instead of being numbered
-  as if the filler label were a gene), `"remove"` (dropped entirely), or
-  `"merge"` (attached to the nearest neighbouring real gene, numbered as
-  one of that gene's own exons).
-* **Off-Target/Filler Region Handling in Plots:** `off_target_gene_pattern`
-  (regex, default `"^HorsROI"`) flags BED rows like off-target padding
-  regions that carry their own unrelated numbering. Flagged rows render as
-  a fixed neutral grey tile with no text label (PDF gene track) and a
-  blanked axis tick (every panel, PDF and report), instead of being
-  interleaved with a gene's real exon numbers with no visual distinction.
+  disable) are kept by default (`keep_hors_roi: true`), labelled `HorsROI`
+  in the processed BED and given **no exon number**, so they never take or
+  shift a real gene's exon numbers. `keep_hors_roi: false` (or
+  `off_target_handling: "remove"` in `handle_off_target_regions()`) drops
+  them instead.
+* **Off-Target Regions in Plots:** the same `off_target_pattern` drives the
+  plots (PDF and HTML report). Consecutive HorsROI intervals form one grey
+  block labelled `HorsROI` in the gene track (an isolated one gets a
+  narrow block with a vertical label), separated from the neighbouring
+  genes by `plot_gene_gap`, and their x-axis ticks and hover text read
+  `HorsROI` instead of being blank.
 * **Confidence Scoring:** HIGH/MEDIUM/LOW tiers from correlation, reference
   count, and read-ratio, with a built-in list of pseudogene/homology-prone
   genes always scored LOW.
@@ -161,11 +163,14 @@ settings:
   report_max_profiles: 500               # CNV calls whose coverage profile is embedded in the report
 ```
 
+Each target's x-axis label is the exon label from column 5 of the BED when
+present (otherwise ECHO's own numbering), identically in the PDF plots and
+in the HTML report.
+
 ```yaml
 bed_preprocess:
-  off_target_pattern: "^HorsROI"         # regex matching filler/backbone intervals, not real exons
-  off_target_handling: "na"              # "na" | "remove" | "merge"
-  off_target_gene_pattern: "^HorsROI"    # grey out/blank-label off-target filler regions in plots
+  off_target_pattern: "^HorsROI"         # regex matching filler/backbone intervals (BED + plots)
+  keep_hors_roi: true                    # false drops them from the processed BED
 
 genome_version: "hg19"
 bed_process: "STANDARD"                  # or "REGEN" / "NO"
@@ -187,7 +192,8 @@ default (`report = TRUE`). Static per-call PDF plots are generated when
 #### Interactive HTML report
 
 One self-contained file (about 4 MB, plotly.js is embedded): open it in any
-browser, offline. It is a small client-side app — tabs are built lazily,
+browser, offline. Its CSS and JavaScript are embedded in the package code
+(`R/echo_report_assets.R`), so no asset file has to be installed. It is a small client-side app — tabs are built lazily,
 the URL hash (`#tab=cnvs&sample=S01`) makes a view shareable, and *Print* to
 PDF expands every tab.
 
@@ -239,6 +245,10 @@ table (`Type = "Analysis scope"`) and in the report:
 To cover the whole genome, run ECHO once per class (`modechrom: "A"`, then
 `"X"`, then `"Y"` with a `sample_table`).
 
+The scope is computed on the full BED (read from the coverage RData, passed
+as `coverage_rdata`), not on the targets kept for calling, so a class that
+is in the BED but not analysed is never reported as missing.
+
 ## Input File Formats
 
 **BED File**
@@ -247,6 +257,9 @@ Standard 0-based BED file (`bed_zero_based: true`, the default; set it to
 `"REGEN"`, it's automatically annotated with gene/exon information first;
 the preprocessed BED is always written 0-based, and ECHO takes care of the
 conversion (an input declared 1-based is no longer shifted twice).
+
+`bed_process: "NO"` keeps the names already in the BED (parsed, then
+numbered); `"STANDARD"` re-annotates from panel files when given.
 
 **Sample table** (optional, required for `modechrom` `X`/`Y`)
 Tab-separated, with `sample_name` and `gender` columns (any other column is
@@ -258,7 +271,8 @@ shown in the report's *Samples* tab).
 * `Chromosome`, `Start`, `End`: Genomic coordinates of the CNV.
 * `Type`: `deletion` or `duplication` (ExomeDepth's own labels).
 * `Nexons`, `Start.p`, `End.p`: Number of exons spanned and their within-gene
-  start/end index.
+  start/end index (`NA` when the call starts or ends on a HorsROI interval,
+  which has no exon number).
 * `BF`: ExomeDepth Bayes factor for the call.
 * `Reads.expected`, `Reads.observed`, `Reads.ratio`: Observed vs.
   reference-implied read counts and their ratio.
@@ -279,15 +293,14 @@ shown in the report's *Samples* tab).
   compound names like `5utr1-ex1` or `utr2-ex10-extra` resolve to the
   right exon. Off-target/filler intervals (e.g. `HorsROI` backbone probes)
   are caught by name via `off_target_pattern` before any exon numbering
-  happens — see `handle_off_target_regions()` below.
+  happens, labelled `HorsROI` and left unnumbered.
 - **Off-target/filler region handling** (`echo_utils.R::handle_off_target_regions()`) —
-  rows whose parsed gene matches `off_target_pattern` (default
-  `"^HorsROI"`) are, per `off_target_handling`: kept with `gene = NA` and
-  excluded from numbering (`"na"`, default), dropped (`"remove"`), or
-  attached to the nearest neighbouring real gene on the same chromosome
-  and numbered as one of its exons (`"merge"`). Without this, such rows
-  get numbered as if the filler label were a gene in its own right, and
-  show up interleaved with the real gene's exons in plots.
+  standalone helper: rows whose name matches `off_target_pattern` are set
+  to `gene = NA` (`"na"`), dropped (`"remove"`) or attached to the nearest
+  real gene on the same chromosome (`"merge"`). Inside the pipeline,
+  retained intervals always end up labelled `HorsROI` without an exon
+  number; `assign_exon_numbers_per_gene()` never numbers them, and
+  `pad_gene_terminal_exons()` never pads them.
 - **Sample/exon QC exclusion** (`echo_utils.R`) — `sample_qc` drops outlier
   samples (robust z-score on cross-target noise) and `exon_qc` drops
   problematic exons (high cross-sample MAD, low mean coverage, or GC
@@ -305,7 +318,13 @@ shown in the report's *Samples* tab).
   shows real blank space, in every panel, exactly between a gene's last
   exon and the next gene's first exon — lines and ribbons break there
   rather than visually bridging the gap. Controlled by `plot_gene_gap`
-  (default `1`; `0` disables it).
+  (default `1`; `0` disables it). A one-target block gets a short flat
+  interval band so its 95% interval stays visible.
+- **Shared coverage window** (`echo_plots.R::prepare_plot_data()`) — one
+  computation of a call's window (coverage, observed/expected, interval,
+  z-scores, labels) feeds both the PDF panels and the HTML report, so the
+  two always agree. PDF panels share the same plot area, so gene tiles sit
+  exactly above their points.
 - **QC metrics table** (`echo_metrics.R`) — per-sample and per-exon flags,
   written to TSV and shown in the report. Columns: `Sample`, `Exon`, `Type`,
   `Details`, `Gene`, `Severity` (`error` / `warning` / `info`). `Type` is one
@@ -320,14 +339,28 @@ shown in the report's *Samples* tab).
 - **PCA of coverage profiles** (`echo_utils.R::plot_coverage_pca()`).
 - **VCF export** (`echo_vcf_export.R`) — multi-sample or per-sample.
 - **Interactive HTML report** (`echo_report.R::generate_report()`,
-  `inst/report/echo_report.{css,js}`) — see
-  [Interactive HTML report](#interactive-html-report). The old R Markdown
-  templates (`inst/rmd/`) are no longer used and can be deleted.
+  front-end in `echo_report_assets.R`) — see
+  [Interactive HTML report](#interactive-html-report). `inst/report/` and
+  the old R Markdown templates (`inst/rmd/`) are no longer used and can be
+  deleted.
 - **Background-calibration diagnostic** (`echo_utils.R::check_background_calibration()`) —
   flags a call when the *non-called* exons in its plotted window fall
   outside the modelled 95% predictive interval more often than a
   well-calibrated interval implies (a sign the real alteration may extend
   further, or that the reference match is poor for this region).
+
+## What's new in 0.3.0
+
+* Report CSS/JS embedded in the R code (`inst/report/` no longer needed; R >= 4.0).
+* HorsROI intervals: one labelled, spaced block per run of consecutive
+  intervals in the PDF and the HTML report; no exon number, no padding.
+  `off_target_gene_pattern` is gone: plots use `off_target_pattern`.
+* Fixes: overlapping/missing gene tiles in the PDF, different exon labels
+  between PDF and report, false "chromosome missing from the BED" warnings,
+  `bed_process: "NO"` stopping with an error, unreadable labels on light
+  tiles, invisible interval band on one-target blocks.
+* Internal refactoring (shared window computation, BED processing paths,
+  helpers); outputs unchanged otherwise.
 
 ## License
 

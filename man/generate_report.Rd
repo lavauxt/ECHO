@@ -86,7 +86,8 @@ plots.
 Every metric is drawn against its threshold, and failing samples are
 coloured.
 
-Optional \code{settings}: \code{report_plotly} (\code{"inline"},
+The off-target pattern is read from \code{config$off_target_pattern}
+  (default \code{"^HorsROI"}). Optional \code{settings}: \code{report_plotly} (\code{"inline"},
   default, or \code{"cdn"} for a ~3.6 MB smaller file that needs internet to
   draw plots) and \code{report_max_profiles} (default \code{500}): maximum
   number of calls for which the per-call coverage profile is embedded

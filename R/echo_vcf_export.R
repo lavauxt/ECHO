@@ -187,26 +187,15 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
         info_items <- c(info_items, paste0("REFS=", refs_val))
       }
     }
-    if ("Correlation" %in% names(representative)) {
-      corr <- representative$Correlation[1]
-      if (length(corr) && !is.na(corr) && corr != "NA")
-        info_items <- c(info_items, paste0("CORR=", corr))
+    info_value <- function(col, key, f = identity) {
+      if (!col %in% names(representative)) return(NULL)
+      v <- representative[[col]][1]
+      if (!length(v) || is.na(v) || identical(as.character(v), "NA")) return(NULL)
+      paste0(key, "=", f(v))
     }
-    if ("N.comp" %in% names(representative)) {
-      ncomp <- representative$`N.comp`[1]
-      if (length(ncomp) && !is.na(ncomp) && ncomp != "NA")
-        info_items <- c(info_items, paste0("NCOMP=", ncomp))
-    }
-    if ("BF" %in% names(representative)) {
-      bf <- representative$BF[1]
-      if (length(bf) && !is.na(bf) && bf != "NA")
-        info_items <- c(info_items, paste0("BF=", bf))
-    }
-    if ("Reads.ratio" %in% names(representative)) {
-      ratio <- representative$`Reads.ratio`[1]
-      if (length(ratio) && !is.na(ratio) && ratio != "NA")
-        info_items <- c(info_items, paste0("READS_RATIO=", round(as.numeric(ratio), 2)))
-    }
+    info_items <- c(info_items,
+                    info_value("Correlation", "CORR"), info_value("N.comp", "NCOMP"), info_value("BF", "BF"),
+                    info_value("Reads.ratio", "READS_RATIO", function(v) round(as.numeric(v), 2)))
 
     sample_fields <- vapply(vcf_samples, function(s) {
       sample_row <- row_hits[as.character(row_hits$Sample) == s, , drop = FALSE]

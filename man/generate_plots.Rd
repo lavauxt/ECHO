@@ -10,7 +10,8 @@ generate_plots(
   modechrom = "A",
   prefix = NULL,
   log_file = NULL,
-  gene_gap = 1
+  gene_gap = 1,
+  off_target_pattern = "^HorsROI"
 )
 }
 \arguments{
@@ -27,8 +28,12 @@ generate_plots(
 \item{gene_gap}{Numeric >= 0. Extra x-axis units inserted between a
 gene's last exon and the next gene's first exon, in every panel, so
 the two are visually separated instead of sitting flush like ordinary
-neighbouring exons. \code{0} disables the extra spacing. See
+neighbouring exons. A run of consecutive off-target (HorsROI) intervals is
+one block, separated the same way. \code{0} disables the extra spacing. See
 \code{\link{compute_gene_gap_positions}}. Default \code{1}.}
+
+\item{off_target_pattern}{Regex identifying off-target targets (the run's
+\code{off_target_pattern}); targets labelled \code{"HorsROI"} always are.}
 }
 \value{
 Invisibly returns the number of PDFs written.

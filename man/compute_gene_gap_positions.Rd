@@ -7,5 +7,7 @@
 compute_gene_gap_positions(bed_file, exon_range, gap = 1)
 }
 \description{
-Compute gap-inserted x-axis positions for CNV window plots
+A gap of \code{gap} units separates consecutive genes. When \code{bed_file}
+has a logical \code{off_target} column, a run of consecutive off-target
+(HorsROI) intervals forms one block, separated from its neighbours.
 }

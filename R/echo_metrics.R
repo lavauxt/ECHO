@@ -55,8 +55,7 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
     gene_all <- ifelse(is.na(bed_file$gene) | bed_file$gene == "", "Unknown", bed_file$gene)
 
     mat           <- as.matrix(counts[, sample_names, drop = FALSE])
-    sample_median <- if (requireNamespace("matrixStats", quietly = TRUE))
-        matrixStats::colMedians(mat, na.rm = TRUE) else apply(mat, 2, median, na.rm = TRUE)
+    sample_median <- col_medians(mat)
     names(sample_median) <- sample_names
     total_reads <- colSums(mat, na.rm = TRUE)
 
@@ -122,8 +121,7 @@ run_qc_metrics <- function(rdata_file, min_corr = 0.98, min_cov = 100,
                                           " (< ", format(min_total_reads, scientific = FALSE), ")"),
                    rep("All", length(low_reads)))
 
-    exon_median <- if (requireNamespace("matrixStats", quietly = TRUE))
-        matrixStats::rowMedians(mat, na.rm = TRUE) else apply(mat, 1, median, na.rm = TRUE)
+    exon_median <- row_medians(mat)
     fail_exon   <- which(exon_median < min_cov)
     if (length(fail_exon)) {
         add_metric(rep("All", length(fail_exon)), exon_label_all[fail_exon],

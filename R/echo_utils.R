@@ -176,6 +176,70 @@ if (!is.null(a)) a else b
 }
 #' @import data.table
 NULL
+
+#' Column names of a BED-like data frame (lowercase or capitalised style)
+#' @noRd
+bed_cols <- function(df) {
+  pick <- function(a, b) if (a %in% names(df)) a else b
+  list(chrom = pick("chromosome", "Chr"), start = pick("start", "Start"),
+       end = pick("end", "End"), gene = pick("gene", "Gene"))
+}
+
+#' Natural chromosome order: 1-22, X, Y, M (with and without "chr"), then the rest
+#' @noRd
+chrom_sort_levels <- function(chrs = character()) {
+  base <- c(as.character(1:22), "X", "Y", "M")
+  unique(c(paste0("chr", base), base, unique(as.character(chrs))))
+}
+
+#' Label given to retained off-target (HorsROI) targets
+#' @noRd
+OFF_TARGET_LABEL <- "HorsROI"
+
+#' Which gene labels denote off-target (HorsROI) targets
+#'
+#' @param genes Character vector of gene labels.
+#' @param pattern Optional extra regex (the run's \code{off_target_pattern}).
+#' @return Logical vector.
+#' @noRd
+is_off_target_gene <- function(genes, pattern = "^HorsROI") {
+  g   <- as.character(genes)
+  hit <- !is.na(g) & toupper(g) == toupper(OFF_TARGET_LABEL)
+  if (length(pattern) == 1L && !is.na(pattern) && nzchar(pattern)) {
+    hit <- hit | (!is.na(g) & grepl(pattern, g, perl = TRUE))
+  }
+  hit
+}
+
+#' Column / row medians (matrixStats when installed)
+#' @noRd
+col_medians <- function(m) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) matrixStats::colMedians(m, na.rm = TRUE)
+  else apply(m, 2, stats::median, na.rm = TRUE)
+}
+#' @noRd
+row_medians <- function(m) {
+  if (requireNamespace("matrixStats", quietly = TRUE)) matrixStats::rowMedians(m, na.rm = TRUE)
+  else apply(m, 1, stats::median, na.rm = TRUE)
+}
+
+#' Genes covered by target index ranges
+#'
+#' @param genes Gene label of every target.
+#' @param lo,hi Target index ranges (one pair per call).
+#' @param drop_unknown Also drop \code{"Unknown"} labels.
+#' @return One space-separated gene string per range (\code{"Unknown"} if none).
+#' @noRd
+genes_in_targets <- function(genes, lo, hi, drop_unknown = FALSE) {
+  n <- length(genes)
+  vapply(seq_along(lo), function(j) {
+    a <- suppressWarnings(as.integer(lo[j])); b <- suppressWarnings(as.integer(hi[j]))
+    if (is.na(a) || is.na(b) || b < a || a > n || b < 1L) return("Unknown")
+    g <- unique(as.character(genes[seq.int(max(1L, a), min(b, n))]))
+    g <- g[!is.na(g) & nzchar(g) & (!drop_unknown | g != "Unknown")]
+    if (length(g)) paste(g, collapse = " ") else "Unknown"
+  }, character(1))
+}
 #' Sanitize a string for use as a filename
 #' @export
 sanitize_filename <- function(name) {
@@ -189,10 +253,8 @@ verbose = TRUE) {
 handling  <- match.arg(handling)
 if (is.null(pattern) || !nzchar(pattern)) return(df)
 if (is.null(df) || nrow(df) == 0) return(df)
-chrom_col <- if ("chromosome" %in% names(df)) "chromosome" else "Chr"
-start_col <- if ("start"      %in% names(df)) "start"      else "Start"
-end_col   <- if ("end"        %in% names(df)) "end"        else "End"
-gene_col  <- if ("gene"       %in% names(df)) "gene"       else "Gene"
+bc <- bed_cols(df)
+chrom_col <- bc$chrom; start_col <- bc$start; end_col <- bc$end; gene_col <- bc$gene
 if (!gene_col %in% names(df)) return(df)
 
 if ("OriginalName" %in% names(df)) {
@@ -275,10 +337,8 @@ df
 #' Assign sequential exon numbers within each chromosome/gene locus
 #' @noRd
 assign_exon_numbers_per_gene  <- function(bed_file) {
-chrom_col  <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
-start_col  <- if ("start"      %in% names(bed_file)) "start"      else "Start"
-end_col    <- if ("end"        %in% names(bed_file)) "end"        else "End"
-gene_col   <- if ("gene"       %in% names(bed_file)) "gene"       else "Gene"
+bc <- bed_cols(bed_file)
+chrom_col <- bc$chrom; start_col <- bc$start; end_col <- bc$end; gene_col <- bc$gene
 stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
 n_in <- nrow(bed_file)
 dt <- data.table::as.data.table(bed_file)
@@ -295,19 +355,17 @@ if (any(dup_rows)) {
         sum(dup_rows)), immediate. = TRUE)
 }
 dt_unique <- dt[!dup_rows]
-chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
-                  c(as.character(1:22), "X", "Y", "M"))
-dt_unique[, .chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(chrom))))]
+dt_unique[, .chrom_fac := factor(chrom, levels = chrom_sort_levels(chrom))]
 data.table::setorder(dt_unique, .chrom_fac, start, end)
 dt_unique[, .chrom_fac := NULL]
 
-valid_gene_rows <- !is.na(dt_unique$gene) & dt_unique$gene != "" & dt_unique$gene != "."
+# Retained off-target (HorsROI) intervals are not exons of a gene: no number.
+valid_gene_rows <- !is.na(dt_unique$gene) & !dt_unique$gene %in% c("", ".") &
+  !is_off_target_gene(dt_unique$gene, pattern = NULL)
 dt_unique[, exon_number := NA_integer_]
 if (any(valid_gene_rows)) {
     dt_unique[valid_gene_rows, exon_number := seq_len(.N), by = .(chrom, gene)]
 }
-# ------------------------------------------------------------------
-
 dt[, exon_number := dt_unique$exon_number[match(.key, dt_unique$.key)]]
 data.table::setorder(dt, .orig_row)
 dt[, c(".orig_row", ".key") := NULL]
@@ -325,10 +383,8 @@ if (is.null(padding) || length(padding) != 1 || is.na(padding) || padding  <= 0)
 return(bed_file)
 }
 padding  <- as.integer(round(padding))
-chrom_col <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
-start_col <- if ("start"      %in% names(bed_file)) "start"      else "Start"
-end_col   <- if ("end"        %in% names(bed_file)) "end"        else "End"
-gene_col  <- if ("gene"       %in% names(bed_file)) "gene"       else "Gene"
+bc <- bed_cols(bed_file)
+chrom_col <- bc$chrom; start_col <- bc$start; end_col <- bc$end; gene_col <- bc$gene
 stopifnot(all(c(chrom_col, start_col, end_col, gene_col) %in% names(bed_file)))
 n_in <- nrow(bed_file)
 if (n_in == 0) return(bed_file)
@@ -340,11 +396,10 @@ data.table::setnames(dt, c(chrom_col, start_col, end_col, gene_col),
                      c("chrom", "start", "end", "gene"))
 dt[, is_first := exon_number == 1L]
 dt[, is_last  := exon_number == max(exon_number), by = .(chrom, gene)]
-no_gene <- is.na(dt$gene) | dt$gene %in% c("", ".", "Unknown")
+# Unnumbered targets (no gene, HorsROI) are never padded.
+no_gene <- is.na(dt$exon_number) | is.na(dt$gene) | dt$gene %in% c("", ".", "Unknown")
 dt[no_gene, c("is_first", "is_last") := FALSE]
-chrom_levels <- c(paste0("chr", c(1:22, "X", "Y", "M")),
-                  c(as.character(1:22), "X", "Y", "M"))
-dt[, .chrom_fac := factor(chrom, levels = unique(c(chrom_levels, unique(chrom))))]
+dt[, .chrom_fac := factor(chrom, levels = chrom_sort_levels(chrom))]
 data.table::setorder(dt, .chrom_fac, start, end)
 n        <- nrow(dt)
 chrom_id <- as.integer(dt$.chrom_fac)
@@ -413,17 +468,25 @@ out
 }
 
 #' Compute gap-inserted x-axis positions for CNV window plots
+#'
+#' A gap of \code{gap} units separates consecutive genes. When \code{bed_file}
+#' has a logical \code{off_target} column, a run of consecutive off-target
+#' (HorsROI) intervals forms one block, separated from its neighbours.
 #' @export
 compute_gene_gap_positions  <- function(bed_file, exon_range, gap = 1) {
-if (length(exon_range) == 0) {
+n <- length(exon_range)
+if (n == 0) {
 return(data.frame(idx = integer(0), px = numeric(0),
 gene_break = logical(0), gene_group = integer(0)))
 }
 gap  <- if (is.null(gap) || is.na(gap) || gap  < 0) 1 else gap
-gene_col <- if ("gene" %in% names(bed_file)) "gene" else "Gene"
-genes    <- as.character(bed_file[[gene_col]][exon_range])
+genes    <- as.character(bed_file[[bed_cols(bed_file)$gene]][exon_range])
 genes[is.na(genes)] <- ""
-gene_break    <- c(FALSE, genes[-1] != genes[-length(genes)])
+off <- if ("off_target" %in% names(bed_file)) as.logical(bed_file$off_target[exon_range]) else rep(FALSE, n)
+off[is.na(off)] <- FALSE
+# Consecutive off-target intervals form one block, even with distinct labels.
+both_off      <- off[-1] & off[-n]
+gene_break    <- c(FALSE, (genes[-1] != genes[-n] & !both_off) | off[-1] != off[-n])
 step          <- ifelse(gene_break, 1 + gap, 1)
 step[1]       <- 0
 px            <- cumsum(step) + 1
@@ -688,6 +751,7 @@ if (!"exon_number" %in% colnames(bed_file)) {
 bed_file <- assign_exon_numbers_per_gene(bed_file)
 }
 cnv_calls$terminal_only <- FALSE
+chr_col <- bed_cols(bed_file)$chrom
 for (i in seq_len(nrow(cnv_calls))) {
 start_idx <- as.integer(cnv_calls$global_start[i])
 end_idx   <- as.integer(cnv_calls$global_end[i])
@@ -698,7 +762,6 @@ genes <- unique(bed_file$gene[start_idx:end_idx])
 if (length(genes) != 1) next
 gene <- genes[1]
 if (is.na(gene) || gene == "") next
-chr_col <- if ("chromosome" %in% names(bed_file)) "chromosome" else "Chr"
 gene_rows <- which(bed_file$gene == gene & bed_file[[chr_col]] == bed_file[[chr_col]][start_idx])
 gene_exons <- bed_file$exon_number[gene_rows]
 gene_exons <- gene_exons[!is.na(gene_exons)]

@@ -450,7 +450,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
               modechrom  = cfg$settings$modechrom,
               prefix     = cfg$output$prefix,
               log_file   = NULL,  # its message() output is captured by the handler below
-              gene_gap   = cfg$settings$plot_gene_gap %||% 1
+              gene_gap   = cfg$settings$plot_gene_gap %||% 1,
+              off_target_pattern = cfg$off_target_pattern %||% "^HorsROI"
             ),
             error = function(e) log_msg(paste("Plot generation failed:", conditionMessage(e)), "WARNING")
           )

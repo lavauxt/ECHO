@@ -44,9 +44,9 @@ effective_off_target_handling <- if (!keep_hors_roi) {
   off_target_handling
 }
 parse_keep_indices <- function(keep_str, max_len) {
-  if (is.null(keep_str) || keep_str == "") return(NULL)
+  if (is.null(keep_str) || identical(keep_str, "")) return(NULL)
   if (is.numeric(keep_str)) return(keep_str)
-  keep_str <- as.character(keep_str)
+  keep_str <- as.character(keep_str)[1]
   if (grepl("-", keep_str)) {
     parts <- as.numeric(strsplit(keep_str, "-")[[1]])
     if (length(parts) == 2 && !any(is.na(parts))) return(seq(parts[1], min(parts[2], max_len)))
@@ -55,9 +55,36 @@ parse_keep_indices <- function(keep_str, max_len) {
     parts <- as.numeric(strsplit(keep_str, ",")[[1]])
     return(parts[!is.na(parts)])
   }
-  idx <- as.numeric(keep_str)
+  idx <- suppressWarnings(as.numeric(keep_str))
   if (!is.na(idx)) return(idx)
   NULL
+}
+# Off-target rows are identified by the original BED name.
+hors_roi_rows <- function(df) {
+  if (!"OriginalName" %in% names(df) || is.null(off_target_pattern) || !nzchar(off_target_pattern)) {
+    return(rep(FALSE, nrow(df)))
+  }
+  !is.na(df$OriginalName) & grepl(off_target_pattern, as.character(df$OriginalName), perl = TRUE)
+}
+# Off-target handling + exon numbering of a lowercase-column target table;
+# returns the Chr/Start/End/Gene/ExonNum/Custom.Exon layout.
+number_targets <- function(df) {
+  df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
+  # Retained off-target intervals are labelled before numbering, so they never
+  # take (or leave gaps in) a neighbouring gene's exon numbers.
+  off <- hors_roi_rows(df)
+  if (any(off)) df$gene[off] <- OFF_TARGET_LABEL
+  user_exon_labels <- df$ExonNum
+  df <- assign_exon_numbers_per_gene(df)
+  if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
+    warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
+    df$exon_number <- seq_len(nrow(df))
+  }
+  df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") user_exon_labels else df$exon_number
+  df$exon_number <- NULL
+  df$Custom.Exon <- df$ExonNum
+  names(df)[match(c("chromosome", "start", "end", "gene"), names(df))] <- c("Chr", "Start", "End", "Gene")
+  df
 }
 parse_bed_name  <- function(name_vec, exon_sep = " ", gene_field_index = NULL,
 gene_name_keep = NULL, auto_exon = TRUE, gene_name_collapse = " ") {
@@ -109,17 +136,7 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
 
   keep_idx <- NULL
   if (!is.null(gene_name_keep)) {
-    keep_str <- as.character(gene_name_keep)
-    if (grepl("-", keep_str)) {
-      p <- as.numeric(strsplit(keep_str, "-")[[1]])
-      if (length(p) == 2 && !any(is.na(p))) keep_idx <- seq(p[1], min(p[2], length(parts)))
-    } else if (grepl(",", keep_str)) {
-      keep_idx <- as.numeric(strsplit(keep_str, ",")[[1]])
-      keep_idx <- keep_idx[!is.na(keep_idx)]
-    } else {
-      idx <- as.numeric(keep_str)
-      if (!is.na(idx)) keep_idx <- idx
-    }
+    keep_idx <- parse_keep_indices(gene_name_keep, length(parts))
   } else if (!is.null(gene_field_index)) {
     idx <- as.numeric(gene_field_index)
     if (!is.na(idx)) keep_idx <- idx
@@ -245,146 +262,68 @@ names(df)[names(df) == "end"] <- "End"
 names(df)[names(df) == "gene"] <- "Gene"
 names(df)[names(df) == "exon_number"] <- "ExonNum"
 df$Custom.Exon <- df$ExonNum
-} else if (bed_process == "STANDARD") {
+} else if (bed_process %in% c("STANDARD", "NO")) {
+# "NO" keeps the names parsed from the BED; "STANDARD" re-annotates from the
+# panel BEDs when some are given. ("NO" used to stop() with an error that
+# listed it as valid.)
+df <- data.frame(
+  chromosome = input_df$Chr, start = if (bed_zero_based) input_df$Start else input_df$Start - 1,
+  end = input_df$End, gene = input_df$Gene, ExonNum = input_df$ExonNum,
+  OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
+)
 panel_bed_paths <- NULL
-if (!is.null(list_genes) && file.exists(list_genes)) panel_bed_paths <- readLines(list_genes)
-else if (!is.null(genes_file) && file.exists(genes_file)) panel_bed_paths <- readLines(genes_file)
-else if (!is.null(panel_files)) {
-panel_bed_paths <- panel_files
+if (bed_process == "STANDARD") {
+  if (!is.null(list_genes) && file.exists(list_genes)) panel_bed_paths <- readLines(list_genes)
+  else if (!is.null(genes_file) && file.exists(genes_file)) panel_bed_paths <- readLines(genes_file)
+  else if (!is.null(panel_files)) panel_bed_paths <- panel_files
 }
-if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
-   panel_list <- lapply(panel_bed_paths, function(f) {
-     if (!file.exists(f)) return(NULL)
-        tmp <- utils::read.table(f, sep = "\t", header = FALSE,
-                            stringsAsFactors = FALSE,
-                            fill = TRUE, comment.char = "", quote = "")
-     if (ncol(tmp) < 4) return(NULL)
-     tmp <- tmp[, 1:4]
-     colnames(tmp) <- c("Chr", "Start", "End", "OriginalName")
-     return(tmp)
-   })
-   all_panels <- data.table::rbindlist(Filter(Negate(is.null), panel_list), fill = TRUE)
-   if (nrow(all_panels) > 0) {
-     all_panels <- unique(as.data.frame(all_panels))
-     panel_parsed <- parse_bed_name(all_panels$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
-     all_panels$Gene <- panel_parsed$gene
-     all_panels$ExtractedExon <- panel_parsed$exon
-     if (!auto_exon_number && region_numbering_mode == "bed_text") {
-       all_panels$ExonNum <- all_panels$ExtractedExon
-     } else {
-       all_panels$ExonNum <- NA_integer_
-     }
-     input_start_1based <- if (bed_zero_based) input_df$Start + 1 else input_df$Start
-     bed_gr <- GenomicRanges::GRanges(seqnames = input_df$Chr, ranges = IRanges::IRanges(start = input_start_1based, end = input_df$End))
-     
-     panel_start_1based <- if (bed_zero_based) all_panels$Start + 1L else all_panels$Start
-     if (!bed_zero_based) {
-       warning("[WARNING] bed_zero_based = FALSE: panel BEDs will be treated as ",
-               "1-based. If your panel files are UCSC 0-based (the usual case), ",
-               "they will be off by one. Verify panel coordinates.", immediate. = TRUE)
-     }
-     panel_gr <- GenomicRanges::GRanges(
-       seqnames = all_panels$Chr,
-       ranges   = IRanges::IRanges(start = panel_start_1based, end = all_panels$End),
-       Gene = all_panels$Gene, ExonNum = all_panels$ExonNum, OriginalName = all_panels$OriginalName
-     )
-     common_chromosomes <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),
-                                     unique(as.character(GenomicRanges::seqnames(panel_gr))))
-     if (!length(common_chromosomes)) {
-       warning("The BED and the panel file(s) share no chromosome name (a 'chr' prefix ",
-               "mismatch?): every interval will be annotated 'Unknown'.", immediate. = TRUE)
-     }
-     hits <- if (length(common_chromosomes)) {
-       GenomicRanges::findOverlaps(bed_gr, panel_gr)
-     } else {
-       NULL
-     }
-     sel <- select_best_hits(bed_gr, panel_gr, hits)
-     qh <- sel$q; sh <- sel$s
-     output_start <- if (bed_zero_based) input_df$Start else input_df$Start - 1
-     df <- data.frame(
-       Chr = input_df$Chr, Start = output_start, End = input_df$End,
-       Gene = rep("Unknown", nrow(input_df)), ExonNum = rep(NA_integer_, nrow(input_df)),
-       OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
-     )
-     if (length(qh)) {
-       df$Gene[qh] <- panel_gr$Gene[sh]
-       df$ExonNum[qh] <- panel_gr$ExonNum[sh]
-       df$OriginalName[qh] <- panel_gr$OriginalName[sh]
-     }
-     
-     names(df)[names(df) == "Chr"] <- "chromosome"
-     names(df)[names(df) == "Start"] <- "start"
-     names(df)[names(df) == "End"] <- "end"
-     names(df)[names(df) == "Gene"] <- "gene"
-     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
-     user_exon_labels <- df$ExonNum
-     df <- assign_exon_numbers_per_gene(df)
-     if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
-       warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
-       df$exon_number <- seq_len(nrow(df))
-     }
-     names(df)[names(df) == "chromosome"] <- "Chr"
-     names(df)[names(df) == "start"] <- "Start"
-     names(df)[names(df) == "end"] <- "End"
-     names(df)[names(df) == "gene"] <- "Gene"
-     df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
-       user_exon_labels
-     } else df$exon_number
-     df$exon_number <- NULL
-     df$Custom.Exon <- df$ExonNum
-   } else {
-     df <- data.frame(
-       Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
-       Gene = input_df$Gene, ExonNum = input_df$ExonNum, OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
-     )
-     names(df)[names(df) == "Chr"] <- "chromosome"
-     names(df)[names(df) == "Start"] <- "start"
-     names(df)[names(df) == "End"] <- "end"
-     names(df)[names(df) == "Gene"] <- "gene"
-     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
-     user_exon_labels <- df$ExonNum
-     df <- assign_exon_numbers_per_gene(df)
-     if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
-       warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
-       df$exon_number <- seq_len(nrow(df))
-     }
-     names(df)[names(df) == "chromosome"] <- "Chr"
-     names(df)[names(df) == "start"] <- "Start"
-     names(df)[names(df) == "end"] <- "End"
-     names(df)[names(df) == "gene"] <- "Gene"
-     df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
-       user_exon_labels
-     } else df$exon_number
-     df$exon_number <- NULL
-     df$Custom.Exon <- df$ExonNum
-   }
-} else {
-  df <- data.frame(
-    Chr = input_df$Chr, Start = if (bed_zero_based) input_df$Start else input_df$Start - 1, End = input_df$End,
-    Gene = input_df$Gene, ExonNum = input_df$ExonNum, OriginalName = input_df$OriginalName, stringsAsFactors = FALSE
-  )
-  names(df)[names(df) == "Chr"] <- "chromosome"
-  names(df)[names(df) == "Start"] <- "start"
-  names(df)[names(df) == "End"] <- "end"
-  names(df)[names(df) == "Gene"] <- "gene"
-  df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
-  user_exon_labels <- df$ExonNum
-  df <- assign_exon_numbers_per_gene(df)
-  if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
-    warning("assign_exon_numbers_per_gene() did not produce a valid exon_number column; falling back to sequential numbering.")
-    df$exon_number <- seq_len(nrow(df))
+all_panels <- NULL
+if (length(panel_bed_paths)) {
+  panel_list <- lapply(panel_bed_paths, function(f) {
+    if (!file.exists(f)) return(NULL)
+    tmp <- utils::read.table(f, sep = "\t", header = FALSE, stringsAsFactors = FALSE,
+                             fill = TRUE, comment.char = "", quote = "")
+    if (ncol(tmp) < 4) return(NULL)
+    tmp <- tmp[, 1:4]
+    colnames(tmp) <- c("Chr", "Start", "End", "OriginalName")
+    tmp
+  })
+  all_panels <- data.table::rbindlist(Filter(Negate(is.null), panel_list), fill = TRUE)
+}
+if (!is.null(all_panels) && nrow(all_panels) > 0) {
+  all_panels <- unique(as.data.frame(all_panels))
+  panel_parsed <- parse_bed_name(all_panels$OriginalName, exon_sep, gene_field_index, gene_name_keep, auto_exon_number, gene_name_collapse)
+  all_panels$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") panel_parsed$exon else NA_integer_
+  if (!bed_zero_based) {
+    warning("[WARNING] bed_zero_based = FALSE: panel BEDs will be treated as ",
+            "1-based. If your panel files are UCSC 0-based (the usual case), ",
+            "they will be off by one. Verify panel coordinates.", immediate. = TRUE)
   }
-  names(df)[names(df) == "chromosome"] <- "Chr"
-  names(df)[names(df) == "start"] <- "Start"
-  names(df)[names(df) == "end"] <- "End"
-  names(df)[names(df) == "gene"] <- "Gene"
-  df$ExonNum <- if (!auto_exon_number && region_numbering_mode == "bed_text") {
-    user_exon_labels
-  } else df$exon_number
-  df$exon_number <- NULL
-  df$Custom.Exon <- df$ExonNum
+  to_1based <- function(x) if (bed_zero_based) x + 1L else x
+  bed_gr <- GenomicRanges::GRanges(seqnames = input_df$Chr,
+                                   ranges = IRanges::IRanges(start = to_1based(input_df$Start), end = input_df$End))
+  panel_gr <- GenomicRanges::GRanges(
+    seqnames = all_panels$Chr,
+    ranges   = IRanges::IRanges(start = to_1based(all_panels$Start), end = all_panels$End),
+    Gene = panel_parsed$gene, ExonNum = all_panels$ExonNum, OriginalName = all_panels$OriginalName
+  )
+  common_chromosomes <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),
+                                  unique(as.character(GenomicRanges::seqnames(panel_gr))))
+  if (!length(common_chromosomes)) {
+    warning("The BED and the panel file(s) share no chromosome name (a 'chr' prefix ",
+            "mismatch?): every interval will be annotated 'Unknown'.", immediate. = TRUE)
+  }
+  hits <- if (length(common_chromosomes)) GenomicRanges::findOverlaps(bed_gr, panel_gr) else NULL
+  sel <- select_best_hits(bed_gr, panel_gr, hits)
+  qh <- sel$q; sh <- sel$s
+  df$gene <- "Unknown"; df$ExonNum <- NA_integer_
+  if (length(qh)) {
+    df$gene[qh] <- panel_gr$Gene[sh]
+    df$ExonNum[qh] <- panel_gr$ExonNum[sh]
+    df$OriginalName[qh] <- panel_gr$OriginalName[sh]
+  }
 }
+df <- number_targets(df)
 } else {
 stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")
 }
@@ -393,25 +332,13 @@ df$Gene  <- as.character(df$Gene)
 df$Gene  <- vapply(strsplit(df$Gene, ",", fixed = TRUE), function(x) x[1], character(1))
 df$Gene[is.na(df$Gene) | df$Gene %in% c("", ".")] <- "Unknown"
 # Keep retained off-target intervals visibly identifiable, but without exon numbering.
-is_hors_roi <- if ("OriginalName" %in% names(df) && !is.null(off_target_pattern) && nzchar(off_target_pattern)) {
-  !is.na(df$OriginalName) & grepl(off_target_pattern, as.character(df$OriginalName), perl = TRUE)
-} else {
-  rep(FALSE, nrow(df))
-}
+is_hors_roi <- hors_roi_rows(df)
 if (any(is_hors_roi)) {
-  df$Gene[is_hors_roi] <- "HorsROI"
+  df$Gene[is_hors_roi] <- OFF_TARGET_LABEL
   if ("Custom.Exon" %in% names(df)) df$Custom.Exon[is_hors_roi] <- NA
   if ("ExonNum" %in% names(df)) df$ExonNum[is_hors_roi] <- NA
 }
-chrom_base  <- c(as.character(1:22), "X", "Y", "M")
-if (any(grepl("^chr", df$Chr))) {
-chrom_levels  <- paste0("chr", chrom_base)
-} else {
-chrom_levels  <- chrom_base
-}
-unique_chrs  <- unique(df$Chr)
-final_levels  <- c(chrom_levels, setdiff(unique_chrs, chrom_levels))
-df$Chr  <- factor(df$Chr, levels = final_levels)
+df$Chr  <- factor(df$Chr, levels = chrom_sort_levels(df$Chr))
 df <- df[order(df$Chr, df$Start), ]
 df$Chr <- as.character(df$Chr)
 if ("Custom.Exon" %in% colnames(df)) {

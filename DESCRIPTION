@@ -1,10 +1,12 @@
 Package: ECHO
 Type: Package
 Title: Exome Coverage and HMM Optimizer
-Version: 0.2.0
+Version: 0.3.0
 Author: TL
 Maintainer: TL <lavauxt@gmail.com>
-Description: A modular R package for processing BAM files, extracting coverage, computing quality metrics, and calling/plotting CNVs using the ExomeDepthHMM algorithm. Supports BED preprocessing using curated RefSeq Select annotations, exon-level mapping, VCF export, and a self-contained interactive HTML report (multi-sample, with QC and chromosome-scope warnings).
+Description: A modular R package for processing BAM files, extracting coverage, computing quality metrics, and calling/plotting CNVs using the ExomeDepthHMM algorithm. Supports BED preprocessing using curated RefSeq Select annotations, exon-level mapping, VCF export, and a self-contained interactive HTML report (multi-sample, with QC and chromosome-scope warnings) whose CSS and JavaScript are embedded in the package code. Off-target (HorsROI) intervals are kept, left unnumbered and shown as labelled blocks in every plot.
+Depends:
+    R (>= 4.0.0)
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
@@ -29,6 +31,7 @@ Imports:
     AnnotationDbi,
     matrixStats,
     Rsamtools,
+    Biostrings,
     GenomeInfoDb,
     BiocGenerics
 Suggests:
