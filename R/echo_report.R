@@ -119,12 +119,47 @@ load_report_inputs <- function(summary_rdata, qc_metrics_file, coverage_rdata,
   cnv_calls <- env$cnv_calls
   if (is.null(cnv_calls)) cnv_calls <- data.frame()
   bed_file <- as.data.frame(env$bed_file, stringsAsFactors = FALSE)
-  if (!"chromosome" %in% colnames(bed_file)) {
-    chr_col <- intersect(colnames(bed_file), c("chr", "chrom", "seqnames"))[1]
-    if (is.na(chr_col)) stop("[ERROR] bed_file has no chromosome column.")
-    bed_file$chromosome <- bed_file[[chr_col]]
+  # The processed BED uses exported column names such as Chr, Gene and
+  # Custom.Exon, whereas older report code expected lowercase `gene`.
+  # Normalize aliases here so the HTML report uses the same annotations as
+  # the PDF plots and extracted BED.
+  find_bed_col <- function(candidates) {
+    hit <- match(tolower(candidates), tolower(colnames(bed_file)))
+    hit <- hit[!is.na(hit)]
+    if (length(hit)) colnames(bed_file)[hit[1]] else NA_character_
   }
-  if (!"gene" %in% colnames(bed_file)) bed_file$gene <- NA_character_
+
+  chr_col <- find_bed_col(c("chromosome", "chr", "chrom", "seqnames"))
+  if (is.na(chr_col)) stop("[ERROR] bed_file has no chromosome column.")
+  if (!identical(chr_col, "chromosome")) bed_file$chromosome <- bed_file[[chr_col]]
+
+  gene_col <- find_bed_col(c("gene", "gene_symbol", "symbol"))
+  if (is.na(gene_col)) {
+    bed_file$gene <- NA_character_
+  } else if (!identical(gene_col, "gene")) {
+    bed_file$gene <- bed_file[[gene_col]]
+  }
+  bed_file$gene <- trimws(as.character(bed_file$gene))
+  bed_file$gene[is.na(bed_file$gene) | !nzchar(bed_file$gene) |
+                  bed_file$gene %in% c(".", "NA")] <- "Unknown"
+
+  exon_col <- find_bed_col(c("exon_number", "custom.exon", "exonnum", "exon"))
+  if (!is.na(exon_col) && !identical(exon_col, "exon_number")) {
+    bed_file$exon_number <- bed_file[[exon_col]]
+  }
+
+  # HorsROI targets are retained by design, but are not numbered exons.
+  is_hors_roi <- !is.na(bed_file$gene) &
+    grepl("^HorsROI$", bed_file$gene, ignore.case = TRUE)
+  if ("exon_number" %in% colnames(bed_file)) {
+    bed_file$exon_number[is_hors_roi] <- NA
+  }
+  if ("Custom.Exon" %in% colnames(bed_file)) {
+    bed_file$Custom.Exon[is_hors_roi] <- NA
+  }
+  if ("ExonNum" %in% colnames(bed_file)) {
+    bed_file$ExonNum[is_hors_roi] <- NA
+  }
 
   analysed <- as.character(env$sample_names)
   all_samples <- analysed
@@ -688,7 +723,7 @@ report_json <- function(x) {
   json <- as.character(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", na = "null",
                                         digits = 6, force = TRUE))
   json <- gsub("</", "<\\/", json, fixed = TRUE)
-  gsub("<!--", "\\u003c!--", json, fixed = TRUE)
+  gsub("<!--", "<\\!--", json, fixed = TRUE)
 }
 
 #' Location of the plotly.js bundle shipped with the plotly R package
