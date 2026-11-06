@@ -326,6 +326,12 @@ for (i in which(off_s)) {
     }
 }
 df[[gene_col]][ord] <- new_gene_s
+
+# <-- NEW: Drop the off-target marker from `OriginalName` for merged intervals
+if ("OriginalName" %in% names(df) && any(merged_s)) {
+    df[["OriginalName"]][ord[merged_s]] <- new_gene_s[merged_s]
+}
+    
 if (verbose) {
     message(sprintf(
         "[INFO] handle_off_target_regions: merged %d/%d off-target interval(s) matching /%s/ into their nearest neighbouring gene (%d had no real gene on their chromosome to attach to).",
@@ -439,9 +445,9 @@ if (any(no_next_last)) {
         unname(chr_lengths[as.character(dt$chrom[no_next_last])])
     } else {
         rep(NA_real_, sum(no_next_last))
-    }
-    avail <- ifelse(!is.na(chr_len_here), chr_len_here - end_v[no_next_last], Inf)
-    right_extend[no_next_last] <- pmin(padding, pmax(avail, 0))
+        }
+    avail <- ifelse(!is.na(chr_len_here), chr_len_here - end_v[no_next_last], 1e12)
+    right_extend[no_next_last] <- as.integer(pmin(padding, pmax(avail, 0)))
 }
 n_padded_start <- sum(left_extend > 0L)
 n_padded_end   <- sum(right_extend > 0L)

@@ -349,18 +349,20 @@ run_cnv_calling <- function(rdata_file,
   all_calls_list <- lapply(results, function(x) x$calls)
   all_calls_list <- Filter(function(x) !is.null(x) && nrow(x) > 0, all_calls_list)
   models         <- lapply(results, function(x) x$model)
-  names(models)  <- sample_names
+  names(models)  <- names(results)        
+  models         <- models[sample_names]
   refs           <- lapply(results, function(x) x$refs)
-  names(refs)    <- sample_names
-
+  names(refs)    <- names(results)
+  refs           <- refs[sample_names]
+  
   cnv_calls <- if (length(all_calls_list) > 0)
     as.data.frame(data.table::rbindlist(all_calls_list, fill = TRUE)) else data.frame()
   if (nrow(cnv_calls) > 0) {
     cnv_calls  <- cbind(CNV.ID = seq_len(nrow(cnv_calls)), cnv_calls)
     exclude_cols <- c("global_start", "global_end", "terminal_only")
     tsv_cols     <- setdiff(colnames(cnv_calls), exclude_cols)
-    utils::write.table(cnv_calls[, tsv_cols], file = output_file,
-                       row.names = FALSE, sep = "\t", quote = FALSE)
+    utils::write.table(cnv_calls[, tsv_cols, drop = FALSE], file = output_file,
+                      row.names = FALSE, sep = "\t", quote = FALSE)
     message("[INFO] Saved CNV calls to: ", output_file)
   } else {
     # A header-only TSV represents a successful run with zero calls. Opening

@@ -232,7 +232,8 @@ run_bam_coverage <- function(
   # contribute counts to ExomeDepth reference selection but must never become
   # test samples or receive their own CNV calls.
   test_bams <- character()
-  if (!is.null(bamfiles) && length(bamfiles) == 1L && file.exists(bamfiles)) {
+  if (!is.null(bamfiles) && length(bamfiles) == 1L &&
+    file.exists(bamfiles) && !dir.exists(bamfiles)) {
     test_bams <- c(test_bams, trimws(readLines(bamfiles, warn = FALSE)))
   }
   if (!is.null(bamdir) && length(bamdir) == 1L && dir.exists(bamdir)) {
