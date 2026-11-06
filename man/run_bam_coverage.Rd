@@ -26,7 +26,9 @@ run_bam_coverage(
 )
 }
 \arguments{
-\item{bamfiles}{Character string. File containing BAM file paths (one per line).}
+\item{bamfiles}{Either a character vector of BAM file paths, a single BAM
+file path, or a path to a text file listing one BAM path per line.
+CRAM input is rejected with an explicit error.}
 
 \item{bamdir}{Character string. Directory containing BAM files.}
 
@@ -50,7 +52,8 @@ cache directory. Ignored when \code{fasta_source = "file"}.}
 
 \item{rbams}{Character string. Optional path to external reference BAMs,
 either (a) a directory containing \code{.bam} files, or (b) a TSV file
-with a \code{bam} column listing reference BAM paths.}
+with a \code{bam} column listing reference BAM paths. Relative BAM paths
+inside the TSV are resolved against the TSV's own directory.}
 
 \item{data_out}{Character string. Output \code{.RData} file path.}
 
