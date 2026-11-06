@@ -224,6 +224,30 @@ run_cnv_calling <- function(rdata_file,
   ed_objects   <- list()
   no_result    <- list(calls = data.frame(), model = NULL, refs = character(0))
 
+  # Column mapping shared by the real TSV write and the header-only TSV below,
+  # so empty and non-empty runs always emit the same schema. ExomeDepth's
+  # CNV.calls columns (start, end, chromosome, id, type, BF, reads.expected,
+  # reads.observed, reads.ratio, start.p, end.p, nexons) keep their name unless
+  # renamed here; `id` is ExomeDepth's internal target id and is dropped.
+  cnv_rename_map <- c(start.p = "Start.p", end.p = "End.p", type = "Type", nexons = "Nexons",
+                      start = "Start", end = "End", chromosome = "Chromosome",
+                      reads.expected = "Reads.expected", reads.observed = "Reads.observed",
+                      reads.ratio = "Reads.ratio")
+  cnv_exclude_cols <- c("global_start", "global_end", "terminal_only", "id")
+  # ExomeDepth CNV.calls schema, in constructor order; the pipeline appends
+  # Gene, Confidence, Correlation, N.comp, Comparator.name, Genomic.ID and
+  # prepends CNV.ID / Sample before writing.
+  ed_call_columns <- c("start", "end", "chromosome", "id", "type", "BF",
+                       "reads.expected", "reads.observed", "reads.ratio",
+                       "start.p", "end.p", "nexons")
+  cnv_tsv_columns <- c(
+    "CNV.ID", "Sample",
+    unname(ifelse(ed_call_columns %in% names(cnv_rename_map),
+                  cnv_rename_map[ed_call_columns], ed_call_columns)),
+    "Gene", "Confidence", "Correlation", "N.comp", "Comparator.name", "Genomic.ID"
+  )
+  cnv_tsv_columns <- setdiff(cnv_tsv_columns, cnv_exclude_cols)
+
   for (sample in sample_names) {
     message("[INFO] Processing sample: ", sample)
     if (modechrom == "A") {
@@ -256,7 +280,7 @@ run_cnv_calling <- function(rdata_file,
       ExomeDepth::select.reference.set(
         test.counts      = test_counts,
         reference.counts = ref_matrix,
-        bin.length       = (counts$end - counts$start),
+        bin.length       = (counts$end - counts$start + 1L),
         n.bins.reduced   = n.bins.reduced,
         phi.bins         = phi.bins,
         formula          = formula,
@@ -275,7 +299,8 @@ run_cnv_calling <- function(rdata_file,
 
     ref_counts <- rowSums(counts[, best_refs, drop = FALSE])
     suppressWarnings({
-      ed <- methods::new("ExomeDepth", test = test_counts, reference = ref_counts, formula = formula)
+      ed <- methods::new("ExomeDepth", test = test_counts, reference = ref_counts,
+                         formula = formula, data = data)
       ed <- ExomeDepth::CallCNVs(
         x                      = ed,
         transition.probability = transition.probability,
@@ -324,12 +349,10 @@ run_cnv_calling <- function(rdata_file,
         processed_calls$N.comp           <- num_refs
         processed_calls$Comparator.name  <- paste(best_refs, collapse = ", ")
 
-        rename <- c(start.p = "Start.p", end.p = "End.p", type = "Type", nexons = "Nexons",
-                    start = "Start", end = "End", chromosome = "Chromosome", bayesfactor = "BF",
-                    reads.expected = "Reads.expected", reads.observed = "Reads.observed",
-                    reads.ratio = "Reads.ratio")
-        hit <- names(processed_calls) %in% names(rename)
-        names(processed_calls)[hit] <- rename[names(processed_calls)[hit]]
+        # cnv_rename_map / cnv_exclude_cols are shared with the empty-run
+        # header below so the two TSV schemas cannot drift apart.
+        hit <- names(processed_calls) %in% names(cnv_rename_map)
+        names(processed_calls)[hit] <- cnv_rename_map[names(processed_calls)[hit]]
         processed_calls$Genomic.ID <- paste0(processed_calls$Chromosome, ":",
                                               processed_calls$Start, "-", processed_calls$End)
       } else {
@@ -359,21 +382,16 @@ run_cnv_calling <- function(rdata_file,
     as.data.frame(data.table::rbindlist(all_calls_list, fill = TRUE)) else data.frame()
   if (nrow(cnv_calls) > 0) {
     cnv_calls  <- cbind(CNV.ID = seq_len(nrow(cnv_calls)), cnv_calls)
-    exclude_cols <- c("global_start", "global_end", "terminal_only")
-    tsv_cols     <- setdiff(colnames(cnv_calls), exclude_cols)
+    tsv_cols     <- setdiff(colnames(cnv_calls), cnv_exclude_cols)
     utils::write.table(cnv_calls[, tsv_cols, drop = FALSE], file = output_file,
                       row.names = FALSE, sep = "\t", quote = FALSE)
     message("[INFO] Saved CNV calls to: ", output_file)
   } else {
     # A header-only TSV represents a successful run with zero calls. Opening
     # the file for writing also replaces any calls left by an earlier run.
-    # Keep these columns aligned with the documented ECHO CNV TSV contract.
-    cnv_tsv_columns <- c(
-      "CNV.ID", "Sample", "Chromosome", "Start", "End", "Type", "Nexons",
-      "Start.p", "End.p", "BF", "Reads.expected", "Reads.observed",
-      "Reads.ratio", "Gene", "Confidence", "Correlation", "N.comp",
-      "Comparator.name", "Genomic.ID"
-    )
+    # The header is derived from the same rename/exclude mapping used for real
+    # calls (cnv_rename_map / cnv_exclude_cols above), so an empty run emits
+    # exactly the columns -- and column order -- of a run with calls.
     empty_cnv_calls <- as.data.frame(
       setNames(lapply(cnv_tsv_columns, function(x) character(0)), cnv_tsv_columns),
       check.names = FALSE

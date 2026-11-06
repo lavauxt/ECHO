@@ -96,7 +96,14 @@ resolve_reference_fasta <- function(fasta = NULL,
   }
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
-  cache_tag <- if (direct_pkg) pkg else genome_version
+  # Normalise the cache tag through the same mapping as the package lookup
+  # so that hg19 / GRCh37 (etc.) share one cached FASTA instead of each
+  # spelling building its own duplicate copy of the same sequences.
+  cache_tag <- if (direct_pkg) pkg else
+    switch(tolower(genome_version),
+           hg19   = "hg19", grch37 = "hg19",
+           hg38   = "hg38", grch38 = "hg38",
+           genome_version)
   cache_fasta <- file.path(cache_dir, paste0("ECHO_ref_", cache_tag, "_bsgenome.fa"))
   cache_fai   <- paste0(cache_fasta, ".fai")
 
@@ -131,7 +138,9 @@ resolve_reference_fasta <- function(fasta = NULL,
 #' Reads BAM files and computes exon-level read counts using
 #' \code{ExomeDepth::getBamCounts}.
 #'
-#' @param bamfiles Character string. File containing BAM file paths (one per line).
+#' @param bamfiles Either a character vector of BAM file paths, a single BAM
+#'   file path, or a path to a text file listing one BAM path per line.
+#'   CRAM input is rejected with an explicit error.
 #' @param bamdir Character string. Directory containing BAM files.
 #' @param bed Character string. Path to target BED file.
 #' @param fasta Character string. Path to reference genome FASTA file.
@@ -148,7 +157,8 @@ resolve_reference_fasta <- function(fasta = NULL,
 #'   cache directory. Ignored when \code{fasta_source = "file"}.
 #' @param rbams Character string. Optional path to external reference BAMs,
 #'   either (a) a directory containing \code{.bam} files, or (b) a TSV file
-#'   with a \code{bam} column listing reference BAM paths.
+#'   with a \code{bam} column listing reference BAM paths. Relative BAM paths
+#'   inside the TSV are resolved against the TSV's own directory.
 #' @param data_out Character string. Output \code{.RData} file path.
 #' @param include.chr Logical. Passed to \code{ExomeDepth::getBamCounts}.
 #' @param verbose Logical. Print progress messages.
@@ -232,9 +242,40 @@ run_bam_coverage <- function(
   # contribute counts to ExomeDepth reference selection but must never become
   # test samples or receive their own CNV calls.
   test_bams <- character()
-  if (!is.null(bamfiles) && length(bamfiles) == 1L &&
-    file.exists(bamfiles) && !dir.exists(bamfiles)) {
-    test_bams <- c(test_bams, trimws(readLines(bamfiles, warn = FALSE)))
+  if (!is.null(bamfiles) && length(bamfiles) > 0L) {
+    if (length(bamfiles) > 1L) {
+      # A vector of BAM paths supplied directly.
+      missing_bamfiles <- !file.exists(bamfiles)
+      if (any(missing_bamfiles)) {
+        stop("[ERROR] bamfiles: file(s) not found: ",
+             paste(bamfiles[missing_bamfiles], collapse = ", "))
+      }
+      test_bams <- c(test_bams, as.character(bamfiles))
+    } else {
+      bf <- as.character(bamfiles)
+      if (dir.exists(bf)) {
+        stop("[ERROR] bamfiles points to a directory (", bf,
+             "). Use bamdir = for directories; bamfiles takes a single BAM path, ",
+             "a vector of BAM paths, or a text file listing one BAM path per line.")
+      } else if (grepl("\\.cram$", bf, ignore.case = TRUE)) {
+        stop("[ERROR] CRAM input is not supported (ExomeDepth::getBamCounts() cannot read CRAM): ",
+             bf, ". Convert to BAM first, e.g. samtools view -b -o out.bam in.cram")
+      } else if (grepl("\\.bam$", bf, ignore.case = TRUE)) {
+        if (!file.exists(bf)) {
+          stop("[ERROR] bamfiles: BAM file not found: ", bf)
+        }
+        # A single BAM path, not a text list of paths (reading a BAM with
+        # readLines() produced garbage "paths" and confusing index errors).
+        test_bams <- c(test_bams, bf)
+      } else if (file.exists(bf)) {
+        # Text file listing one BAM path per line (original behaviour).
+        test_bams <- c(test_bams, trimws(readLines(bf, warn = FALSE)))
+      } else {
+        stop("[ERROR] bamfiles: '", bf, "' is neither an existing file nor a .bam path. ",
+             "Supply a vector of BAM paths, a single BAM path, or a text file ",
+             "listing one BAM path per line.")
+      }
+    }
   }
   if (!is.null(bamdir) && length(bamdir) == 1L && dir.exists(bamdir)) {
     test_bams <- c(test_bams, list.files(bamdir, pattern = "\\.bam$", full.names = TRUE))
@@ -254,6 +295,18 @@ run_bam_coverage <- function(
         stop("[ERROR] External reference BAM list must contain a 'bam' column: ", rbams)
       }
       reference_bams <- trimws(as.character(ref_table$bam))
+      # Anchor relative BAM paths to the directory of the TSV itself, so the
+      # same list works regardless of the working directory the pipeline is
+      # launched from (absolute paths are kept untouched).
+      non_empty <- !is.na(reference_bams) & nzchar(reference_bams)
+      is_abs    <- grepl("^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)", reference_bams)
+      to_anchor <- non_empty & !is_abs
+      if (any(to_anchor)) {
+        ref_list_dir <- dirname(normalizePath(rbams, mustWork = TRUE))
+        reference_bams[to_anchor] <- file.path(ref_list_dir, reference_bams[to_anchor])
+        if (verbose) message("[INFO] Anchored ", sum(to_anchor),
+                             " relative reference BAM path(s) to ", ref_list_dir)
+      }
     } else {
       warning("[WARNING] rbams path not found, skipping external reference BAMs: ", rbams)
     }
@@ -264,6 +317,17 @@ run_bam_coverage <- function(
   if (!length(test_bams)) stop("[ERROR] No analysis BAM files found (bamfiles/bamdir is empty)")
 
   bams <- c(test_bams, reference_bams)
+
+  # CRAM cannot enter the counting step: ExomeDepth::getBamCounts() builds its
+  # BAM views without a reference FASTA, so CRAM records cannot be decoded.
+  # Fail here with the real problem instead of confusing index/extraction
+  # errors later (derive_sample_names() no longer pretends .cram is supported).
+  cram_bams <- bams[grepl("\\.cram$", bams, ignore.case = TRUE)]
+  if (length(cram_bams)) {
+    stop("[ERROR] CRAM input is not supported (ExomeDepth::getBamCounts() cannot read CRAM): ",
+         paste(cram_bams, collapse = ", "),
+         ". Convert to BAM first, e.g. samtools view -b -o out.bam in.cram")
+  }
 
   # ExomeDepth::getBamCounts() identifies its output count columns from
   # basename(bam), not the full path. Distinct files in different directories
@@ -297,7 +361,7 @@ run_bam_coverage <- function(
   derive_sample_names <- function(paths) {
     if (!length(paths)) return(character(0))
     base_names <- basename(paths)
-    base_names <- sub("\\.(cram|bam)$", "", base_names, ignore.case = TRUE)
+    base_names <- sub("\\.bam$", "", base_names, ignore.case = TRUE)
     base_names <- sub("\\.(sort|markdup|dedup|recal|fixmate|rg|merged)$", "",
                       base_names, ignore.case = TRUE)
     keep_parts <- function(x, delim, keep_spec, collapse) {

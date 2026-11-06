@@ -53,8 +53,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   }
 
   if (anyNA(vcf_samples) || any(!nzchar(vcf_samples)) ||
-      any(grepl("[\\t\\r\\n]", vcf_samples))) {
-    stop("[ERROR] VCF sample names must be non-empty and cannot contain tabs or newlines.")
+      any(grepl("[[:space:]]", vcf_samples))) {
+    stop("[ERROR] VCF sample names must be non-empty and cannot contain whitespace (tabs/newlines).")
   }
   if (anyDuplicated(vcf_samples)) {
     stop("[ERROR] VCF sample names must be unique.")

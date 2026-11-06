@@ -125,6 +125,15 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   # coverage extraction as well as by the report.
   if (!is.null(ref_bams)) cfg$input$rbams <- ref_bams
 
+  # Same plumbing for sample_table as for ref_bams above: a formal argument
+  # overrides the YAML, and the YAML key is accepted at the top level or under
+  # input: (mirroring ref_bams / input$rbams). Without this, a sample_table
+  # set only in the YAML was silently ignored and mode X/Y runs failed later
+  # with "[ERROR] sample_table required for mode X/Y".
+  if (is.null(sample_table)) {
+    sample_table <- cfg$sample_table %||% cfg$input$sample_table
+  }
+
   # Fill in settings the config may omit. Without this a missing key reached
   # the callees as NULL (e.g. `modechrom == "A"` -> "argument is of length zero",
   # `min_corr = NULL` silently disabling the correlation QC).
@@ -348,7 +357,10 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
       }
 
+      # The PCA block below runs outside run_step(); count it too, or the
+      # "Step k/N" log counter under-reports N whenever PCA is enabled.
       steps_total   <- 3L +  
+                       as.integer(cfg$settings$pca_plot %||% TRUE) +
                        as.integer(plots) +
                        as.integer(report) +
                        as.integer(!is.null(vcf_output) || vcf_per_sample)

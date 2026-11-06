@@ -609,7 +609,9 @@ report_scoring <- function(settings) {
       I(c("HIGH", sprintf(">= %.3f", g("score_high_corr")), sprintf(">= %d", as.integer(g("score_high_refs"))),
           rng(g("score_high_ratio_low"), g("score_high_ratio_high")))),
       I(c("MEDIUM", sprintf(">= %.3f", g("score_med_corr")), sprintf(">= %d", as.integer(g("score_med_refs"))),
-          rng(g("score_low_ratio_low"), g("score_low_ratio_high")))),
+          sprintf("%.2f - %.2f or %.2f - %.2f",
+                  g("score_med_ratio_low"), g("score_low_ratio_low"),
+                  g("score_low_ratio_high"), g("score_med_ratio_high")))),
       I(c("LOW", "any", "any", "otherwise"))),
     forced_low = I(as.character(forced)),
     terminal = if (isTRUE(settings$remove_terminal_only)) {

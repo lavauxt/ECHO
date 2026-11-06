@@ -309,8 +309,9 @@ for (i in rev(seq_len(n))) {
     next_gene[i] <- g; next_start[i] <- s
     if (!off_s[i]) { g <- gene_s[i]; s <- start_s[i] }
 }
-new_gene_s <- gene_s
-n_merged   <- 0L
+new_gene_s  <- gene_s
+n_merged    <- 0L
+merged_flag <- logical(n)   # sorted order, parallel to gene_s / off_s
 for (i in which(off_s)) {
     has_prev <- !is.na(prev_gene[i])
     has_next <- !is.na(next_gene[i])
@@ -319,17 +320,21 @@ for (i in which(off_s)) {
         d_next <- next_start[i] - end_s[i]
         new_gene_s[i] <- if (d_prev <= d_next) prev_gene[i] else next_gene[i]
         n_merged <- n_merged + 1L
+        merged_flag[i] <- TRUE
     } else if (has_prev) {
         new_gene_s[i] <- prev_gene[i]; n_merged <- n_merged + 1L
+        merged_flag[i] <- TRUE
     } else if (has_next) {
         new_gene_s[i] <- next_gene[i]; n_merged <- n_merged + 1L
+        merged_flag[i] <- TRUE
     }
 }
 df[[gene_col]][ord] <- new_gene_s
 
-# <-- NEW: Drop the off-target marker from `OriginalName` for merged intervals
-if ("OriginalName" %in% names(df) && any(merged_s)) {
-    df[["OriginalName"]][ord[merged_s]] <- new_gene_s[merged_s]
+# Drop the off-target marker from `OriginalName` for merged intervals so that
+# hors_roi_rows() no longer re-flags them as off-target.
+if ("OriginalName" %in% names(df) && any(merged_flag)) {
+    df[["OriginalName"]][ord[merged_flag]] <- new_gene_s[merged_flag]
 }
     
 if (verbose) {
