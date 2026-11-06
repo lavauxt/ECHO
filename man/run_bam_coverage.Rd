@@ -13,7 +13,7 @@ run_bam_coverage(
   genome_version = NULL,
   bsgenome_cache_dir = NULL,
   rbams = NULL,
-  data_out = "./ECHO_coverage.Rdata",
+  data_out = "./ECHO_coverage.RData",
   include.chr = FALSE,
   verbose = TRUE,
   sample_name_delim = "\\\\.",
@@ -64,7 +64,9 @@ with a \code{bam} column listing reference BAM paths.}
 
 \item{sample_name_collapse}{Character string. Separator for rejoining parts. Default NULL.}
 
-\item{custom_sample_names}{Optional character vector.}
+\item{custom_sample_names}{Optional character vector, one name per analysis
+BAM. Reference BAMs use filename-derived names; REF_ is added only if a
+reference name collides with an analysis sample name.}
 
 \item{bed_zero_based}{Logical. If TRUE, BED start coordinates are 0-based.}
 

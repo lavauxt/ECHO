@@ -27,8 +27,35 @@ process_bed_file(
   txdb = NULL,
   gene_field_index = NULL,
   off_target_pattern = "^HorsROI",
-  off_target_handling = c("na", "remove", "merge")
+  off_target_handling = c("na", "remove", "merge"),
+  keep_hors_roi = TRUE
 )
+}
+\arguments{
+\item{input_bed}{BED file with at least chromosome, start, and end columns.}
+
+\item{output_bed}{Path for the processed BED output.}
+
+\item{bed_process}{Processing mode: \code{STANDARD}, \code{REGEN}, or \code{NO}.}
+
+\item{bed_zero_based}{Whether BED start coordinates are 0-based. Applied
+to BOTH the input BED and any panel BEDs supplied via \code{panel_files},
+\code{list_genes} or \code{genes_file}.}
+
+\item{refseqgene, transcripts_file, gene_list_restrict, chr_list_restrict}{Legacy
+arguments retained for compatibility; not used by REGEN.}
+
+\item{unknown_gene}{Retained for compatibility. REGEN always preserves
+unmatched intervals as \code{Unknown}.}
+
+\item{exon_sep, gene_name_collapse, customexon, auto_exon_number, region_numbering_mode, gene_name_keep, list_genes, genes_file, panel_files, gene_field_index, off_target_pattern, off_target_handling}{Additional BED-processing options.}
+
+\item{genome_version}{Genome build; REGEN supports \code{hg19} and \code{hg38}.}
+
+\item{txdb}{Optional TxDb object for REGEN; otherwise the matching built-in
+UCSC knownGene TxDb is selected from \code{genome_version}.}
+
+\item{keep_hors_roi}{Logical; retain HorsROI intervals in the processed BED (default TRUE). Retained intervals are labelled 'HorsROI' and have no exon number.}
 }
 \description{
 Process BED File for CNV Analysis

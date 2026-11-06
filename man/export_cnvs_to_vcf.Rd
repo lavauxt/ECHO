@@ -9,26 +9,34 @@ export_cnvs_to_vcf(
   output_vcf,
   sample_name = NULL,
   source = "ECHO",
-  reference = "hg19"
+  reference = "hg19",
+  sample_names = NULL
 )
 }
 \arguments{
-\item{cnv_calls}{Data frame of CNV calls (must contain columns: Sample, Chromosome,
-Start, End, Type, Confidence, etc.)}
+\item{cnv_calls}{Data frame of CNV calls. For non-empty input it must contain
+`Sample`, `Chromosome`, `Start`, `End`, `Type` and the fields used in INFO.}
 
 \item{output_vcf}{Character string. Output VCF file path.}
 
-\item{sample_name}{Character string. If provided, write a single-sample VCF.
-If NULL, write a single multi-sample VCF.}
+\item{sample_name}{Optional single sample name. If provided, write a
+single-sample VCF, including a header-only VCF when that sample has no calls.}
 
-\item{source}{Character string. Source description for VCF header.}
+\item{source}{Character string. Source description for the VCF header.}
 
-\item{reference}{Character string. Reference genome assembly (e.g., "hg19").}
+\item{reference}{Character string. Reference genome assembly (e.g. `hg19`).}
+
+\item{sample_names}{Optional character vector of analysis sample names. Used
+to include samples with no calls in a combined VCF header. Ignored when
+`sample_name` is supplied. If omitted, names are inferred from `cnv_calls`.}
 }
 \value{
 Invisibly returns the written VCF path.
 }
 \description{
-Converts a data frame of CNV calls (from \code{run_cnv_calling}) into VCF.
-When \code{sample_name} is NULL, a single multi-sample VCF is written.
+Converts ECHO CNV calls to VCF 4.2. When `sample_name` is NULL, a single
+multi-sample VCF is written. `sample_names` can be supplied to retain
+analysis samples that have no CNV records in the multi-sample header.
+Empty calls are supported: a valid header-only VCF is written instead of
+silently returning without creating a file.
 }

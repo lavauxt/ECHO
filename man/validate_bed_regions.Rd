@@ -4,7 +4,18 @@
 \alias{validate_bed_regions}
 \title{Validate a BED file}
 \usage{
-validate_bed_regions(bed_path, verbose = TRUE)
+validate_bed_regions(bed_path, verbose = TRUE, bed_zero_based = TRUE)
+}
+\arguments{
+\item{bed_path}{Path to the BED file.}
+
+\item{verbose}{Print messages.}
+
+\item{bed_zero_based}{Logical. With the default \code{TRUE} (UCSC BED), an
+interval is invalid if \code{end <= start} or \code{start < 0}. With
+\code{FALSE} (1-based, closed intervals) a one-base interval
+\code{start == end} is legitimate and only \code{end < start} or
+\code{start < 1} is invalid.}
 }
 \description{
 Validate a BED file

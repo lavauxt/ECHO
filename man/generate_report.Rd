@@ -2,7 +2,7 @@
 % Please edit documentation in R/echo_report.R
 \name{generate_report}
 \alias{generate_report}
-\title{Generate Interactive HTML Report}
+\title{Generate the interactive HTML report}
 \usage{
 generate_report(
   summary_rdata,
@@ -16,39 +16,79 @@ generate_report(
   ref_bams = NULL,
   log_file = NULL,
   pdf_output = FALSE,
-  prefix = NULL
+  prefix = NULL,
+  coverage_rdata = NULL
 )
 }
 \arguments{
-\item{summary_rdata}{Path to ECHO_summary.RData}
+\item{summary_rdata}{Path to the \code{ECHO_*_summary.RData} written by
+\code{run_cnv_calling()}.}
 
-\item{qc_metrics_file}{Path to QC_Metrics.tsv}
+\item{qc_metrics_file}{Path to the QC metrics TSV (optional).}
 
-\item{output_dir}{Output directory for the report (will be created if missing)}
+\item{output_dir}{Output directory (created if missing).}
 
-\item{settings}{List of pipeline settings}
+\item{settings}{List of pipeline settings (\code{cfg$settings}).}
 
-\item{config}{Original config list (optional)}
+\item{config}{Original config list (optional; shown on the Run tab).}
 
-\item{global}{Logical. If TRUE, generate a single global report for all samples.
-If FALSE (default), generate one report per sample (legacy mode).}
+\item{global}{Logical. \code{TRUE} (default): one report for all samples.
+\code{FALSE}: one single-sample report per sample (or for
+\code{sample_name}); each file only contains that sample's calls, QC rows
+and references -- no other sample is named in it apart from its own
+reference samples.}
 
-\item{sample_name}{Optional single sample name (only used when global = FALSE).}
+\item{sample_name}{Optional sample name(s) (only used when \code{global = FALSE}).}
 
-\item{sample_table}{Optional path to sample table (CSV/TSV) to display in report.}
+\item{sample_table}{Optional path to the sample table (TSV with
+\code{sample_name} and \code{gender}).}
 
-\item{ref_bams}{Optional path to external reference BAM list (TSV with 'bam' column).}
+\item{ref_bams}{Optional path to the external reference BAM list (TSV with a
+\code{bam} column).}
 
-\item{log_file}{Path to log file (optional).}
+\item{log_file}{Optional path to the pipeline log (warnings and a tail are shown).}
 
-\item{pdf_output}{Logical. If TRUE, also generate a PDF version using pagedown.}
+\item{pdf_output}{Deprecated and ignored (the old knit-time PDF export is
+gone). Use the browser's Print dialog: every tab is expanded for printing.}
 
-\item{prefix}{Character string. Prefix to use for output file name (e.g., "GOM").
-When provided, the global report will be named `ECHO_<prefix>_report.html`.}
+\item{prefix}{Optional output prefix: the global report is named
+\code{ECHO_<prefix>_report.html}.}
+
+\item{coverage_rdata}{Optional path to the coverage RData (output of
+\code{run_bam_coverage()}); used to list samples that were excluded
+before CNV calling.}
 }
 \value{
-Invisibly returns the output file path(s).
+Invisibly, the path(s) of the HTML file(s) written.
 }
 \description{
-Generate Interactive HTML Report
+Writes a single self-contained HTML file (no server, no Shiny, no network
+access needed once generated). The page is a small client-side application in
+the style of the SPARKS unified report: tabs (Overview, QC & warnings,
+Samples, CNV calls, Cohort, Methods, Run), \pkg{plotly} figures, sortable and
+filterable tables with CSV export, a light/dark/auto theme and \code{#tab=}
+deep links. A \emph{sample selector} in the header filters every tab, so one
+report serves a whole multi-sample run; clicking a CNV row shows its coverage
+evidence (log coverage vs references, observed/expected with the
+beta-binomial interval, z-scores) computed from the same model as the PDF
+plots.
+}
+\details{
+\strong{Warnings.} The report surfaces
+\itemize{
+  \item the chromosome scope of the run: chromosome classes (autosomes, chrX,
+    chrY) that are \emph{not analysed} by the selected \code{modechrom}, and
+    classes missing from the BED;
+  \item sample-level QC failures (low correlation, depth, total reads),
+    exon-level QC, cohort size, and samples excluded from calling;
+  \item calls whose background exons are poorly calibrated.
+}
+Every metric is drawn against its threshold, and failing samples are
+coloured.
+
+Optional \code{settings}: \code{report_plotly} (\code{"inline"},
+  default, or \code{"cdn"} for a ~3.6 MB smaller file that needs internet to
+  draw plots) and \code{report_max_profiles} (default \code{500}): maximum
+  number of calls for which the per-call coverage profile is embedded
+  (HIGH and MEDIUM confidence calls first).
 }

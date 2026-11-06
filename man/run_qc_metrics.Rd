@@ -10,7 +10,8 @@ run_qc_metrics(
   min_cov = 100,
   min_total_reads = 3e+05,
   max_exon_cv = 0.5,
-  output_file = "./QC_metrics.tsv"
+  output_file = "./QC_metrics.tsv",
+  modechrom = "A"
 )
 }
 \arguments{
@@ -25,12 +26,27 @@ run_qc_metrics(
 \item{max_exon_cv}{Numeric. Maximum allowed coefficient of variation per exon.}
 
 \item{output_file}{Character string. Output path. Default \code{"./QC_metrics.tsv"}.}
+
+\item{modechrom}{Character. The chromosome mode the CNV calling will use
+(\code{"A"}, \code{"X"} or \code{"Y"}); drives the autosome/gonosome scope
+warnings. Default \code{"A"}.}
 }
 \value{
 Invisibly returns the metrics data frame.
 }
 \description{
 Checks coverage for low sample correlation, low median depth per sample,
-low total read count, and high per-exon coefficient of variation.
-Writes flagged rows to a TSV file.
+low total read count, and high per-exon coefficient of variation, and
+reports the chromosome scope of the run: a missing autosome/chrX/chrY class
+in the BED, and the chromosome classes (autosomes / gonosomes) that the
+selected \code{modechrom} does NOT analyse. Writes the flagged rows to a TSV
+file.
+}
+\details{
+Output columns: \code{Sample}, \code{Exon}, \code{Type}, \code{Details},
+\code{Gene} and \code{Severity} (\code{"error"}, \code{"warning"} or
+\code{"info"}). \code{Type} is one of \code{"Whole sample"},
+\code{"Whole exon"}, \code{"Exon variability"}, \code{"Cohort size"},
+\code{"Missing Chromosome"} (class absent from the BED) or
+\code{"Analysis scope"} (class present but not analysed by this run).
 }
