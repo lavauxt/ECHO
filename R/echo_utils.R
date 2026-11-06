@@ -31,6 +31,82 @@ stop("[ERROR] Missing variables in RData: ", paste(missing, collapse = ", "),
 }
 as.list(env)
 }
+#' Extract gene symbols from structured BED target annotations
+#'
+#' Recognises RefSeq transcript prefixes, exon/UTR labels, score annotations,
+#' and trailing genomic coordinates. Underscores and hyphens inside gene
+#' symbols are preserved (for example, SCG5_GREM1 and BCR-ABL1).
+#' Multiple comma-separated annotations are reduced to their unique symbols.
+#' @param x Character vector of BED annotation names.
+#' @param collapse Separator used when an interval maps to distinct symbols.
+#' @return Character vector; NA where no structured annotation was recognised.
+#' @noRd
+extract_bed_gene_symbols <- function(x, collapse = ";") {
+    if (is.null(x)) return(character(0))
+
+    extract_one <- function(annotation) {
+        annotation <- trimws(as.character(annotation))
+        if (is.na(annotation) || !nzchar(annotation) || annotation == ".") {
+            return(NA_character_)
+        }
+
+        has_coordinates <- grepl(
+            "_(?:chr[^_]+|[0-9]+|X|Y|M|MT)_[0-9]+_[0-9]+$",
+            annotation, perl = TRUE, ignore.case = TRUE
+        )
+        has_refseq <- grepl("^(?:NM|NR|XM|XR)_[0-9]+_", annotation,
+                            perl = TRUE, ignore.case = TRUE)
+        has_ensembl <- grepl("^ENST[0-9]+(?:\\.[0-9]+)?_", annotation,
+                             perl = TRUE, ignore.case = TRUE)
+        has_exon_or_utr <- grepl(
+            "_(?:(?:5|3)?utr[0-9]*(?:[-_]ex[0-9]+)?|ex(?:on)?[_-]?[0-9]+)(?:$|[_(-])",
+            annotation, perl = TRUE, ignore.case = TRUE
+        )
+
+        # Do not guess at custom formats. The caller can use its legacy,
+        # explicitly configured field selection for those names.
+        if (!(has_coordinates || has_refseq || has_ensembl || has_exon_or_utr)) {
+            return(NA_character_)
+        }
+
+        # Remove the terminal coordinate triplet before symbol extraction.
+        annotation <- sub(
+            "_(?:chr[^_]+|[0-9]+|X|Y|M|MT)_[0-9]+_[0-9]+$",
+            "", annotation, perl = TRUE, ignore.case = TRUE
+        )
+        # Scores such as (251/4972) are metadata, not part of the symbol.
+        annotation <- gsub("\\s*\\([^()]*\\)", "", annotation, perl = TRUE)
+
+        # Strip transcript accessions, not arbitrary underscore-delimited
+        # prefixes. This is what protects fused symbols such as SCG5_GREM1.
+        annotation <- sub("^(?:NM|NR|XM|XR)_[0-9]+_", "", annotation,
+                          perl = TRUE, ignore.case = TRUE)
+        annotation <- sub("^ENST[0-9]+(?:\\.[0-9]+)?_", "", annotation,
+                          perl = TRUE, ignore.case = TRUE)
+
+        # Remove structural exon/UTR suffixes while leaving the complete
+        # preceding symbol (including internal underscores and hyphens).
+        annotation <- sub(
+            "_(?:(?:5|3)?utr[0-9]*(?:[-_]ex[0-9]+)?|ex(?:on)?[_-]?[0-9]+)(?:[_-].*)?$",
+            "", annotation, perl = TRUE, ignore.case = TRUE
+        )
+        annotation <- trimws(annotation)
+        if (!nzchar(annotation) || annotation == ".") return(NA_character_)
+        annotation
+    }
+
+    vapply(as.character(x), function(value) {
+        if (is.na(value) || !nzchar(trimws(value)) || trimws(value) == ".") {
+            return(NA_character_)
+        }
+        annotations <- trimws(strsplit(value, ",", fixed = TRUE)[[1]])
+        genes <- vapply(annotations, extract_one, character(1))
+        genes <- genes[!is.na(genes) & nzchar(genes)]
+        if (!length(genes)) return(NA_character_)
+        paste(unique(genes), collapse = collapse)
+    }, character(1), USE.NAMES = FALSE)
+}
+
 #' Check that a BAM file has an index on disk
 #' @param bam Path to a BAM file.
 #' @return Logical.

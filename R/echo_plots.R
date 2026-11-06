@@ -1,3 +1,17 @@
+# Normalize BED gene labels before drawing gene tiles or creating plot names.
+# This also covers older summary files where the fourth BED column was saved
+# as a raw annotation because preprocessing was skipped.
+normalize_plot_gene_labels <- function(bed_file) {
+    gene_col <- if ("gene" %in% names(bed_file)) "gene" else if ("Gene" %in% names(bed_file)) "Gene" else NULL
+    if (is.null(gene_col)) return(bed_file)
+    gene_values <- as.character(bed_file[[gene_col]])
+    parsed <- extract_bed_gene_symbols(gene_values, collapse = ";")
+    hit <- !is.na(parsed) & nzchar(parsed)
+    gene_values[hit] <- parsed[hit]
+    bed_file[[gene_col]] <- gene_values
+    bed_file
+}
+
 harmonise_chr_prefix <- function(ref_df, target_df) {
     has_chr_ref <- any(grepl("^chr", ref_df$chromosome))
     has_chr_tgt <- any(grepl("^chr", target_df$Chromosome))
@@ -324,6 +338,9 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     models    <- objs$models
     refs      <- objs$refs
 
+    bed_file <- normalize_plot_gene_labels(bed_file)
+    gene_col <- if ("gene" %in% names(bed_file)) "gene" else if ("Gene" %in% names(bed_file)) "Gene" else NULL
+
     if (is.null(cnv_calls) || nrow(cnv_calls) == 0) {
         log_msg("No CNV calls to plot.")
         return(invisible(0))
@@ -341,6 +358,26 @@ generate_plots <- function(rdata_file, output_dir = "./plots", modechrom = "A",
     }
 
     cnv_plot <- harmonise_chr_prefix(bed_file, cnv_plot)
+
+    # Older call tables may carry a stale/raw Gene label. Rebuild it from the
+    # now-normalized BED annotations whenever global target indices are saved.
+    if (!is.null(gene_col) && all(c("global_start", "global_end") %in% names(cnv_plot))) {
+        cnv_plot$Gene <- vapply(seq_len(nrow(cnv_plot)), function(j) {
+            lo <- suppressWarnings(as.integer(cnv_plot$global_start[j]))
+            hi <- suppressWarnings(as.integer(cnv_plot$global_end[j]))
+            if (is.na(lo) || is.na(hi) || lo < 1L || hi < lo || lo > nrow(bed_file)) return("Unknown")
+            idx <- seq.int(lo, min(hi, nrow(bed_file)))
+            genes <- unique(as.character(bed_file[[gene_col]][idx]))
+            genes <- genes[!is.na(genes) & nzchar(genes) & genes != "Unknown"]
+            if (length(genes)) paste(genes, collapse = " ") else "Unknown"
+        }, character(1))
+    } else if ("Gene" %in% names(cnv_plot)) {
+        call_gene_values <- as.character(cnv_plot$Gene)
+        parsed_call_gene <- extract_bed_gene_symbols(call_gene_values, collapse = ";")
+        hit <- !is.na(parsed_call_gene) & nzchar(parsed_call_gene)
+        call_gene_values[hit] <- parsed_call_gene[hit]
+        cnv_plot$Gene <- call_gene_values
+    }
 
     exon_index <- if ("exon_label" %in% colnames(counts) &&
                       length(counts$exon_label) == nrow(bed_file)) {

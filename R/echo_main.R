@@ -112,6 +112,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       skip_invalid_intervals = args$skip_invalid_intervals %||% TRUE,
       off_target_pattern     = args$off_target_pattern %||% "^HorsROI",
       off_target_handling    = args$off_target_handling %||% "na",
+      keep_hors_roi          = args$keep_hors_roi %||% TRUE,
       sample_name_collapse   = args$sample_name_collapse %||% sample_name_collapse,
       panel_files            = args$panel_files %||% panel_files,
       auto_regen             = args$auto_regen %||% TRUE
@@ -258,6 +259,7 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       if (!is.null(cfg$bed_process) && cfg$bed_process != "NO") {
         log_msg(paste0("Off-target region handling: pattern = '", cfg$off_target_pattern %||% "^HorsROI",
                        "', handling = '", cfg$off_target_handling %||% "na", "'"))
+        log_msg(paste("Keep HorsROI intervals:", cfg$keep_hors_roi %||% TRUE))
       }
 
       paths <- list(
@@ -331,7 +333,8 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           txdb                  = cfg$txdb %||% NULL,
           gene_field_index      = gene_field_index,
           off_target_pattern    = cfg$off_target_pattern %||% "^HorsROI",
-          off_target_handling   = cfg$off_target_handling %||% "na"
+          off_target_handling   = cfg$off_target_handling %||% "na",
+          keep_hors_roi          = cfg$keep_hors_roi %||% TRUE
         )
         cfg$input$bed <- processed_bed
         # process_bed_file() always writes a 0-based BED (it subtracts 1 from

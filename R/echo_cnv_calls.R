@@ -64,7 +64,7 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
      (ratio >= score_low_ratio_high & ratio <= score_med_ratio_high))
   
   gene_flagged <- vapply(cnv_calls$Gene, function(g_str) {
-    any(trimws(unlist(strsplit(g_str, "[ ,]"))) %in% score_low_confidence_genes)
+    any(trimws(unlist(strsplit(g_str, "[ ,;]"))) %in% score_low_confidence_genes)
   }, logical(1))
   
   high_cond <- !gene_flagged & high_corr_ok & high_refs_ok & ratio_high_ok

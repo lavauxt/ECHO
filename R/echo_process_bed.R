@@ -12,6 +12,7 @@
 #'   unmatched intervals as \code{Unknown}.
 #' @param refseqgene,transcripts_file,gene_list_restrict,chr_list_restrict Legacy
 #'   arguments retained for compatibility; not used by REGEN.
+#' @param keep_hors_roi Logical; retain HorsROI intervals in the processed BED (default TRUE). Retained intervals are labelled 'HorsROI' and have no exon number.
 #' @param exon_sep,gene_name_collapse,customexon,auto_exon_number,region_numbering_mode,gene_name_keep,list_genes,genes_file,panel_files,gene_field_index,off_target_pattern,off_target_handling Additional BED-processing options.
 #' @export
 process_bed_file  <- function(input_bed, output_bed, bed_process = "STANDARD",
@@ -27,8 +28,21 @@ panel_files = NULL,
 genome_version = NULL, txdb = NULL,
 gene_field_index = NULL,
 off_target_pattern = "^HorsROI",
-off_target_handling = c("na", "remove", "merge")) {
+off_target_handling = c("na", "remove", "merge"),
+keep_hors_roi = TRUE) {
 off_target_handling  <- match.arg(off_target_handling)
+if (length(keep_hors_roi) != 1L || is.na(keep_hors_roi)) {
+  stop("keep_hors_roi must be TRUE or FALSE.")
+}
+keep_hors_roi <- isTRUE(as.logical(keep_hors_roi))
+# Explicit keep_hors_roi takes precedence over legacy off_target_handling.
+effective_off_target_handling <- if (!keep_hors_roi) {
+  "remove"
+} else if (identical(off_target_handling, "remove")) {
+  "na"
+} else {
+  off_target_handling
+}
 parse_keep_indices <- function(keep_str, max_len) {
   if (is.null(keep_str) || keep_str == "") return(NULL)
   if (is.numeric(keep_str)) return(keep_str)
@@ -62,7 +76,11 @@ if (length(exon_sep) > 1) {
      use_fixed <- TRUE
    }
 }
-g_clean <- gsub("\\s*\\(.*?\\)", "", as.character(name_vec))
+# Parse common transcript/exon/coordinate annotations with regex before
+# falling back to user-specified field selection. The regex parser preserves
+# gene-symbol underscores and hyphens and handles comma-separated annotations.
+parsed_symbols <- extract_bed_gene_symbols(name_vec, collapse = ";")
+g_clean <- gsub("\\s*\\([^()]*\\)", "", as.character(name_vec), perl = TRUE)
 g_clean <- sub("^([^,]+),.*$", "\\1", g_clean)
 exon_pattern <- "(?<![A-Za-z0-9])ex(?:on)?[_-]?([0-9]+)"
 exon_all <- gregexpr(exon_pattern, g_clean, perl = TRUE)
@@ -81,6 +99,14 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
   if (is.na(g_orig) || g_orig == "" || g_orig == ".") return(NA_character_)
   parts <- parts_list[[i]]
   parts <- parts[parts != ""]
+
+  # Structured annotations take precedence over positional splitting. This
+  # prevents SCG5_GREM1 from being split into SCG5 / GREM1 and extracts BRCA2
+  # from NM_000059_BRCA2_ex11-style names.
+  if (!is.na(parsed_symbols[i]) && nzchar(parsed_symbols[i])) {
+    return(parsed_symbols[i])
+  }
+
   keep_idx <- NULL
   if (!is.null(gene_name_keep)) {
     keep_str <- as.character(gene_name_keep)
@@ -291,7 +317,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "Start"] <- "start"
      names(df)[names(df) == "End"] <- "end"
      names(df)[names(df) == "Gene"] <- "gene"
-     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
      user_exon_labels <- df$ExonNum
      df <- assign_exon_numbers_per_gene(df)
      if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
@@ -316,7 +342,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
      names(df)[names(df) == "Start"] <- "start"
      names(df)[names(df) == "End"] <- "end"
      names(df)[names(df) == "Gene"] <- "gene"
-     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+     df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
      user_exon_labels <- df$ExonNum
      df <- assign_exon_numbers_per_gene(df)
      if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
@@ -342,7 +368,7 @@ if (!is.null(panel_bed_paths) && length(panel_bed_paths) > 0) {
   names(df)[names(df) == "Start"] <- "start"
   names(df)[names(df) == "End"] <- "end"
   names(df)[names(df) == "Gene"] <- "gene"
-  df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = off_target_handling)
+  df <- handle_off_target_regions(df, pattern = off_target_pattern, handling = effective_off_target_handling)
   user_exon_labels <- df$ExonNum
   df <- assign_exon_numbers_per_gene(df)
   if (!"exon_number" %in% names(df) || length(df$exon_number) != nrow(df)) {
@@ -366,6 +392,17 @@ stop("bed_process must be 'STANDARD', 'REGEN', or 'NO'")
 df$Gene  <- as.character(df$Gene)
 df$Gene  <- vapply(strsplit(df$Gene, ",", fixed = TRUE), function(x) x[1], character(1))
 df$Gene[is.na(df$Gene) | df$Gene %in% c("", ".")] <- "Unknown"
+# Keep retained off-target intervals visibly identifiable, but without exon numbering.
+is_hors_roi <- if ("OriginalName" %in% names(df) && !is.null(off_target_pattern) && nzchar(off_target_pattern)) {
+  !is.na(df$OriginalName) & grepl(off_target_pattern, as.character(df$OriginalName), perl = TRUE)
+} else {
+  rep(FALSE, nrow(df))
+}
+if (any(is_hors_roi)) {
+  df$Gene[is_hors_roi] <- "HorsROI"
+  if ("Custom.Exon" %in% names(df)) df$Custom.Exon[is_hors_roi] <- NA
+  if ("ExonNum" %in% names(df)) df$ExonNum[is_hors_roi] <- NA
+}
 chrom_base  <- c(as.character(1:22), "X", "Y", "M")
 if (any(grepl("^chr", df$Chr))) {
 chrom_levels  <- paste0("chr", chrom_base)

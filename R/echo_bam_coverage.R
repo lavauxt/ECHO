@@ -391,6 +391,16 @@ run_bam_coverage <- function(
 
   bed_file$chromosome <- trimws(as.character(bed_file$chromosome))
 
+  # BEDs can be passed through unchanged (bed_process = "NO"). In that case
+  # column 4 may still contain transcript/exon/coordinate annotations rather
+  # than a parsed gene symbol. Normalize only recognizable structured names;
+  # already-clean symbols are left untouched.
+  if ("gene" %in% names(bed_file)) {
+    parsed_gene <- extract_bed_gene_symbols(as.character(bed_file$gene), collapse = ";")
+    parsed_ok <- !is.na(parsed_gene) & nzchar(parsed_gene)
+    bed_file$gene[parsed_ok] <- parsed_gene[parsed_ok]
+  }
+
   if (bed_zero_based) {
     bed_file$start <- bed_file$start + 1L
     if (verbose) message("[INFO] Converted BED start coordinates from 0-based to 1-based")
