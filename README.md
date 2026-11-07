@@ -349,19 +349,6 @@ shown in the report's *Samples* tab).
   well-calibrated interval implies (a sign the real alteration may extend
   further, or that the reference match is poor for this region).
 
-## What's new in 0.3.0
-
-* Report CSS/JS embedded in the R code (`inst/report/` no longer needed; R >= 4.0).
-* HorsROI intervals: one labelled, spaced block per run of consecutive
-  intervals in the PDF and the HTML report; no exon number, no padding.
-  `off_target_gene_pattern` is gone: plots use `off_target_pattern`.
-* Fixes: overlapping/missing gene tiles in the PDF, different exon labels
-  between PDF and report, false "chromosome missing from the BED" warnings,
-  `bed_process: "NO"` stopping with an error, unreadable labels on light
-  tiles, invisible interval band on one-target blocks.
-* Internal refactoring (shared window computation, BED processing paths,
-  helpers); outputs unchanged otherwise.
-
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
