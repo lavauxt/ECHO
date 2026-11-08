@@ -191,17 +191,35 @@ window_points <- function(pd, y, ref_y) {
          test = test, hit = test[test$affected, , drop = FALSE])
 }
 
+# Subtle call-boundary shading shared by the PDF evidence panels.
+affected_bg <- function(pd) {
+    hit <- pd$px[!is.na(pd$affected) & pd$affected & is.finite(pd$px)]
+    if (!length(hit)) return(NULL)
+    data.frame(xmin = min(hit) - 0.4, xmax = max(hit) + 0.4,
+               ymin = -Inf, ymax = Inf)
+}
+
 create_coverage_plot <- function(pd) {
     d <- window_points(pd, pd$test_log, pd$ref_log)
     test_lab <- paste0("Test sample (", pd$sample, ")")
     d$ref$color_group <- rep("Reference samples", nrow(d$ref))
     d$test$color_group <- rep(test_lab, nrow(d$test))
     d$hit$color_group <- rep("Affected exon(s)", nrow(d$hit))
+    d$test$shape_group <- factor(d$test$affected, levels = c(FALSE, TRUE),
+                                 labels = c("Observed", "Affected"))
     cols <- c("Reference samples" = "gray", stats::setNames("blue", test_lab), "Affected exon(s)" = "red")
-    p_cov <- ggplot2::ggplot(mapping = ggplot2::aes(x = px, y = y, color = color_group)) +
+    bg <- affected_bg(pd)
+    p_cov <- ggplot2::ggplot(mapping = ggplot2::aes(x = px, y = y, color = color_group))
+    if (!is.null(bg)) {
+        p_cov <- p_cov + ggplot2::geom_rect(data = bg,
+            ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            inherit.aes = FALSE, fill = "#E34948", alpha = 0.07)
+    }
+    p_cov <- p_cov +
         ggplot2::geom_point(data = d$ref, size = 2.5, alpha = 0.7) +
-        ggplot2::geom_point(data = d$test, size = 2.5) +
-        ggplot2::geom_point(data = d$hit, size = 3.5) +
+        ggplot2::geom_point(data = d$test, ggplot2::aes(shape = shape_group), size = 2.5) +
+        ggplot2::geom_point(data = d$hit, shape = 17, size = 3.5) +
+        ggplot2::scale_shape_manual(values = c("Observed" = 16, "Affected" = 17), guide = "none") +
         ggplot2::scale_colour_manual(
             values = cols,
             guide  = ggplot2::guide_legend(override.aes = list(size = 4), nrow = 1, title = NULL)) +
@@ -294,13 +312,21 @@ interval_bands <- function(pd, half = 0.3) {
 create_ci_plot <- function(pd) {
     ci <- data.frame(px = pd$px, gene_group = pd$gene_group, ratio = pd$ratio, lo = pd$lo, hi = pd$hi,
                      is_affected = factor(pd$affected, levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
-    p <- ggplot2::ggplot(ci, ggplot2::aes(x = px)) +
+    bg <- affected_bg(pd)
+    p <- ggplot2::ggplot(ci, ggplot2::aes(x = px))
+    if (!is.null(bg)) {
+        p <- p + ggplot2::geom_rect(data = bg,
+            ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            inherit.aes = FALSE, fill = "#E34948", alpha = 0.07)
+    }
+    p <- p +
         ggplot2::geom_ribbon(data = interval_bands(pd), ggplot2::aes(ymin = lo, ymax = hi, group = gene_group),
                              fill = "grey80", colour = NA) +
-        ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected), size = 3.5) +
+        ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected, shape = is_affected), size = 3.5) +
+        ggplot2::scale_shape_manual(values = c("Observed" = 16, "Affected" = 17), guide = "none") +
         ggplot2::scale_color_manual(
             values = c("Observed" = "blue", "Affected" = "red"),
-            guide  = ggplot2::guide_legend(override.aes = list(shape = 19, size = 3))) +
+            guide  = ggplot2::guide_legend(override.aes = list(shape = c(16, 17), size = 3))) +
         ggplot2::labs(x = "", y = "Observed / Expected", subtitle = pd$ci_subtitle) +
         ggplot2::theme_bw() +
         ggplot2::theme(legend.position = "none", legend.title = ggplot2::element_blank())
@@ -320,12 +346,24 @@ create_zscore_plot <- function(pd) {
     d <- window_points(pd, pd$z, pd$ref_z)
     d$test$is_affected <- factor(d$test$affected, levels = c(FALSE, TRUE), labels = c("Observed", "Affected"))
     z_lim <- suppressWarnings(max(abs(c(d$ref$y, d$test$y)), na.rm = TRUE) * 1.1)
-    if (!is.finite(z_lim) || z_lim <= 0) z_lim <- 1
-    p <- ggplot2::ggplot() +
-        ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = "black") +
+    if (!is.finite(z_lim)) z_lim <- 0
+    # Keep the +/-2 and +/-3 visual reference guides in view even for quiet calls.
+    z_lim <- max(z_lim, 3.2)
+    bg <- affected_bg(pd)
+    p <- ggplot2::ggplot()
+    if (!is.null(bg)) {
+        p <- p + ggplot2::geom_rect(data = bg,
+            ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            inherit.aes = FALSE, fill = "#E34948", alpha = 0.07)
+    }
+    p <- p +
+        ggplot2::geom_hline(yintercept = c(-3, 3), linetype = "dashed", colour = "#B3261E", alpha = 0.7, size = 0.4) +
+        ggplot2::geom_hline(yintercept = c(-2, 2), linetype = "dotted", colour = "#B36B00", alpha = 0.8, size = 0.4) +
+        ggplot2::geom_hline(yintercept = 0, linetype = "solid", colour = "black", size = 0.3) +
         # Points only -- no line joins reference or test z-scores across exons.
         ggplot2::geom_point(data = d$ref, ggplot2::aes(x = px, y = y), colour = "grey60", size = 1.5, alpha = 0.7) +
-        ggplot2::geom_point(data = d$test, ggplot2::aes(x = px, y = y, color = is_affected), size = 3) +
+        ggplot2::geom_point(data = d$test, ggplot2::aes(x = px, y = y, color = is_affected, shape = is_affected), size = 3) +
+        ggplot2::scale_shape_manual(values = c("Observed" = 16, "Affected" = 17), guide = "none") +
         ggplot2::scale_color_manual(values = c("Observed" = "blue", "Affected" = "red")) +
         ggplot2::coord_cartesian(ylim = c(-z_lim, z_lim)) +
         ggplot2::labs(y = "Z-score vs references", x = NULL) +

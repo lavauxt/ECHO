@@ -356,12 +356,18 @@ dialog.lightbox img { max-width: 96vw; max-height: 92vh; background: #fff; borde
 @media (max-width:900px) { .overview-summary { grid-template-columns:minmax(0, 1fr); } .overview-summary-status { padding:0 0 16px; border-right:0; border-bottom:1px solid var(--ring); } }
 @media (max-width:560px) { .overview-summary .tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 /* Gene labels use an HTML track so long symbols remain readable at every width. */
-.gene-track-container { width:100%; min-width:0; padding:10px 12px; overflow-x:auto; border:1px solid var(--ring); border-radius:8px; background:var(--surface); }
-.gene-track { display:flex; align-items:stretch; gap:7px; width:100%; min-width:max-content; }
-.gene-track-segment { flex:1 1 0; min-width:125px; min-height:62px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px; padding:8px 10px; border:1px solid var(--track-border, var(--accent)); border-bottom:3px solid var(--track-border, var(--accent)); border-radius:7px; text-align:center; background:var(--track-bg, var(--accent-soft)); }
+.gene-track-container { position:relative; width:100%; min-width:0; height:84px; box-sizing:border-box; padding:10px 12px; overflow:hidden; border:1px solid var(--ring); border-radius:8px; background:var(--surface); }
+.gene-track { position:absolute; top:10px; height:62px; }
+.gene-track-segment { position:absolute; top:0; height:62px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px; padding:6px 4px; border:1px solid var(--track-border, var(--accent)); border-bottom:3px solid var(--track-border, var(--accent)); border-radius:7px; text-align:center; background:var(--track-bg, var(--accent-soft)); }
 .gene-track-segment.off { border-style:dashed; border-color:var(--axis); background:var(--page); }
-.gene-track-name { font-size:12.5px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; color:var(--text); }
-.gene-track-meta { font-size:11px; color:var(--text-2); }
+.gene-track-name { min-width:0; max-width:100%; font-size:12.5px; font-weight:700; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+.gene-track-meta { max-width:100%; font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gene-track-segment { min-width:0; overflow:hidden; }
+.metric-help { display:inline-block; margin-left:6px; color:var(--muted); font-size:11px; font-weight:500; text-decoration:none; vertical-align:middle; }
+.metric-help:hover, .metric-help:focus { color:var(--accent); text-decoration:underline; }
+.tile[role='button'] { cursor:pointer; transition:transform .12s ease, box-shadow .12s ease; }
+.tile[role='button']:hover { transform:translateY(-1px); box-shadow:0 2px 8px var(--ring); }
+.tile[role='button']:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .gene-track-segment.track-a { --track-border:var(--accent); --track-bg:var(--accent-soft); }
 .gene-track-segment.track-b { --track-border:var(--c-high); --track-bg:var(--ok-soft); }
 .gene-track-segment.track-c { --track-border:var(--c-medium); --track-bg:var(--warn-soft); }
@@ -645,7 +651,9 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       var s = build(resolved());
       var cfg = Object.assign({}, CONFIG, s.config || {});
       s.layout.autosize = true;
-      window.Plotly.react(div, s.data, s.layout, cfg);
+      var renderPromise = window.Plotly.react(div, s.data, s.layout, cfg);
+      if (renderPromise && typeof renderPromise.then === 'function')
+        renderPromise.then(function () { if (div._echoGeneTrackSync) div._echoGeneTrackSync(); });
       if (s.onClick && div.on) {
         if (div.removeAllListeners) div.removeAllListeners('plotly_click');
         div.on('plotly_click', s.onClick);
@@ -697,9 +705,21 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     if (open) details.open = true;
     return details;
   }
-  function tile(value, label, level, detail) {
-    return h('div', { class: 'tile' + (level ? ' ' + level : '') }, h('div', { class: 'v', text: String(value) }),
-      h('div', { class: 'l', text: label }), detail ? h('span', { class: 'detail', text: detail }) : null);
+  function tile(value, label, level, detail, onclick) {
+    var el = h('div', { class: 'tile' + (level ? ' ' + level : '') },
+      h('div', { class: 'v', text: String(value) }),
+      h('div', { class: 'l', text: label }),
+      detail ? h('span', { class: 'detail', text: detail }) : null);
+    if (typeof onclick === 'function') {
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', label + ': ' + String(value) + '. Activate to inspect details.');
+      el.addEventListener('click', onclick);
+      el.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onclick(ev); }
+      });
+    }
+    return el;
   }
   function alertBox(level, title, text, extra) {
     return h('div', { class: 'alert ' + level, role: level === 'fail' || level === 'error' ? 'alert' : 'note' },
@@ -1084,7 +1104,17 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       h('div', { class: 'tiles' },
         tile(called + ' / ' + requested, 'samples analysed / requested', called < requested ? 'fail' : 'ok'),
         tile(notAnalysed, 'samples not analysed', notAnalysed > 0 ? 'fail' : 'ok',
-          notAnalysedNames.length ? notAnalysedNames.join(', ') : null),
+          notAnalysedNames.length ? notAnalysedNames.join(', ') : null,
+          notAnalysedNames.length ? function () {
+            if (notAnalysedNames.length === 1) {
+              setSample(notAnalysedNames[0]);
+            } else {
+              setSample('');
+              var sampleTable = $('#sample-qc-table');
+              if (sampleTable && sampleTable.scrollIntoView)
+                sampleTable.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+          } : null),
         // The four count tiles below are informational (no threshold to fail);
         // render them green (ok) so the cohort snapshot reads as a status
         // board rather than a mix of coloured and plain boxes.
@@ -1249,7 +1279,14 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     orderSel.addEventListener('change', draw);
     draw();
     var nbad = m.thr() === null || m.thr() === undefined ? 0 : ids.filter(function (i) { return m.dir === 'below' ? vals[i] < m.thr() : vals[i] > m.thr(); }).length;
-    return card(m.label, (m.thr() !== null && m.thr() !== undefined ? 'threshold ' + fmt(m.thr()) + ' \u2013 ' : '') + m.hint + (nbad ? ' \u2013 ' + nbad + ' sample(s) flagged' : ''), box, nbad ? 'flagged' : '');
+    var metricCard = card(m.label, (m.thr() !== null && m.thr() !== undefined ? 'threshold ' + fmt(m.thr()) + ' \u2013 ' : '') + m.hint + (nbad ? ' \u2013 ' + nbad + ' sample(s) flagged' : ''), box, nbad ? 'flagged' : '');
+    var metricTitle = metricCard.querySelector('header h3');
+    if (metricTitle) metricTitle.appendChild(h('a', {
+      class: 'metric-help', href: '#tab=methods',
+      title: 'See the Methods tab for the metric definition',
+      'aria-label': 'Help: ' + m.label + ' definition', text: '(?)'
+    }));
+    return metricCard;
   }
 
   // ---- Cohort metrics ----
@@ -1552,6 +1589,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       cellClass.status = function (v) { return v === 'failed' || v === 'excluded' ? 'fail' : ''; };
     }
     var host = h('div');
+    host.id = 'sample-qc-table';
     root.appendChild(card('Sample QC table', 'Select a row to filter the other report views; select it again or choose All samples to clear.', host));
     tv = tableView(host, T, { filename: 'samples', pageSize: 20, sort: ['flags', 'desc'], labels: labels, render: render, cellClass: cellClass,
       wrap: ['reason'],
@@ -1721,11 +1759,71 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       text: called.text, hoverinfo: hoverMode, marker: { color: c.hit, size: 11, symbol: 'diamond' } });
     return data;
   }
+  function affectedRegionShape(P, theme) {
+    var px = asArray(P.px), affected = asArray(P.affected), hits = [];
+    for (var i = 0; i < Math.min(px.length, affected.length); i++) {
+      var x = Number(px[i]);
+      if (affected[i] && isFinite(x)) hits.push(x);
+    }
+    if (!hits.length) return null;
+    var dark = theme === 'dark';
+    return {
+      type: 'rect', xref: 'x', yref: 'paper',
+      x0: Math.min.apply(null, hits) - 0.4,
+      x1: Math.max.apply(null, hits) + 0.4,
+      y0: 0, y1: 1, layer: 'below',
+      fillcolor: dark ? 'rgba(230,103,103,0.12)' : 'rgba(227,73,72,0.08)',
+      line: { width: 0 }
+    };
+  }
+  function syncCallViewerXAxes(divs) {
+    var syncing = false;
+    function bind(source, handler, attempts) {
+      if (source.on) {
+        source._echoSyncHandler = handler;
+        source.on('plotly_relayout', handler);
+      } else if (attempts < 20) {
+        window.setTimeout(function () { bind(source, handler, attempts + 1); }, 25);
+      }
+    }
+    divs.forEach(function (source) {
+      if (source._echoSyncHandler && source.removeListener)
+        source.removeListener('plotly_relayout', source._echoSyncHandler);
+      var handler = function (eventData) {
+        if (syncing || !eventData) return;
+        var update = {};
+        if (eventData['xaxis.autorange'] === true) {
+          update['xaxis.autorange'] = true;
+        } else {
+          var lo = eventData['xaxis.range[0]'];
+          var hi = eventData['xaxis.range[1]'];
+          if (eventData['xaxis.range'] && eventData['xaxis.range'].length === 2) {
+            lo = eventData['xaxis.range'][0]; hi = eventData['xaxis.range'][1];
+          }
+          if (lo === undefined || hi === undefined) return;
+          update['xaxis.range[0]'] = lo;
+          update['xaxis.range[1]'] = hi;
+        }
+        syncing = true;
+        divs.forEach(function (target) {
+          if (target !== source && target.data && window.Plotly)
+            window.Plotly.relayout(target, update);
+        });
+        window.setTimeout(function () { syncing = false; }, 50);
+      };
+      bind(source, handler, 0);
+    });
+  }
   function viewerPlots(P, cov, ci, z, showRefs) {
     var px = asArray(P.px), xlab = asArray(P.xlab), group = asArray(P.gene_group || P.group);
     var refCov = P.ref_cov ? asArray(P.ref_cov).map(asArray) : [];
     var refZ = P.ref_z ? asArray(P.ref_z).map(asArray) : [];
     var test = asArray(P.test_log || P.test), ratio = asArray(P.ratio), lo = asArray(P.lo), hi = asArray(P.hi), zScore = asArray(P.z);
+    var zValues = zScore.concat.apply(zScore.slice(), refZ);
+    var zMax = zValues.reduce(function (m, v) {
+      var n = Number(v); return isFinite(n) ? Math.max(m, Math.abs(n)) : m;
+    }, 0);
+    var zLimit = Math.max(3.2, zMax * 1.1);
     var axis = function () {
       var low = Math.min.apply(null, px) - 0.8, high = Math.max.apply(null, px) + 0.8;
       return { tickmode: 'array', tickvals: px, ticktext: xlab, tickangle: -45, range: [low, high], showgrid: false };
@@ -1733,7 +1831,9 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     var tipCoverage = function (j) { return viewerTargetName(P, j); };
     plot(cov, function (t) {
       var data = viewerWindowTraces(P, t, test, refCov, tipCoverage, 6, showRefs);
-      return { data: data, layout: baseLayout(t, { ylab: 'log(coverage)', legend: true, xaxis: axis() }) };
+      var bg = affectedRegionShape(P, t);
+      return { data: data, layout: baseLayout(t, { ylab: 'log(coverage)', legend: true, xaxis: axis(),
+        shapes: bg ? [bg] : [] }) };
     });
     plot(ci, function (t) {
       var data = [], c = CHROME[t], groups = group.length ? uniq(group) : ['all'];
@@ -1754,52 +1854,172 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       var points = viewerWindowTraces(P, t, ratio, [], tipRatio, 0, false);
       points[0].name = 'Observed'; points[0].marker.size = 9; points[1].name = 'Affected';
       data = data.concat(points);
+      var bg = affectedRegionShape(P, t);
+      var shapes = [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1,
+        line: { color: c.axis, width: 1, dash: 'dash' } }];
+      if (bg) shapes.unshift(bg);
       return { data: data, layout: baseLayout(t, { ylab: 'Observed / expected', legend: true, xaxis: axis(),
-        shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1,
-          line: { color: c.axis, width: 1, dash: 'dash' } }] }) };
+        shapes: shapes }) };
     });
     plot(z, function (t) {
       var data = viewerWindowTraces(P, t, zScore, refZ, function (j) { return viewerTargetName(P, j); }, 5, showRefs);
       var c = CHROME[t];
+      var bg = affectedRegionShape(P, t);
+      var shapes = [
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 0, y1: 0,
+          line: { color: c.axis, width: 1, dash: 'dash' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 2, y1: 2,
+          line: { color: c.warn, width: 1, dash: 'dot' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: -2, y1: -2,
+          line: { color: c.warn, width: 1, dash: 'dot' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 3, y1: 3,
+          line: { color: c.hit, width: 1, dash: 'dash' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: -3, y1: -3,
+          line: { color: c.hit, width: 1, dash: 'dash' } }
+      ];
+      if (bg) shapes.unshift(bg);
       return { data: data, layout: baseLayout(t, { ylab: 'Z-score', legend: true, xaxis: axis(),
-        shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 0, y1: 0,
-          line: { color: c.axis, width: 1, dash: 'dash' } }] }) };
+        yaxis: { range: [-zLimit, zLimit] }, shapes: shapes }) };
     });
   }
-  function renderGeneTrack(host, P) {
+  function renderGeneTrack(host, P, plotDiv) {
     clear(host);
     var px = asArray(P.px), genes = asArray(P.gene), groups = asArray(P.gene_group || P.group), off = asArray(P.off);
-    if (!genes.length) {
+    if (!genes.length || !px.length) {
       host.appendChild(emptyNote('Gene annotations are not available for this call.'));
       return;
     }
+
+    // Build contiguous annotation runs. The group ID is authoritative because
+    // the same gene can occur on both sides of an off-target block.
     var runs = [], begin = 0;
     function keyAt(i) {
-      var grp = groups.length ? String(groups[i]) : '';
-      return grp + '\u0000' + String(genes[i] || '');
+      return String(groups.length ? groups[i] : '') + '\u0000' + String(genes[i] || '');
     }
     for (var i = 1; i <= genes.length; i++) {
       if (i === genes.length || keyAt(i) !== keyAt(begin)) {
         var name = String(genes[begin] || '').trim() || 'Unannotated target';
-        runs.push({ name: name, start: begin, end: i - 1, count: i - begin,
+        runs.push({ name: name, startIndex: begin, endIndex: i - 1, count: i - begin,
           off: !!off[begin], first: P.xlab && P.xlab[begin], last: P.xlab && P.xlab[i - 1] });
         begin = i;
       }
     }
-    var track = h('div', { class: 'gene-track', role: 'group', 'aria-label': 'Genes across the selected CNV window' });
+
+    var track = h('div', { class: 'gene-track', role: 'group', 'aria-label': 'Genes aligned to genomic target positions' });
     runs.forEach(function (r, idx) {
       var cls = 'gene-track-segment track-' + ['a', 'b', 'c', 'd', 'e', 'f'][idx % 6] + (r.off ? ' off' : '');
-      var range = r.first !== undefined && r.first !== null ? String(r.first) + (r.last !== undefined && r.last !== null && r.last !== r.first ? '–' + String(r.last) : '') : '';
-      var meta = r.count + ' target' + (r.count === 1 ? '' : 's') + (range ? ' · ' + range : '');
-      var segment = h('div', { class: cls, title: r.name + ' · ' + meta },
+      var range = r.first !== undefined && r.first !== null ? String(r.first) +
+        (r.last !== undefined && r.last !== null && r.last !== r.first ? '\u2013' + String(r.last) : '') : '';
+      var meta = r.count + ' target' + (r.count === 1 ? '' : 's') + (range ? ' \u00b7 ' + range : '');
+      track.appendChild(h('div', { class: cls, title: r.name + ' \u00b7 ' + meta,
+        'aria-label': r.name + ', ' + meta },
         h('div', { class: 'gene-track-name', text: r.name }),
-        h('div', { class: 'gene-track-meta', text: meta }));
-      segment.style.flexGrow = String(r.count);
-      track.appendChild(segment);
+        h('div', { class: 'gene-track-meta', text: meta })));
     });
     host.appendChild(track);
-  }
 
+    function align() {
+      if (!plotDiv || !host.isConnected || !plotDiv._fullLayout || !plotDiv._fullLayout.xaxis) return;
+      var axis = plotDiv._fullLayout.xaxis;
+      var range = axis.range;
+      if (!range || range.length !== 2) return;
+      var lo = Number(range[0]), hi = Number(range[1]);
+      if (!isFinite(lo) || !isFinite(hi) || hi === lo) return;
+
+      // Use the actual Plotly drag rectangle as the plotting-area geometry.
+      // _offset is an internal SVG coordinate and combining it with the graph
+      // div's client rectangle can shift the track when Plotly's SVG is scaled
+      // or nested in a padded card. The drag rectangle is already in viewport
+      // coordinates, exactly matching the visible data plotting region.
+      var plotArea = plotDiv.querySelector('.nsewdrag');
+      var areaRect = plotArea && plotArea.getBoundingClientRect();
+      if (!areaRect || !areaRect.width) {
+        // Fallback for Plotly builds that do not expose .nsewdrag.
+        var plotRect = plotDiv.getBoundingClientRect();
+        var offset = Number(axis._offset), length = Number(axis._length);
+        if (!isFinite(offset) || !isFinite(length) || length <= 0) return;
+        areaRect = { left: plotRect.left + offset, width: length };
+      }
+
+      var hostRect = host.getBoundingClientRect();
+      // Absolute children are positioned from the host's padding edge.
+      var trackLeft = areaRect.left - hostRect.left - host.clientLeft;
+      track.style.left = trackLeft + 'px';
+      track.style.width = areaRect.width + 'px';
+
+      var span = hi - lo;
+      runs.forEach(function (r, idx) {
+        var first = Number(px[r.startIndex]), last = Number(px[r.endIndex]);
+        if (!isFinite(first) || !isFinite(last)) return;
+        var prev = r.startIndex > 0 ? Number(px[r.startIndex - 1]) : first - (px.length > 1 ? Number(px[1]) - first : 1);
+        var next = r.endIndex < px.length - 1 ? Number(px[r.endIndex + 1]) : last + (px.length > 1 ? last - Number(px[px.length - 2]) : 1);
+        if (!isFinite(prev)) prev = first - 1;
+        if (!isFinite(next)) next = last + 1;
+        var x0 = r.startIndex === 0 ? first - (next - first) / 2 : (prev + first) / 2;
+        var x1 = r.endIndex === px.length - 1 ? last + (last - prev) / 2 : (last + next) / 2;
+        var el = track.children[idx];
+        var leftPx = ((x0 - lo) / span) * areaRect.width;
+        var rightPx = ((x1 - lo) / span) * areaRect.width;
+        el.style.left = leftPx + 'px';
+        el.style.width = Math.max(0, rightPx - leftPx) + 'px';
+      });
+    }
+
+    // Plotly's render() promise looks for this callback on the plot div.
+    // Keep it there (not only on the track host), so every newly loaded CNV
+    // call receives a final alignment pass after Plotly.react() completes.
+    // Defer one animation frame: Plotly may resolve its promise just before
+    // the browser has committed the final SVG/layout geometry.
+    function scheduleAlign() {
+      if (scheduleAlign.pending) return;
+      scheduleAlign.pending = true;
+      var raf = window.requestAnimationFrame || function (cb) { window.setTimeout(cb, 16); };
+      raf(function () {
+        scheduleAlign.pending = false;
+        if (host.isConnected && plotDiv && plotDiv._fullLayout) align();
+      });
+    }
+    host._echoGeneTrackSync = scheduleAlign;
+    if (plotDiv) plotDiv._echoGeneTrackSync = scheduleAlign;
+
+    function bindPlotlyEvents() {
+      if (!plotDiv || !plotDiv.on) return;
+      if (plotDiv._echoGeneTrackAfterPlot && plotDiv.removeListener)
+        plotDiv.removeListener('plotly_afterplot', plotDiv._echoGeneTrackAfterPlot);
+      if (plotDiv._echoGeneTrackRelayout && plotDiv.removeListener)
+        plotDiv.removeListener('plotly_relayout', plotDiv._echoGeneTrackRelayout);
+      plotDiv._echoGeneTrackAfterPlot = scheduleAlign;
+      plotDiv._echoGeneTrackRelayout = scheduleAlign;
+      plotDiv.on('plotly_afterplot', scheduleAlign);
+      plotDiv.on('plotly_relayout', scheduleAlign);
+      scheduleAlign();
+    }
+    if (plotDiv && plotDiv.on) bindPlotlyEvents();
+    else if (plotDiv) {
+      var tries = 0;
+      (function waitForPlotly() {
+        if (!host.isConnected) return;
+        if (plotDiv.on) bindPlotlyEvents();
+        else if (tries++ < 80) window.setTimeout(waitForPlotly, 25);
+      })();
+    }
+
+    // Also catch width changes caused by opening/reloading call details,
+    // expanding cards, or changing the browser viewport. Disconnect observers
+    // when the old call-detail DOM is discarded.
+    if (window.ResizeObserver) {
+      if (host._echoGeneTrackResizeObserver) host._echoGeneTrackResizeObserver.disconnect();
+      var resizeObserver = new ResizeObserver(scheduleAlign);
+      resizeObserver.observe(host);
+      if (plotDiv) resizeObserver.observe(plotDiv);
+      host._echoGeneTrackResizeObserver = resizeObserver;
+    } else {
+      if (host._echoGeneTrackResize) window.removeEventListener('resize', host._echoGeneTrackResize);
+      host._echoGeneTrackResize = scheduleAlign;
+      window.addEventListener('resize', scheduleAlign);
+    }
+    scheduleAlign();
+  }
 
   tab('calls', 'CNV calls', function () { return true; }, function (root) {
     var stack = h('div', { class: 'stack' });
@@ -1936,8 +2156,9 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       body.appendChild(card(IS_ECHO ? 'Observed / expected with 95% beta-binomial interval' : 'Observed / expected with 95% negative-binomial interval', null, ciBox));
       body.appendChild(card('Z-score vs references', null, zBox));
       function drawPanels() {
-        renderGeneTrack(stripBox, P);
+        renderGeneTrack(stripBox, P, covBox);
         viewerPlots(P, covBox, ciBox, zBox, refsChk.checked);
+        syncCallViewerXAxes([covBox, ciBox, zBox]);
       }
       refsChk.addEventListener('change', drawPanels);
       drawPanels();
@@ -2142,6 +2363,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       h('p', { text: IS_ECHO
         ? 'Observed / expected is the test count divided by the count expected from the reference aggregate; the grey ribbon is the 95% interval of the beta-binomial model (overdispersion phi fitted by ExomeDepth). The z-score uses the model’s own standard deviation, so reference samples should scatter around 0.'
         : 'Observed / expected is the test count divided by the count expected from the reference aggregate; the grey ribbon is the 95% predictive interval of the negative-binomial model. The z-score is measured against the reference distribution, so reference samples should scatter around 0.' }),
+      h('p', { text: 'The horizontal z-score guides at ±2 and ±3 are visual reference levels only; they are not independent CNV-calling thresholds or clinical significance criteria.' }),
       h('p', { text: 'If more background exons than expected fall outside the interval, the call is flagged “check” (poorly calibrated reference set).' }))));
     // 4. Calling model
     stack.appendChild(detailCard(IS_ECHO ? 'How ECHO works' : 'How CANOPE works', null, h('div', { class: 'prose' },
