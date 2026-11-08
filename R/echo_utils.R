@@ -651,6 +651,12 @@ data.table::setnames(bed, 1:3, c("chrom", "start", "end"))
 if (ncol(bed)  >= 4) data.table::setnames(bed, 4, "name") else bed$name  <- NA_character_
 issues <- list()
 if (verbose) message("[INFO] Validating BED file: ", bed_path, " (", nrow(bed), " rows)")
+chrom_chr <- trimws(as.character(bed$chrom))
+bad_chrom <- which(is.na(chrom_chr) | !nzchar(chrom_chr) | chrom_chr == ".")
+if (length(bad_chrom)) {
+    issues$invalid_chromosome <- as.data.frame(bed[bad_chrom, ])
+    if (verbose) message("[WARNING] ", length(bad_chrom), " BED row(s) have a missing or blank chromosome.")
+}
 start_num <- suppressWarnings(as.numeric(as.character(bed$start)))
 end_num <- suppressWarnings(as.numeric(as.character(bed$end)))
 bad_order <- if (isFALSE(bed_zero_based)) {

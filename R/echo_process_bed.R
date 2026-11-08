@@ -127,19 +127,17 @@ gene_names <- vapply(seq_along(parts_list), function(i) {
   parts <- parts_list[[i]]
   parts <- parts[parts != ""]
 
-  # Structured annotations take precedence over positional splitting. This
-  # prevents SCG5_GREM1 from being split into SCG5 / GREM1 and extracts BRCA2
-  # from NM_000059_BRCA2_ex11-style names.
-  if (!is.na(parsed_symbols[i]) && nzchar(parsed_symbols[i])) {
-    return(parsed_symbols[i])
-  }
-
+  # Explicit user configuration takes precedence. Without an override,
+  # structured parsing preserves fused/hyphenated/underscored gene symbols.
   keep_idx <- NULL
   if (!is.null(gene_name_keep)) {
     keep_idx <- parse_keep_indices(gene_name_keep, length(parts))
   } else if (!is.null(gene_field_index)) {
     idx <- as.numeric(gene_field_index)
     if (!is.na(idx)) keep_idx <- idx
+  }
+  if (is.null(keep_idx) && !is.na(parsed_symbols[i]) && nzchar(parsed_symbols[i])) {
+    return(parsed_symbols[i])
   }
   if (!is.null(keep_idx)) {
     valid_idx <- keep_idx[keep_idx <= length(parts) & keep_idx >= 1]

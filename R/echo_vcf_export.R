@@ -38,6 +38,24 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
       stop("[ERROR] CNV calls are missing required VCF column(s): ",
            paste(missing, collapse = ", "))
     }
+    start_num <- suppressWarnings(as.numeric(as.character(cnv_calls$Start)))
+    end_num <- suppressWarnings(as.numeric(as.character(cnv_calls$End)))
+    bad_coord <- !is.finite(start_num) | !is.finite(end_num) |
+      start_num != floor(start_num) | end_num != floor(end_num) |
+      start_num < 1 | end_num < start_num
+    if (any(bad_coord)) {
+      stop("[ERROR] VCF coordinates must be finite positive integers with End >= Start; invalid row(s): ",
+           paste(which(bad_coord), collapse = ", "))
+    }
+    cnv_calls$Start <- as.integer(start_num)
+    cnv_calls$End <- as.integer(end_num)
+    if (anyNA(cnv_calls$Chromosome) || any(!nzchar(trimws(as.character(cnv_calls$Chromosome)))))
+      stop("[ERROR] CNV Chromosome values must be non-empty.")
+    type_norm <- tolower(trimws(as.character(cnv_calls$Type)))
+    valid_type <- type_norm %in% c("del", "deletion", "<del>", "dup", "duplication", "<dup>")
+    if (anyNA(type_norm) || any(!valid_type))
+      stop("[ERROR] Unsupported CNV Type value(s): ", paste(unique(type_norm[is.na(type_norm) | !valid_type]), collapse = ", "),
+           ". Supported types are DEL/deletion and DUP/duplication.")
   }
 
   if (!is.null(sample_name)) {
@@ -74,6 +92,24 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     }
   }
 
+  # VCF metadata values are quoted/escaped; INFO string values use percent
+  # encoding for reserved delimiters so user-provided labels cannot corrupt fields.
+  meta_escape <- function(x) {
+    # Replace characters that require VCF meta-header quoting/escaping.
+    x <- gsub("\\", "_", as.character(x), fixed = TRUE)
+    gsub('"', "_", x, fixed = TRUE)
+  }
+  info_escape <- function(x) {
+    x <- enc2utf8(as.character(x))
+    x <- gsub("%", "%25", x, fixed = TRUE)
+    x <- gsub(";", "%3B", x, fixed = TRUE)
+    x <- gsub("=", "%3D", x, fixed = TRUE)
+    x <- gsub(",", "%2C", x, fixed = TRUE)
+    x <- gsub("\t", "%09", x, fixed = TRUE)
+    x <- gsub("\n", "%0A", x, fixed = TRUE)
+    x <- gsub("\r", "%0D", x, fixed = TRUE)
+    x
+  }
   safe_char <- function(x, default = ".") {
     if (length(x) == 0L || is.na(x[1]) || as.character(x[1]) == "NA") {
       default
@@ -86,8 +122,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   meta <- c(
     "##fileformat=VCFv4.2",
     paste0("##fileDate=", format(Sys.Date(), "%Y%m%d")),
-    paste0("##source=", source),
-    paste0("##reference=", reference),
+    paste0('##source="', meta_escape(source), '"'),
+    paste0('##reference="', meta_escape(reference), '"'),
     '##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant (DUP/DEL)">',
     '##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Difference in length between REF and ALT alleles">',
     '##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the variant described in this record">',
@@ -133,7 +169,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   multi_sample <- length(vcf_samples) > 1L
   make_sample_field <- function(row_df, sv_type) {
     if (nrow(row_df) == 0L) {
-      return(if (multi_sample) "0/0:2:1.00" else "./.:.:.")
+      # No exact call is not evidence of a confident reference genotype.
+      return("./.:.:.")
     }
     ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
     if (!length(ratio) || !is.finite(ratio)) ratio <- 1
@@ -163,8 +200,10 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     chrom   <- as.character(key_row$Chromosome)
     start   <- as.integer(key_row$Start)
     end     <- as.integer(key_row$End)
-    cnv_type <- tolower(as.character(key_row$Type))
-    is_dup  <- grepl("dup", cnv_type)
+    cnv_type <- tolower(trimws(as.character(key_row$Type)))
+    is_dup <- cnv_type %in% c("dup", "duplication", "<dup>")
+    is_del <- cnv_type %in% c("del", "deletion", "<del>")
+    if (!is_dup && !is_del) stop("[ERROR] Unsupported CNV Type while building VCF: ", cnv_type)
     alt     <- if (is_dup) "<DUP>" else "<DEL>"
     sv_type <- if (is_dup) "DUP" else "DEL"
     sv_len  <- if (is_dup) end - start + 1L else -(end - start + 1L)
@@ -187,11 +226,12 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
                     paste0("END=", end))
 
     conf <- safe_char(representative$Confidence)
-    if (conf != ".") info_items <- c(info_items, paste0("CONFIDENCE=", conf))
+    if (conf != ".") info_items <- c(info_items, paste0("CONFIDENCE=", info_escape(conf)))
     if ("Comparator.name" %in% names(representative)) {
       refs_val <- safe_char(representative$Comparator.name, "")
       if (nzchar(refs_val)) {
         refs_val <- gsub(",\\s*", ",", refs_val)
+        refs_val <- paste(vapply(strsplit(refs_val, ",", fixed = TRUE)[[1]], info_escape, character(1)), collapse = ",")
         info_items <- c(info_items, paste0("REFS=", refs_val))
       }
     }

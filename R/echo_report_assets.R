@@ -1776,6 +1776,58 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       line: { width: 0 }
     };
   }
+  // Filled-scatter form of the affected-region overlay, used by panels where
+  // the overlay must sit BETWEEN two trace groups -- e.g. on top of the
+  // confidence-interval band but below the ratio points. Plotly shapes are
+  // either above or below every trace, so a paper-space shape cannot be
+  // sandwiched between the band and the points; a scatter polygon can, simply
+  // by being pushed onto the data array between them.
+  // `yMin` / `yMax` should cover the panel's full visible y-range (use
+  // ciYRange()) so the rectangle spans the entire height, matching the
+  // paper-space shape form produced by affectedRegionShape().
+  function affectedRegionTrace(P, theme, yMin, yMax) {
+    var px = asArray(P.px), affected = asArray(P.affected), hits = [];
+    for (var i = 0; i < Math.min(px.length, affected.length); i++) {
+      var x = Number(px[i]);
+      if (affected[i] && isFinite(x)) hits.push(x);
+    }
+    if (!hits.length) return null;
+    var dark = theme === 'dark';
+    var x0 = Math.min.apply(null, hits) - 0.4;
+    var x1 = Math.max.apply(null, hits) + 0.4;
+    return {
+      type: 'scatter', mode: 'lines',
+      x: [x0, x1, x1, x0, x0],
+      y: [yMin, yMin, yMax, yMax, yMin],
+      fill: 'toself',
+      fillcolor: dark ? 'rgba(230,103,103,0.18)' : 'rgba(227,73,72,0.18)',
+      line: { width: 0 },
+      hoverinfo: 'skip',
+      showlegend: false,
+      name: 'Affected region'
+    };
+  }
+  // Visible y-axis range of the CI panel: the min/max of the band bounds (lo,
+  // hi) and the ratio values, plus the y=1 reference line, with a small
+  // padding. Used both as the explicit yaxis.range and as the vertical extent
+  // of the affected-region trace so the overlay covers the full visible
+  // height while edge points stay on screen.
+  function ciYRange(lo, hi, ratio) {
+    var min = Infinity, max = -Infinity;
+    [lo, hi, ratio, [1]].forEach(function (arr) {
+      asArray(arr).forEach(function (v) {
+        var n = Number(v);
+        if (isFinite(n)) {
+          if (n < min) min = n;
+          if (n > max) max = n;
+        }
+      });
+    });
+    if (!isFinite(min) || !isFinite(max)) return [0, 2];
+    var span = max - min;
+    var pad = span > 0 ? span * 0.1 : 0.1;
+    return [min - pad, max + pad];
+  }
   function syncCallViewerXAxes(divs) {
     var syncing = false;
     function bind(source, handler, attempts) {
@@ -1837,6 +1889,11 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     });
     plot(ci, function (t) {
       var data = [], c = CHROME[t], groups = group.length ? uniq(group) : ['all'];
+      // Lock the y-axis to the data range so the affected-region trace (a
+      // scatter polygon in data coordinates, not a paper-space shape) can
+      // span the full visible height.
+      var yRange = ciYRange(lo, hi, ratio);
+      // 1. Draw the confidence-interval band FIRST.
       groups.forEach(function (g, k) {
         var ii = range(px.length).filter(function (j) { return group.length ? group[j] === g : true; });
         if (!ii.length) return;
@@ -1846,6 +1903,13 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         data.push({ type: 'scatter', mode: 'lines', x: xs, y: band(hi), line: { width: 0 }, fill: 'tonexty', fillcolor: c.grid,
           name: '95% interval', showlegend: k === 0, hoverinfo: 'skip' });
       });
+      // 2. Then the translucent red affected-region overlay, drawn ON TOP of
+      //    the band. A paper-space shape (layer: 'below') would hide under the
+      //    band traces; a scatter polygon placed after the band traces paints
+      //    over the band while the points (added next) stay above it.
+      var affected = affectedRegionTrace(P, t, yRange[0], yRange[1]);
+      if (affected) data.push(affected);
+      // 3. Then the coverage points/lines remain visible above both.
       var tipRatio = function (j) {
         return viewerTargetName(P, j) + '<br>observed ' + fmt(P.observed && P.observed[j]) +
           '<br>expected ' + fmt(P.expected && P.expected[j]) + '<br>ratio ' + fmt(ratio[j]) +
@@ -1854,12 +1918,10 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       var points = viewerWindowTraces(P, t, ratio, [], tipRatio, 0, false);
       points[0].name = 'Observed'; points[0].marker.size = 9; points[1].name = 'Affected';
       data = data.concat(points);
-      var bg = affectedRegionShape(P, t);
       var shapes = [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1,
         line: { color: c.axis, width: 1, dash: 'dash' } }];
-      if (bg) shapes.unshift(bg);
       return { data: data, layout: baseLayout(t, { ylab: 'Observed / expected', legend: true, xaxis: axis(),
-        shapes: shapes }) };
+        yaxis: { range: yRange }, shapes: shapes }) };
     });
     plot(z, function (t) {
       var data = viewerWindowTraces(P, t, zScore, refZ, function (j) { return viewerTargetName(P, j); }, 5, showRefs);
@@ -1980,6 +2042,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       });
     }
     host._echoGeneTrackSync = scheduleAlign;
+    host._echoGeneTrackPlotDiv = plotDiv;
     if (plotDiv) plotDiv._echoGeneTrackSync = scheduleAlign;
 
     function bindPlotlyEvents() {
@@ -2007,16 +2070,25 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     // Also catch width changes caused by opening/reloading call details,
     // expanding cards, or changing the browser viewport. Disconnect observers
     // when the old call-detail DOM is discarded.
+    function resizeAndAlign() {
+      if (!host.isConnected) return;
+      if (plotDiv && window.Plotly && Plotly.Plots && Plotly.Plots.resize) {
+        try {
+          var result = Plotly.Plots.resize(plotDiv);
+          if (result && typeof result.then === 'function') result.then(scheduleAlign, scheduleAlign);
+          else scheduleAlign();
+        } catch (e) { scheduleAlign(); }
+      } else scheduleAlign();
+    }
     if (window.ResizeObserver) {
       if (host._echoGeneTrackResizeObserver) host._echoGeneTrackResizeObserver.disconnect();
-      var resizeObserver = new ResizeObserver(scheduleAlign);
+      var resizeObserver = new ResizeObserver(resizeAndAlign);
       resizeObserver.observe(host);
-      if (plotDiv) resizeObserver.observe(plotDiv);
       host._echoGeneTrackResizeObserver = resizeObserver;
     } else {
       if (host._echoGeneTrackResize) window.removeEventListener('resize', host._echoGeneTrackResize);
-      host._echoGeneTrackResize = scheduleAlign;
-      window.addEventListener('resize', scheduleAlign);
+      host._echoGeneTrackResize = resizeAndAlign;
+      window.addEventListener('resize', resizeAndAlign);
     }
     scheduleAlign();
   }
@@ -2120,7 +2192,27 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     apply();
   });
 
+  function disposeGeneTrackTree(root) {
+    if (!root) return;
+    var nodes = [];
+    if (root.matches && root.matches('.gene-track-container')) nodes.push(root);
+    if (root.querySelectorAll) nodes = nodes.concat(Array.prototype.slice.call(root.querySelectorAll('.gene-track-container')));
+    nodes.forEach(function (node) {
+      if (node._echoGeneTrackResizeObserver) { node._echoGeneTrackResizeObserver.disconnect(); node._echoGeneTrackResizeObserver = null; }
+      if (node._echoGeneTrackResize) { window.removeEventListener('resize', node._echoGeneTrackResize); node._echoGeneTrackResize = null; }
+      var plot = node._echoGeneTrackPlotDiv;
+      if (plot) {
+        if (plot._echoGeneTrackAfterPlot && plot.removeListener) plot.removeListener('plotly_afterplot', plot._echoGeneTrackAfterPlot);
+        if (plot._echoGeneTrackRelayout && plot.removeListener) plot.removeListener('plotly_relayout', plot._echoGeneTrackRelayout);
+        delete plot._echoGeneTrackAfterPlot; delete plot._echoGeneTrackRelayout; delete plot._echoGeneTrackSync;
+        if (window.Plotly && Plotly.purge) { try { Plotly.purge(plot); } catch (e) {} }
+      }
+      delete node._echoGeneTrackSync;
+    });
+  }
+
   function showCallDetail(host, i) {
+    disposeGeneTrackTree(host);
     clear(host);
     var id = callId(i), P = PLOTS[String(id)];
     var head = h('div', { class: 'detail-head' },
@@ -2161,10 +2253,15 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         syncCallViewerXAxes([covBox, ciBox, zBox]);
       }
       refsChk.addEventListener('change', drawPanels);
-      drawPanels();
+      stripBox._echoGeneTrackDrawPanels = drawPanels;
     }
     var detailGrid = kvPairs.length ? h('div', { class: 'grid g-main' }, h('div', { class: 'stack' }, body), kv(kvPairs)) : body;
     host.appendChild(card('Call details', 'CNV.ID ' + id, h('div', null, head, detailGrid)));
+    // Plotly must render only after its containers are connected and measurable.
+    if (P) {
+      var trackHost = host.querySelector('.gene-track-container');
+      if (trackHost && trackHost._echoGeneTrackDrawPanels) trackHost._echoGeneTrackDrawPanels();
+    }
     applyGlobalAlertFilter();
     host.scrollIntoView && host.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }

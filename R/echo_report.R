@@ -58,9 +58,10 @@ generate_report <- function(summary_rdata, qc_metrics_file, output_dir,
   if (!length(samples)) { message("[INFO] No CNV calls -- skipping per-sample reports."); return(invisible(NULL)) }
   out_files <- character()
   for (s in samples) {
-    sample_dir <- file.path(output_dir, sanitize_filename(s))
+    safe_s <- paste0(substr(sanitize_filename(s), 1L, 80L), "_", substr(sprintf("%08x", as.integer(sum(utf8ToInt(enc2utf8(s)) * seq_along(utf8ToInt(enc2utf8(s)))) %% 2147483647)), 1L, 8L))
+    sample_dir <- file.path(output_dir, safe_s)
     dir.create(sample_dir, recursive = TRUE, showWarnings = FALSE)
-    out_file <- file.path(sample_dir, paste0("ECHO_report_", sanitize_filename(s), ".html"))
+    out_file <- file.path(sample_dir, paste0("ECHO_report_", safe_s, ".html"))
     payload <- build_report_payload(rd, settings, config, log_file, prefix, focus = s)
     report_html(payload, settings, out_file)
     out_files <- c(out_files, out_file)
@@ -763,7 +764,21 @@ restrict_payload_to_sample <- function(p, s) {
   p$ref_bams <- NULL
   p$config_yaml <- NULL
   p$meta$n_samples <- 1L
+  p$meta$n_analysed <- 1L
+  p$meta$n_calls <- p$calls$n
+  p$meta$samples_requested <- 1L
+  p$meta$samples_called <- if (p$calls$n > 0L) 1L else 0L
+  p$meta$samples_with_calls <- if (p$calls$n > 0L) 1L else 0L
   p$meta$focus <- s
+  # Summary counters are derived from the filtered payload, not copied from
+  # the original cohort report.
+  if (is.list(p$summary)) {
+    for (nm in intersect(c("samples_requested", "samples_analysed", "samples_called",
+                           "samples_with_calls", "n_samples", "n_analysed"), names(p$summary)))
+      p$summary[[nm]] <- if (nm %in% c("samples_called", "samples_with_calls")) as.integer(p$calls$n > 0L) else 1L
+    if ("calls" %in% names(p$summary)) p$summary$calls <- p$calls$n
+    if ("n_calls" %in% names(p$summary)) p$summary$n_calls <- p$calls$n
+  }
   p
 }
 

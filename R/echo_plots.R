@@ -313,15 +313,18 @@ create_ci_plot <- function(pd) {
     ci <- data.frame(px = pd$px, gene_group = pd$gene_group, ratio = pd$ratio, lo = pd$lo, hi = pd$hi,
                      is_affected = factor(pd$affected, levels = c(FALSE, TRUE), labels = c("Observed", "Affected")))
     bg <- affected_bg(pd)
-    p <- ggplot2::ggplot(ci, ggplot2::aes(x = px))
+    p <- ggplot2::ggplot(ci, ggplot2::aes(x = px)) +
+        # Draw the confidence interval first. The affected-region shading must
+        # be added afterwards; otherwise the ribbon is painted over it and the
+        # red CNV overlay disappears in the CI panel.
+        ggplot2::geom_ribbon(data = interval_bands(pd), ggplot2::aes(ymin = lo, ymax = hi, group = gene_group),
+                             fill = "grey80", colour = NA)
     if (!is.null(bg)) {
         p <- p + ggplot2::geom_rect(data = bg,
             ggplot2::aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-            inherit.aes = FALSE, fill = "#E34948", alpha = 0.07)
+            inherit.aes = FALSE, fill = "#E34948", alpha = 0.18)
     }
     p <- p +
-        ggplot2::geom_ribbon(data = interval_bands(pd), ggplot2::aes(ymin = lo, ymax = hi, group = gene_group),
-                             fill = "grey80", colour = NA) +
         ggplot2::geom_point(ggplot2::aes(y = ratio, color = is_affected, shape = is_affected), size = 3.5) +
         ggplot2::scale_shape_manual(values = c("Observed" = 16, "Affected" = 17), guide = "none") +
         ggplot2::scale_color_manual(
