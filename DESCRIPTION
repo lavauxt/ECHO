@@ -33,7 +33,8 @@ Imports:
     Rsamtools,
     Biostrings,
     GenomeInfoDb,
-    BiocGenerics
+    BiocGenerics,
+    vcfR
 Suggests:
     testthat (>= 3.0.0),
     withr,

@@ -396,19 +396,24 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
       })
 
       if (cfg$settings$pca_plot %||% TRUE) {
-        tryCatch({
-          objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
-          counts       <- objs$counts
-          sample_names <- objs$sample_names
-          pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
-          group_info   <- NULL
-          if (!is.null(sample_table) && file.exists(sample_table)) {
-            sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
-            group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
-          }
-          plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
-        }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING")
-        )
+        # PCA is counted in steps_total, so give it its own "Step k/N" log
+        # lines. It used to run unlogged between steps 1 and 2, leaving the
+        # counter one short (a 7-step run ended at "Step 6/7 completed").
+        run_step("Generating PCA plot", {
+          tryCatch({
+            objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
+            counts       <- objs$counts
+            sample_names <- objs$sample_names
+            pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
+            group_info   <- NULL
+            if (!is.null(sample_table) && file.exists(sample_table)) {
+              sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
+              group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
+            }
+            plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
+          }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING")
+          )
+        })
       }
 
       run_step("Running QC metrics", {

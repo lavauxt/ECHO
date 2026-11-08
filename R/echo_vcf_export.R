@@ -1,10 +1,16 @@
 #' Export CNV calls to VCF format
 #'
-#' Converts ECHO CNV calls to VCF 4.2. When `sample_name` is NULL, a single
-#' multi-sample VCF is written. `sample_names` can be supplied to retain
-#' analysis samples that have no CNV records in the multi-sample header.
-#' Empty calls are supported: a valid header-only VCF is written instead of
-#' silently returning without creating a file.
+#' Converts ECHO CNV calls to a plain-text VCF 4.2 file. When
+#' `sample_name` is NULL, a single multi-sample VCF is written. `sample_names`
+#' can be supplied to retain analysis samples that have no CNV records in the
+#' multi-sample header. Empty calls are supported: a valid header-only VCF is
+#' written instead of silently returning without creating a file.
+#'
+#' The file is written directly, without \pkg{vcfR}: vcfR exports no vcfR
+#' object constructor (`new_vcf()` does not exist) and its `write.vcf()`
+#' always opens a `gzfile()` connection, i.e. it gzips the output even when
+#' the requested path ends in `.vcf`, which would silently break the
+#' plain-text contract of `output_vcf`.
 #'
 #' @param cnv_calls Data frame of CNV calls. For non-empty input it must contain
 #'   `Sample`, `Chromosome`, `Start`, `End`, `Type` and the fields used in INFO.
@@ -76,7 +82,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     }
   }
 
-  header <- c(
+  # ---- meta header lines (##) ----
+  meta <- c(
     "##fileformat=VCFv4.2",
     paste0("##fileDate=", format(Sys.Date(), "%Y%m%d")),
     paste0("##source=", source),
@@ -97,14 +104,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     '##ALT=<ID=DEL,Description="Deletion">'
   )
 
-  fixed_columns <- c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")
-  if (length(vcf_samples) > 0L) {
-    header <- c(header, paste(c(fixed_columns, "FORMAT", vcf_samples), collapse = "\t"))
-  } else {
-    # VCFs without sample columns end at INFO; do not emit a FORMAT-only column.
-    header <- c(header, paste(fixed_columns, collapse = "\t"))
-  }
-
+  # ---- key_df ----
   key_df <- if (nrow(cnv_calls) > 0L) {
     unique(data.frame(
       Chromosome = as.character(cnv_calls$Chromosome),
@@ -133,8 +133,6 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
   multi_sample <- length(vcf_samples) > 1L
   make_sample_field <- function(row_df, sv_type) {
     if (nrow(row_df) == 0L) {
-      # Multi-sample VCF: absence of a call at this locus is homozygous reference.
-      # Single-sample VCF: only called loci are emitted, so this is missing.
       return(if (multi_sample) "0/0:2:1.00" else "./.:.:.")
     }
     ratio <- suppressWarnings(as.numeric(row_df$Reads.ratio[1]))
@@ -149,17 +147,27 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     paste0(gt, ":", cn, ":", format(round(ratio, 2), nsmall = 2, trim = TRUE))
   }
 
-  records <- character(nrow(key_df))
-  for (i in seq_len(nrow(key_df))) {
+  n_recs <- nrow(key_df)
+  n_samp <- length(vcf_samples)
+
+  chrom_vec <- character(n_recs)
+  pos_vec   <- integer(n_recs)
+  id_vec    <- character(n_recs)
+  alt_vec   <- character(n_recs)
+  info_vec  <- character(n_recs)
+  sample_mat <- matrix("", nrow = n_recs, ncol = max(n_samp, 0))
+  if (n_samp > 0) colnames(sample_mat) <- vcf_samples
+
+  for (i in seq_len(n_recs)) {
     key_row <- key_df[i, , drop = FALSE]
-    chrom <- as.character(key_row$Chromosome)
-    start <- as.integer(key_row$Start)
-    end <- as.integer(key_row$End)
+    chrom   <- as.character(key_row$Chromosome)
+    start   <- as.integer(key_row$Start)
+    end     <- as.integer(key_row$End)
     cnv_type <- tolower(as.character(key_row$Type))
-    is_dup <- grepl("dup", cnv_type)
-    alt <- if (is_dup) "<DUP>" else "<DEL>"
+    is_dup  <- grepl("dup", cnv_type)
+    alt     <- if (is_dup) "<DUP>" else "<DEL>"
     sv_type <- if (is_dup) "DUP" else "DEL"
-    sv_len <- if (is_dup) end - start + 1L else -(end - start + 1L)
+    sv_len  <- if (is_dup) end - start + 1L else -(end - start + 1L)
 
     row_hits <- cnv_calls[
       as.character(cnv_calls$Chromosome) == chrom &
@@ -194,27 +202,80 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
       paste0(key, "=", f(v))
     }
     info_items <- c(info_items,
-                    info_value("Correlation", "CORR"), info_value("N.comp", "NCOMP"), info_value("BF", "BF"),
-                    info_value("Reads.ratio", "READS_RATIO", function(v) round(as.numeric(v), 2)))
+                    info_value("Correlation", "CORR"),
+                    info_value("N.comp", "NCOMP"),
+                    info_value("BF", "BF"),
+                    info_value("Reads.ratio", "READS_RATIO",
+                               function(v) round(as.numeric(v), 2)))
 
-    sample_fields <- vapply(vcf_samples, function(s) {
-      sample_row <- row_hits[as.character(row_hits$Sample) == s, , drop = FALSE]
-      make_sample_field(sample_row, sv_type)
-    }, character(1))
+    chrom_vec[i] <- chrom
+    pos_vec[i]   <- start
+    id_vec[i]    <- id
+    alt_vec[i]   <- alt
+    info_vec[i]  <- paste(info_items, collapse = ";")
 
-    record_fields <- c(chrom, start, id, "N", alt, ".", "PASS",
-                       paste(info_items, collapse = ";"))
-    if (length(vcf_samples) > 0L) {
-      record_fields <- c(record_fields, "GT:CN:FR", sample_fields)
+    if (n_samp > 0) {
+      for (s in vcf_samples) {
+        sample_row <- row_hits[as.character(row_hits$Sample) == s, , drop = FALSE]
+        sample_mat[i, s] <- make_sample_field(sample_row, sv_type)
+      }
     }
-    records[i] <- paste(record_fields, collapse = "\t")
+  }
+
+  # ---- fixed fields ----
+  if (n_recs > 0L) {
+    fix <- data.frame(
+      CHROM  = chrom_vec,
+      POS    = pos_vec,
+      ID     = id_vec,
+      REF    = rep("N", n_recs),
+      ALT    = alt_vec,
+      QUAL   = rep(".", n_recs),
+      FILTER = rep("PASS", n_recs),
+      INFO   = info_vec,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    fix <- data.frame(
+      CHROM = character(0), POS = integer(0), ID = character(0),
+      REF   = character(0), ALT = character(0),
+      QUAL  = character(0), FILTER = character(0), INFO = character(0),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # ---- genotype fields ----
+  gt <- data.frame(FORMAT = if (n_recs > 0L) rep("GT:CN:FR", n_recs) else character(0),
+                   stringsAsFactors = FALSE)
+  if (n_samp > 0) {
+    for (s in vcf_samples) {
+      gt[[s]] <- if (n_recs > 0L) sample_mat[, s] else character(0)
+    }
   }
 
   dir.create(dirname(output_vcf), showWarnings = FALSE, recursive = TRUE)
-  con <- file(output_vcf, open = "wt")
+
+  # ---- write the file (plain-text VCF 4.2) ----
+  # Written directly: vcfR exports no object constructor (new_vcf() does not
+  # exist) and vcfR::write.vcf() always opens a gzfile() connection, i.e. it
+  # gzips the output even for a ".vcf" file name. Writing the bytes ourselves
+  # keeps the promised plain-text VCF at exactly `output_vcf` and makes the
+  # output identical on every OS (UTF-8, LF line endings).
+  header_cols <- c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")
+  if (n_samp > 0L) header_cols <- c(header_cols, "FORMAT", vcf_samples)
+  lines <- c(meta, paste(header_cols, collapse = "\t"))
+  if (n_recs > 0L) {
+    body <- cbind(fix, FORMAT = gt$FORMAT)
+    if (n_samp > 0L) {
+      for (s in vcf_samples) body[[s]] <- gt[[s]]
+    }
+    lines <- c(lines, apply(body, 1L, paste, collapse = "\t"))
+  }
+  txt <- paste0(paste(lines, collapse = "\n"), "\n")
+  con <- file(output_vcf, open = "wb")
   on.exit(close(con), add = TRUE)
-  writeLines(header, con, useBytes = TRUE)
-  if (length(records)) writeLines(records, con, useBytes = TRUE)
-  message("[INFO] Wrote ", length(records), " CNV record(s) to ", output_vcf)
+  writeBin(charToRaw(enc2utf8(txt)), con)
+
+  message("[INFO] Wrote ", n_recs, " CNV record(s) to ", output_vcf)
   invisible(output_vcf)
 }
