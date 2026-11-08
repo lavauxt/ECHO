@@ -225,8 +225,8 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .alert.warn .ico, .alert.warn .ic, .alert.warn .ttl, .alert.warning .ico, .alert.warning .ic, .alert.warning .ttl { color: var(--warn); }
 .alert.ok { border: 1px solid var(--c-high); border-left: 4px solid var(--c-high); background: var(--ok-soft); }
 .alert.ok .ico, .alert.ok .ic { color: var(--ok-ink); }
-.alert.info { border: 1px solid var(--accent); border-left: 4px solid var(--accent); background: var(--info-soft); }
-.alert.info .ico, .alert.info .ic, .alert.info .ttl { color: var(--accent); }
+.alert.info { border: 1px solid var(--c-high); border-left: 4px solid var(--c-high); background: var(--ok-soft); }
+.alert.info .ico, .alert.info .ic, .alert.info .ttl { color: var(--ok-ink); }
 .alert a { cursor: pointer; }
 
 /* Alert content is controlled by the single global severity selector. */
@@ -238,7 +238,7 @@ table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .chip.ok { color: var(--ok-ink); background: var(--ok-soft); border-color: var(--c-high); }
 .chip.warn, .chip.warning { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
 .chip.fail, .chip.error { color: var(--fail); background: var(--fail-soft); border-color: var(--fail); }
-.chip.info { color: var(--accent); background: var(--info-soft); border-color: var(--accent); }
+.chip.info { color: var(--ok-ink); background: var(--ok-soft); border-color: var(--c-high); }
 .chip.cat { font-weight: 500; }
 .chip.type.DEL, .chip.DEL { color: var(--c-del); border-color: var(--c-del); background: transparent; }
 .chip.type.DUP, .chip.DUP { color: var(--c-dup); border-color: var(--c-dup); background: transparent; }
@@ -346,9 +346,13 @@ dialog.lightbox img { max-width: 96vw; max-height: 92vh; background: #fff; borde
 .overview-not-analysed { margin-top:12px; padding:11px 12px; border:1px solid var(--fail); border-left:4px solid var(--fail); border-radius:8px; background:var(--fail-bg); color:var(--text); }
 .overview-not-analysed strong { display:block; margin-bottom:5px; color:var(--fail); font-size:12px; }
 .overview-not-analysed ul { margin:0; padding-left:18px; display:flex; flex-wrap:wrap; gap:3px 22px; font-size:12px; }
-.global-notice { max-width:100%; padding:8px 0 14px; }
-.global-notice .alert { margin:0; padding:12px 16px; min-height:58px; }
-.global-notice .alert .btn { margin-left:14px; padding:4px 11px; }
+.overview-noise-figure { margin-top:10px; padding:10px 12px; border:1px solid var(--ring); border-radius:8px; background:var(--surface); }
+.overview-noise-figure > strong { display:block; margin-bottom:6px; font-size:12px; color:var(--text-2); }
+.overview-noise-figure .plot { min-height:200px; }
+.overview-not-analysed .chip { margin-left:6px; }
+.global-notice { max-width:100%; padding:4px 0 6px; }
+.global-notice .alert { margin:0; padding:4px 12px; min-height:0; font-size:12.5px; line-height:1.3; }
+.global-notice .alert .btn { margin-left:8px; padding:2px 9px; font-size:11.5px; }
 @media (max-width:900px) { .overview-summary { grid-template-columns:minmax(0, 1fr); } .overview-summary-status { padding:0 0 16px; border-right:0; border-bottom:1px solid var(--ring); } }
 @media (max-width:560px) { .overview-summary .tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 /* Gene labels use an HTML track so long symbols remain readable at every width. */
@@ -435,6 +439,63 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
   var SAMPLE_KEY = S.data.sample ? 'sample' : 'Sample';
   var SIDX = {}; SAMPLES.forEach(function (s, i) { SIDX[s] = i; });
 
+  // ---- analysis completeness (shared by the cohort snapshot, the sample
+  //      table and the header notice) --------------------------------------
+  // A sample counts as not analysed when the payload says so explicitly
+  // (Analysed = no/false/0) or, failing that, when its status is
+  // excluded / failed / not analysed.
+  function isNotAnalysed(i) {
+    var analysed = tcol(S, 'Analysed');
+    if (analysed.length) return /^(no|false|0)$/i.test(String(analysed[i]));
+    return /^(excluded|failed|not analysed|not analyzed)$/i.test(String(tcol(S, 'status')[i] || ''));
+  }
+  function notAnalysedSampleNames() {
+    return SAMPLES.filter(function (name, i) { return isNotAnalysed(i); });
+  }
+  // Why a sample was not analysed: prefer an explicit column from the payload,
+  // otherwise recover the reason from the pipeline log lines, e.g.
+  // "sample_qc: excluding 1 outlier sample(s) from calling (used neither as
+  //  test nor reference): SGT2501756".
+  function buildExclusionReasons() {
+    var out = {};
+    ['reason', 'exclusion_reason', 'Reason', 'Exclusion reason'].forEach(function (c) {
+      var col = tcol(S, c);
+      if (col.length) SAMPLES.forEach(function (nm, i) {
+        var v = String(col[i] || '').trim();
+        if (v) out[nm] = v;
+      });
+    });
+    asArray(LOG.warnings).concat(asArray(LOG.tail)).forEach(function (ln) {
+      var m = /excluding\s+\d+\s+outlier sample\(s\)\s+from calling\s*\(([^)]*)\)\s*:\s*(.+)$/.exec(String(ln));
+      if (!m) return;
+      var why = m[1].trim();
+      m[2].split(/,\s*/).forEach(function (nm) {
+        nm = nm.trim();
+        if (nm && !out[nm]) out[nm] = 'Outlier sample excluded from calling (' + why + ')';
+      });
+    });
+    asArray(LOG.warnings).concat(asArray(LOG.tail)).forEach(function (ln) {
+      var m = /(\d+)\s+sample\(s\)\s+excluded\s*:\s*(.+)$/.exec(String(ln));
+      if (!m) return;
+      m[2].split(/,\s*/).forEach(function (nm) {
+        nm = nm.trim();
+        if (nm && !out[nm]) out[nm] = 'Sample excluded from calling (sample QC failure)';
+      });
+    });
+    return out;
+  }
+  var EXCLUSION_REASONS = buildExclusionReasons();
+  // A sample that was not analysed is reported as a failure, never as a
+  // warning.  Normalise the level column at load time so the cohort severity
+  // filter, the health tiles and the sample table all agree.
+  (function normalizeNotAnalysedLevels() {
+    var levels = S.data && S.data.level;
+    if (!levels) return;
+    SAMPLES.forEach(function (nm, i) {
+      if (isNotAnalysed(i) && String(levels[i] || '').toLowerCase() !== 'fail') levels[i] = 'fail';
+    });
+  })();
+
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
@@ -515,11 +576,11 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
   };
   var SEM = {
     light: { DEL: '#e34948', DUP: '#2a78d6', HIGH: '#006300', MEDIUM: '#eda100', LOW: '#898781', NA: '#c3c2b7',
-             fail: '#b3261e', error: '#b3261e', warn: '#8a5a00', warning: '#8a5a00', ok: '#1baf7a', info: '#2a78d6',
+             fail: '#b3261e', error: '#b3261e', warn: '#8a5a00', warning: '#8a5a00', ok: '#1baf7a', info: '#006300',
              test: '#2a78d6', ref: '#a9a8a0', flank: '#898781', hit: '#e34948', del: '#e34948', dup: '#2a78d6',
              high: '#006300', medium: '#eda100', low: '#898781', bad: '#c42b2b' },
     dark: { DEL: '#e66767', DUP: '#3987e5', HIGH: '#0ca30c', MEDIUM: '#fab219', LOW: '#898781', NA: '#555552',
-            fail: '#ff8a80', error: '#ff8a80', warn: '#fab219', warning: '#fab219', ok: '#199e70', info: '#3987e5',
+            fail: '#ff8a80', error: '#ff8a80', warn: '#fab219', warning: '#fab219', ok: '#199e70', info: '#0ca30c',
             test: '#3987e5', ref: '#6f6e68', flank: '#898781', hit: '#e66767', del: '#e66767', dup: '#3987e5',
             high: '#0ca30c', medium: '#fab219', low: '#898781', bad: '#f08080' }
   };
@@ -927,6 +988,16 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         var c = SEM[t], x = ids.map(function (i) { return SAMPLES[i]; });
         var mk = function (name, arr, col) { return { type: 'bar', name: name, x: x, y: ids.map(function (i) { return arr[i] || 0; }), marker: { color: col }, hovertemplate: '%{x}<br>' + name + ': %{y}<extra></extra>' }; };
         var data = [mk('HIGH', nH2.length ? nH2 : nH, c.HIGH || c.high), mk('MEDIUM', nM2.length ? nM2 : nM, c.MEDIUM || c.medium), mk('LOW', nL2.length ? nL2 : nL, c.LOW || c.low)];
+        // Excluded samples have 0 calls so their stacked bar is invisible.
+        // Add a thin red "excluded" baseline marker so they are still
+        // visible in the figure (one bar per excluded sample at y=0 with
+        // a red marker line).
+        var exclIds = ids.filter(function (i) { return isNotAnalysed(i); });
+        if (exclIds.length) {
+          data.push({ type: 'scatter', mode: 'markers', name: 'Excluded', x: exclIds.map(function (i) { return SAMPLES[i]; }), y: exclIds.map(function () { return 0; }),
+            marker: { color: c.fail, symbol: 'x', size: 10, line: { width: 2, color: c.fail } },
+            hovertemplate: '%{x}<br>Excluded from calling<extra></extra>', showlegend: true });
+        }
         var L = baseLayout(t, { ylab: 'CNV calls', barmode: 'stack', legend: true, xaxis: { type: 'category', tickangle: -45 }, margin: { l: 56, r: 16, t: 16, b: 90 } });
         L.yaxis.rangemode = 'tozero';
         return { data: data, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
@@ -940,12 +1011,13 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     var lvCol = tcol(S, 'level'), stCol = tcol(S, 'status');
     if (lvCol.length) lvCol.forEach(function (l) {
       var key = String(l || '').toLowerCase();
-      if (key === 'warning' || key === 'excluded') key = 'warn';
-      if (key === 'error') key = 'fail';
+      // "excluded" means the sample was not analysed -- a failure, not a warning.
+      if (key === 'warning') key = 'warn';
+      if (key === 'excluded' || key === 'error') key = 'fail';
       if (counts[key] !== undefined) counts[key]++;
     });
     else if (stCol.length) stCol.forEach(function (l) {
-      var key = ({ OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'warn', failed: 'fail', excluded: 'warn' })[l] || 'ok';
+      var key = ({ OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'fail', failed: 'fail', excluded: 'fail' })[l] || 'ok';
       counts[key]++;
     });
     var grid = h('div', { class: 'health-tile-grid' });
@@ -971,7 +1043,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         var present = !!tcol(SCOPE, 'present')[i];
         if (!present && cls !== 'other' && (cls === 'autosome' || cls === 'x' || cls === 'y')) {
           var label = cls === 'autosome' ? 'Autosomes (chr1-22)' : 'chr' + cls.toUpperCase();
-          missing.push(label);
+          missing.push({ label: label, cls: cls });
         }
       });
     } else if (CHR.status && CHR.status.n) {
@@ -979,11 +1051,18 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         var cls = String(tcol(CHR.status, 'class')[i] || '').toLowerCase();
         var inInput = !!tcol(CHR.status, 'in_input')[i];
         if (!inInput && cls !== 'other' && (cls === 'autosome' || cls === 'x' || cls === 'y')) {
-          missing.push(cls === 'autosome' ? 'Autosomes (chr1-22)' : 'chr' + cls.toUpperCase());
+          missing.push({ label: cls === 'autosome' ? 'Autosomes (chr1-22)' : 'chr' + cls.toUpperCase(), cls: cls });
         }
       });
     }
-    return uniq(missing);
+    // One combined entry when neither gonosome is in the BED.
+    var gx = missing.filter(function (m) { return m.cls === 'x'; })[0];
+    var gy = missing.filter(function (m) { return m.cls === 'y'; })[0];
+    if (gx && gy) {
+      missing = missing.filter(function (m) { return m.cls !== 'x' && m.cls !== 'y'; });
+      missing.push({ label: 'Gonosomes (chrX & chrY)', cls: 'gonosome' });
+    }
+    return uniq(missing.map(function (m) { return m.label; }));
   }
 
   var overviewSubtabs = null;
@@ -996,28 +1075,96 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     var called = Number(SUM.samples_called !== undefined ? SUM.samples_called : (META.n_analysed || 0));
     var requested = Number(SUM.samples_requested !== undefined ? SUM.samples_requested : (META.n_samples || S.n));
     var notAnalysed = Math.max(0, requested - called);
+    // Names (and reasons) of the samples that were not analysed.
+    var notAnalysedNames = notAnalysedSampleNames();
     // Overview > Samples contains the cohort snapshot and the sample QC table.
     // Cohort-wide Sample QC status tiles remain in QC & warnings.
     var summary = h('div', { class: 'overview-summary overview-summary-single' });
     var stats = h('div', { class: 'overview-summary-stats' },
       h('div', { class: 'tiles' },
         tile(called + ' / ' + requested, 'samples analysed / requested', called < requested ? 'fail' : 'ok'),
-        tile(notAnalysed, 'samples not analysed', notAnalysed > 0 ? 'fail' : 'ok'),
-        tile(fmtInt(CALLS.n), 'CNV calls (' + del + ' DEL, ' + dup + ' DUP)'),
-        tile(fmtInt(high), 'HIGH-confidence calls'),
-        tile(SUM.samples_with_calls || 0, 'samples with at least one call'),
-        tile(fmtInt(META.n_targets || SUM.targets || 0), 'targets analysed')));
-    // Resolve the names from sample-level analysis/status fields.
-    var sampleData = S.data || {}, sampleNames = sampleData.sample || sampleData.Sample || SAMPLES;
-    var analysed = sampleData.Analysed || sampleData.analysed || [];
-    var statuses = sampleData.status || [];
-    var notAnalysedNames = sampleNames.filter(function (name, i) {
-      return (analysed.length && /^(no|false|0)$/i.test(String(analysed[i]))) ||
-        (!analysed.length && /^(excluded|failed|not analysed|not analyzed)$/i.test(String(statuses[i] || '')));
-    });
+        tile(notAnalysed, 'samples not analysed', notAnalysed > 0 ? 'fail' : 'ok',
+          notAnalysedNames.length ? notAnalysedNames.join(', ') : null),
+        // The four count tiles below are informational (no threshold to fail);
+        // render them green (ok) so the cohort snapshot reads as a status
+        // board rather than a mix of coloured and plain boxes.
+        tile(fmtInt(CALLS.n), 'CNV calls (' + del + ' DEL, ' + dup + ' DUP)', 'ok'),
+        tile(fmtInt(high), 'HIGH-confidence calls', 'ok'),
+        tile(SUM.samples_with_calls || 0, 'samples with at least one call', 'ok'),
+        tile(fmtInt(META.n_targets || SUM.targets || 0), 'targets analysed', 'ok')));
     summary.appendChild(stats);
+    // Cohort snapshot must show WHICH samples were not analysed and why, not
+    // only how many: names and reasons sit under the count tiles.  The
+    // sample_qc outlier tag is rendered as a fail chip next to the name.
+    // (The noise_z figure used to live here; it is now a separate card at
+    // the end of the subtab so the snapshot stays a compact summary.)
+    var nzCol = tcol(S, 'noise_z');
+    var nzThr = TH.qc_zscore;
+    var hasNz = nzCol.length && nzThr !== null && nzThr !== undefined;
+    if (notAnalysedNames.length) {
+      summary.appendChild(h('div', { class: 'overview-not-analysed' },
+        h('strong', { text: 'Samples not analysed (' + notAnalysedNames.length + ')' }),
+        h('ul', null, notAnalysedNames.map(function (n) {
+          var reason = EXCLUSION_REASONS[n] || '';
+          var li = h('li', null, h('strong', { text: String(n) }));
+          if (reason) {
+            // The "Outlier: noise z" tag is rendered as a fail chip so it is
+            // visually distinct from a plain text reason; everything else
+            // stays as a dash-prefixed text.
+            if (/^Outlier:\s*noise z/i.test(reason)) {
+              li.appendChild(h('span', { text: ' ' }));
+              li.appendChild(chip('fail', reason));
+            } else {
+              li.appendChild(document.createTextNode(' \u2014 ' + reason));
+            }
+          }
+          return li;
+        }))));
+    }
+    // Card order in Overview > Samples:
+    //   1. Cohort snapshot (summary boxes + not-analysed list)
+    //   2. Sample QC table (per-sample detail)
+    //   3. Sample noise (robust z) figure (separate card at the end)
     root.appendChild(card('Cohort snapshot', 'Cohort-level summary and analysis completeness', summary));
     buildSampleTable(root);
+    // Separate noise_z figure card: one bar per sample, dashed threshold
+    // line, failed/excluded samples in red, threshold-crossers in yellow.
+    // Only shown when noise_z values are present in the payload.
+    if (hasNz) {
+      var nzBox = plotBox('short');
+      root.appendChild(card('Sample noise (robust z)',
+        'Outliers above the dashed line (qc_zscore = ' + fmt(nzThr) + ') are excluded from calling by the sample_qc step. See Methods for the formula.',
+        nzBox));
+      plot(nzBox, function (t) {
+        var c = SEM[t];
+        var ids = range(S.n).filter(function (i) { return isNum(nzCol[i]); });
+        var d = [{ type: 'bar', x: ids.map(function (i) { return SAMPLES[i]; }), y: ids.map(function (i) { return nzCol[i]; }),
+          marker: { color: ids.map(function (i) { return isNotAnalysed(i) ? c.fail : Math.abs(nzCol[i]) > nzThr ? c.warn : CAT[t][0]; }) },
+          hovertemplate: '%{x}<br>noise z: %{y:.2f}<extra></extra>' }];
+        var lo = Math.min(0, Math.min.apply(null, nzCol)), hi = Math.max(Math.max.apply(null, nzCol), nzThr);
+        // OUTLIER arrow annotation on every bar above the threshold, same as
+        // the QC > Sample variability chart, so the figure is self-explanatory
+        // here too.
+        var annotations = [];
+        ids.forEach(function (i) {
+          if (Math.abs(nzCol[i]) > nzThr) {
+            annotations.push({
+              x: SAMPLES[i], y: nzCol[i], xref: 'x', yref: 'y',
+              text: 'OUTLIER', showarrow: true, arrowhead: 2, arrowsize: 0.8,
+              arrowcolor: c.fail, font: { color: c.fail, size: 10, weight: 'bold' },
+              ax: 0, ay: -28, bordercolor: c.fail, borderpad: 2, borderwidth: 1,
+              bgcolor: t === 'dark' ? 'rgba(40,12,10,0.85)' : 'rgba(253,236,235,0.95)'
+            });
+          }
+        });
+        var L = baseLayout(t, { ylab: 'noise z', yaxis: { type: 'linear', range: [lo < 0 ? lo * 1.1 : 0, hi > 0 ? hi * 1.18 : 1] },
+          xaxis: { type: 'category', tickangle: -45, showticklabels: ids.length <= 60 },
+          shapes: [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: nzThr, y1: nzThr, line: { color: c.fail, dash: 'dash', width: 1.5 } }],
+          annotations: annotations,
+          margin: { l: 50, r: 12, t: 24, b: ids.length <= 60 ? 70 : 20 } });
+        return { data: d, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
+      });
+    }
   }
   function buildOverviewCalls(root) {
     root.appendChild(card('Calls per sample', 'Select a bar to filter the report to that sample', overviewBars()));
@@ -1066,13 +1213,36 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       else if (o === 'desc') order.sort(function (a, b) { return vals[b] - vals[a]; });
       plot(box, function (t) {
         var c = SEM[t], thr = m.thr();
+        // A sample is shown "bad" (yellow) when its metric value crosses the
+        // threshold, and shown "fail" (red) when the SAMPLE itself is
+        // excluded/failed -- a failed sample is red in every figure even if
+        // the individual metric value happens to pass.
         var bad = function (i) { return thr !== null && thr !== undefined && (m.dir === 'below' ? vals[i] < thr : vals[i] > thr); };
+        var failed = function (i) { return isNotAnalysed(i); };
         var shapes = (thr !== null && thr !== undefined) ? [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: thr, y1: thr, line: { color: c.fail, dash: 'dash', width: 1.5 } }] : [];
+        // For the noise_z outlier metric, label every bar above the
+        // threshold with an "OUTLIER" text annotation so the figure is
+        // self-explanatory and cross-references the sample-table tag and
+        // the Methods section.
+        var annotations = [];
+        if (m.col === 'noise_z' && thr !== null && thr !== undefined) {
+          order.forEach(function (i) {
+            if (Math.abs(vals[i]) > thr) {
+              annotations.push({
+                x: SAMPLES[i], y: vals[i], xref: 'x', yref: 'y',
+                text: 'OUTLIER', showarrow: true, arrowhead: 2, arrowsize: 0.8,
+                arrowcolor: c.fail, font: { color: c.fail, size: 10, weight: 'bold' },
+                ax: 0, ay: -28, bordercolor: c.fail, borderpad: 2, borderwidth: 1,
+                bgcolor: t === 'dark' ? 'rgba(40,12,10,0.85)' : 'rgba(253,236,235,0.95)'
+              });
+            }
+          });
+        }
         var d = [{ type: 'bar', x: order.map(function (i) { return SAMPLES[i]; }), y: order.map(function (i) { return vals[i]; }),
-          marker: { color: order.map(function (i) { return bad(i) ? c.warn : CAT[t][0]; }) },
+          marker: { color: order.map(function (i) { return failed(i) ? c.fail : bad(i) ? c.warn : CAT[t][0]; }) },
           hovertemplate: '%{x}<br>' + m.label + ': %{y}<extra></extra>' }];
         var lo = Math.min(0, Math.min.apply(null, ids.map(function (i) { return vals[i]; }))), hi = Math.max(Math.max.apply(null, ids.map(function (i) { return vals[i]; })), thr !== null && thr !== undefined ? thr : -Infinity);
-        var L = baseLayout(t, { ylab: '', yaxis: { type: 'linear', range: [lo < 0 ? lo * 1.1 : 0, hi > 0 ? hi * 1.08 : 1] }, xaxis: { type: 'category', tickangle: -45, showticklabels: order.length <= 60 }, shapes: shapes, margin: { l: 60, r: 16, t: 10, b: order.length <= 60 ? 80 : 20 } });
+        var L = baseLayout(t, { ylab: '', yaxis: { type: 'linear', range: [lo < 0 ? lo * 1.1 : 0, hi > 0 ? hi * 1.18 : 1] }, xaxis: { type: 'category', tickangle: -45, showticklabels: order.length <= 60 }, shapes: shapes, annotations: annotations, margin: { l: 60, r: 16, t: 24, b: order.length <= 60 ? 80 : 20 } });
         return { data: d, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
       });
     }
@@ -1122,7 +1292,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         ['ok', 'warn', 'fail'].forEach(function (lv) {
           var ids = okIds.filter(function (i) {
             if (lvCol.length) return lvCol[i] === lv;
-            if (stCol.length) { var m = { OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'warn' }[stCol[i]] || 'ok'; return m === lv; }
+            if (stCol.length) { var m = { OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'fail' }[stCol[i]] || 'ok'; return m === lv; }
             return lv === 'ok';
           });
           if (!ids.length) return;
@@ -1195,23 +1365,105 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
   }
 
   // ---- Chromosome scope: one canonical summary, preferring target counts when available ----
+  // Canonical autosomes (chr1-22) that are absent from the BED, computed from
+  // the per-chromosome inventory when it is available.
+  function autosomesMissingFromBed() {
+    var have = {}, seenAny = false;
+    [CHR && CHR.inventory, DATA.chr_all, DATA.chr].forEach(function (T) {
+      if (!T || !T.n || !hasCol(T, 'chromosome')) return;
+      seenAny = true;
+      range(T.n).forEach(function (i) {
+        var k = String(tcol(T, 'chromosome')[i]).replace(/^chr/i, '').toUpperCase();
+        if (k) have[k] = true;
+      });
+    });
+    if (!seenAny) return [];
+    var missing = [];
+    for (var c = 1; c <= 22; c++) if (!have[String(c)]) missing.push('chr' + c);
+    return missing;
+  }
+  // 'chr4, chr6, chr17-22' -- consecutive chromosomes are compressed into ranges.
+  function compressChromList(names) {
+    var nums = uniq(names.map(function (n) { return parseInt(String(n).replace(/^chr/i, ''), 10); }))
+      .filter(function (n) { return isFinite(n); }).sort(function (a, b) { return a - b; });
+    var parts = [], i = 0;
+    while (i < nums.length) {
+      var j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      if (j - i >= 2) parts.push('chr' + nums[i] + '-' + nums[j]);
+      else if (j - i === 1) parts.push('chr' + nums[i] + ', chr' + nums[j]);
+      else parts.push('chr' + nums[i]);
+      i = j + 1;
+    }
+    return parts.join(', ');
+  }
+  function scopeTileFor(row) {
+    var status = !row.present ? 'Not in BED' : row.analysed ? 'Analysed' : 'In BED, not analysed';
+    var lvl = !row.present ? 'fail' : row.analysed ? 'ok' : 'fail';
+    return tile(fmtInt(row.targets), row.label, lvl, status);
+  }
   function chromosomeScopeCard() {
     if (SCOPE && SCOPE.n) {
-      var scopeTiles = range(SCOPE.n).map(function (i) {
-        var present = !!tcol(SCOPE, 'present')[i], analysed = !!tcol(SCOPE, 'analysed')[i];
-        var status = !present ? 'Not in BED' : analysed ? 'Analysed' : 'In BED, not analysed';
-        var chrClass = String(tcol(SCOPE, 'class')[i] || '').toLowerCase();
-        var cls = !present && chrClass !== 'other' ? 'fail' : !present ? '' : analysed ? 'ok' : 'fail';
-        return tile(fmtInt(tcol(SCOPE, 'targets')[i]), tcol(SCOPE, 'label')[i], cls, status);
-      });
+      // Index scope rows by class so the autosome / gonosome / other branches
+      // below can pick the rows they need regardless of payload order.
+      var rows = scopeRows();
+      var byCls = {};
+      rows.forEach(function (r) { byCls[r.cls] = r; });
+      var tiles = [];
+      // Autosome box: names the autosomes missing from the BED so that
+      // "Autosomes (chr1-22)" never reads as full chr1-22 coverage.
+      var auto = byCls['autosome'];
+      if (auto) {
+        var missing = autosomesMissingFromBed();
+        var lvl = !auto.present ? 'fail' : auto.analysed ? (missing.length ? 'warn' : 'ok') : 'fail';
+        var detail = !auto.present ? 'Not in BED' : auto.analysed ? 'Analysed' : 'In BED, not analysed';
+        if (auto.present && missing.length) {
+          detail += ' \u00b7 ' + (22 - missing.length) + '/22 chromosomes in BED'
+            + ' \u00b7 not in BED: ' + compressChromList(missing);
+        }
+        tiles.push(tile(fmtInt(auto.targets), auto.label, lvl, detail));
+      }
+      // Gonosomes: one merged box when neither chrX nor chrY is in the BED.
+      var gx = byCls['x'], gy = byCls['y'];
+      if (gx && gy && !gx.present && !gy.present) {
+        tiles.push(tile(fmtInt(gx.targets + gy.targets), 'Gonosomes (chrX & chrY)', 'fail', 'Not in BED'));
+      } else {
+        [gx, gy].forEach(function (r) { if (r) tiles.push(scopeTileFor(r)); });
+      }
+      // Other contigs: only shown when the BED actually contains some; an empty
+      // class with 0 targets must not be reported as "Not in BED".
+      var other = byCls['other'];
+      if (other && other.present) tiles.push(scopeTileFor(other));
       return card('Run scope by chromosome class', META.mode_label || META.modechrom_label || ('Mode ' + (META.modechrom || 'n/a')),
-        h('div', null, h('div', { class: 'scope' }, scopeTiles),
-          h('p', { class: 'note', text: 'A run analyses one chromosome mode. Classes present in the BED but not analysed require a separate run; absence of calls is not a negative result for those regions.' })));
+        h('div', null, h('div', { class: 'scope' }, tiles),
+          h('p', { class: 'note', text: 'A run analyses one chromosome mode. Chromosomes listed as not in BED are absent from the panel BED, so absence of calls is not a negative result for those regions; classes present in the BED but not analysed require a separate run. Other contigs are omitted when the BED contains none.' })));
     }
     if (CHR.status && CHR.status.n) {
       return card('Run scope by chromosome class', META.mode_label || META.modechrom_label, chromStrip());
     }
     return null;
+  }
+  // Decode the SCOPE table rows into a small array of {cls,label,targets,present,analysed}.
+  function scopeRows() {
+    var rows = [];
+    if (SCOPE && SCOPE.n) {
+      range(SCOPE.n).forEach(function (i) {
+        rows.push({ cls: String(tcol(SCOPE, 'class')[i] || '').toLowerCase(),
+          label: String(tcol(SCOPE, 'label')[i] || ''),
+          targets: Number(tcol(SCOPE, 'targets')[i] || 0),
+          present: !!tcol(SCOPE, 'present')[i],
+          analysed: !!tcol(SCOPE, 'analysed')[i] });
+      });
+    } else if (CHR.status && CHR.status.n) {
+      range(CHR.status.n).forEach(function (i) {
+        rows.push({ cls: String(tcol(CHR.status, 'class')[i] || '').toLowerCase(),
+          label: String(tcol(CHR.status, 'label')[i] || ''),
+          targets: 0,
+          present: !!tcol(CHR.status, 'in_input')[i],
+          analysed: !!tcol(CHR.status, 'analysed')[i] });
+      });
+    }
+    return rows;
   }
 
   tab('qc', 'QC & warnings', function () { return true; }, function (root) {
@@ -1235,7 +1487,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
   function buildSampleTable(root) {
     // Build a display table with both ECHO and CANOPE columns
     var dispCols = ['sample', 'status', 'level', 'n_cnvs', 'n_del', 'n_dup', 'n_high', 'n_medium', 'n_low',
-                    'median_depth', 'total_reads', 'max_corr', 'n_refs', 'sex_inferred'];
+                    'median_depth', 'total_reads', 'max_corr', 'n_refs', 'noise_z', 'sex_inferred'];
     // Map ECHO column names
     var colMap = {};
     dispCols.forEach(function (c) {
@@ -1264,16 +1516,29 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     }
     // Add sample-sheet attrs
     if (DATA.sample_attrs) Object.keys(DATA.sample_attrs).forEach(function (k) { T.cols.push(k); T.data[k] = asArray(DATA.sample_attrs[k]); });
+    // Reason a sample was not analysed (explicit payload column or pipeline log);
+    // only added when at least one sample carries a reason.
+    var reasonArr = SAMPLES.map(function (s) { return EXCLUSION_REASONS[s] || ''; });
+    if (reasonArr.some(function (r) { return r; })) { T.cols.push('reason'); T.data.reason = reasonArr; }
 
     var tv = null;
     var labels = { n_cnvs: 'CNVs', n_del: 'DEL', n_dup: 'DUP', n_high: 'HIGH', n_medium: 'MEDIUM', n_low: 'LOW',
-                   median_depth: 'median depth', total_reads: 'total reads', max_corr: 'best corr.', n_refs: 'refs', sex_inferred: 'sex (inferred)', flags: 'flags' };
+                   median_depth: 'median depth', total_reads: 'total reads', max_corr: 'best corr.', n_refs: 'refs', noise_z: 'noise z', sex_inferred: 'sex (inferred)', flags: 'flags', reason: 'reason not analysed' };
     var cellClass = {};
     var render = {
       level: function (v) { return chip(v, LEVEL_LABEL[v] || v); },
       status: function (v) { return v === 'called' ? 'analysed' : v === 'Yes' ? 'analysed' : v === 'No' ? 'excluded' : v; },
       sample: function (v) { return h('strong', { text: v }); }
     };
+    // Highlight the noise_z cell when it exceeds the qc_zscore threshold (the
+    // exact metric that triggers sample_qc outlier exclusion in ECHO).  This
+    // applies to both ECHO and CANOPE -- the CANOPE-only block below adds the
+    // other numeric flag checks on top.
+    if (colMap.noise_z && TH.qc_zscore) {
+      cellClass[colMap.noise_z] = function (v) {
+        return isNum(v) && Math.abs(v) > TH.qc_zscore ? 'warn' : '';
+      };
+    }
     // numeric flag checks (CANOPE)
     if (IS_CANOPE) {
       var NF = {
@@ -1289,6 +1554,7 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     var host = h('div');
     root.appendChild(card('Sample QC table', 'Select a row to filter the other report views; select it again or choose All samples to clear.', host));
     tv = tableView(host, T, { filename: 'samples', pageSize: 20, sort: ['flags', 'desc'], labels: labels, render: render, cellClass: cellClass,
+      wrap: ['reason'],
       selected: function () { return state.sample ? SIDX[state.sample] : -1; },
       onRow: function (i) { setSample(SAMPLES[i] === state.sample ? '' : SAMPLES[i]); } });
     onState(function () { tv.redraw(); });
@@ -1299,6 +1565,59 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     var s = String(c).replace(/^chr/i, '').toUpperCase(), n = parseInt(s, 10);
     if (s === 'X') return 23; if (s === 'Y') return 24; if (s === 'M' || s === 'MT') return 25;
     return isFinite(n) ? n : 99;
+  }
+  // ---- Canonical human chromosome helpers --------------------------------
+  // Normalise any naming style: "1", "chr1", "CHR1", "23"->X, "24"->Y, "MT"/"25"->M.
+  function chrKey(name) {
+    var s = String(name === null || name === undefined ? '' : name).trim().replace(/^chr/i, '').toUpperCase();
+    if (s === '23') return 'X';
+    if (s === '24') return 'Y';
+    if (s === '25' || s === 'MT') return 'M';
+    return s;
+  }
+  function chrRank(name) {
+    var k = chrKey(name);
+    if (/^([1-9]|1[0-9]|2[0-2])$/.test(k)) return parseInt(k, 10);
+    if (k === 'X') return 23;
+    if (k === 'Y') return 24;
+    if (k === 'M') return 25;
+    return 1000;  // non-canonical contigs sort last, original order kept
+  }
+  // Pad the chromosome inventory to the full canonical set (chr1-22, X, Y, M)
+  // so the table always matches the announced scope ("Autosomes (chr1-22)")
+  // and the missing chromosomes the user sees in the "Missing chromosomes"
+  // card also appear as rows in the inventory table (with 0 targets and a
+  // "not in BED" status).  Without this padding the table only lists the
+  // chromosomes that are actually in the BED, so the missing ones are
+  // invisible in the inventory.
+  function completeChromosomeInventory(inv) {
+    var CANON = (function () { var a = [], i; for (i = 1; i <= 22; i++) a.push(String(i)); return a.concat(['X', 'Y', 'M']); })();
+    var have = {}, prefix = '';
+    range(inv.n).forEach(function (i) {
+      var nm = String(tcol(inv, 'chromosome')[i] === undefined ? '' : tcol(inv, 'chromosome')[i]);
+      if (/^chr/i.test(nm)) prefix = 'chr';
+      have[chrKey(nm)] = true;
+    });
+    var missing = CANON.filter(function (c) { return !have[c]; });
+    if (!missing.length) return inv;
+    var entries = range(inv.n).map(function (i) { return { synth: false, chr: tcol(inv, 'chromosome')[i], i: i, seq: i }; });
+    missing.forEach(function (c, k) { entries.push({ synth: true, chr: prefix + c, i: -1, seq: inv.n + k }); });
+    entries.sort(function (a, b) { var d = chrRank(a.chr) - chrRank(b.chr); return d !== 0 ? d : a.seq - b.seq; });
+    var out = { cols: inv.cols.slice(), data: {}, n: entries.length };
+    inv.cols.forEach(function (col) {
+      var arr = tcol(inv, col);
+      out.data[col] = entries.map(function (e) {
+        if (!e.synth) return arr[e.i];
+        var key = chrKey(e.chr);
+        if (col === 'chromosome') return e.chr;
+        if (col === 'class') return (key === 'X' || key === 'Y') ? key : (key === 'M' ? 'other' : 'autosome');
+        if (col === 'targets_in_bed' || col === 'targets_analysed') return 0;
+        if (col === 'analysed') return false;
+        if (arr.length && typeof arr[0] === 'number') return 0;
+        return '';
+      });
+    });
+    return out;
   }
   function callFlags(i) {
     var out = [];
@@ -1632,14 +1951,23 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
   function pcaPlot(div) {
     var P = PCA;
     plot(div, function (t) {
+      var c = SEM[t];
       var names = P.names || P.samples, pc1 = P.pc1 || P.pcs.PC1, pc2 = P.pc2 || P.pcs.PC2;
       var groups = P.group ? uniq(P.group) : ['All'], cc = catColors(Math.max(groups.length, 1), t), s = state.sample;
+      // Pre-compute the not-analysed sample-name set so excluded samples can
+      // be drawn in red regardless of their group colour.
+      var failedSet = {}; notAnalysedSampleNames().forEach(function (n) { failedSet[n] = true; });
       var data = groups.map(function (g, k) {
         var ii = range(names.length).filter(function (i) { return (P.group ? P.group[i] : 'All') === g; });
         return { type: 'scatter', mode: 'markers+text', name: g, x: ii.map(function (i) { return pc1[i]; }), y: ii.map(function (i) { return pc2[i]; }),
           text: ii.map(function (i) { return names[i]; }), textposition: 'top right', textfont: { size: 10, color: CHROME[t].secondary },
-          hovertemplate: '<b>%{text}</b><br>PC1 %{x:.2f}<br>PC2 %{y:.2f}<extra>' + g + '</extra>',
-          marker: { color: cc[k], size: ii.map(function (i) { return s && names[i] === s ? 15 : 9; }), line: { width: ii.map(function (i) { return s && names[i] === s ? 3 : 0; }), color: CHROME[t].text } } };
+          hovertemplate: '<b>%{text}</b><br>PC1 %{x:.2f}<br>PC2 %{y:.2f}<extra>' + g + (failedSet[names[ii[0]]] ? ' (excluded)' : '') + '</extra>',
+          // Failed samples inside this group get the fail (red) colour and an
+          // 'x' marker symbol; the rest keep their group colour.
+          marker: { color: ii.map(function (i) { return failedSet[names[i]] ? c.fail : cc[k]; }),
+                    symbol: ii.map(function (i) { return failedSet[names[i]] ? 'x' : 'circle'; }),
+                    size: ii.map(function (i) { return (s && names[i] === s) || failedSet[names[i]] ? 15 : 9; }),
+                    line: { width: ii.map(function (i) { return s && names[i] === s ? 3 : 0; }), color: CHROME[t].text } } };
       });
       var v1 = P.var1 || (P.var ? P.var[0] : 0), v2 = P.var2 || (P.var ? P.var[1] : 0);
       return { data: data, layout: baseLayout(t, { xlab: 'PC1 (' + fmt(v1) + '%)', ylab: 'PC2 (' + fmt(v2) + '%)', legend: groups.length > 1, margin: { l: 56, r: 24, t: 28, b: 48 } }) };
@@ -1657,17 +1985,73 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
     });
   }
 
+  // Build a list of individual chromosomes that are absent from the BED,
+  // grouped by class, for the prominent "Missing chromosomes" card at the
+  // top of the Chromosomes subtab.  Uses the same inventory source as
+  // autosomesMissingFromBed() so the two never disagree.
+  function missingChromosomesDetailed() {
+    var have = {}, seenAny = false;
+    [CHR && CHR.inventory, DATA.chr_all, DATA.chr].forEach(function (T) {
+      if (!T || !T.n || !hasCol(T, 'chromosome')) return;
+      seenAny = true;
+      range(T.n).forEach(function (i) {
+        var k = String(tcol(T, 'chromosome')[i]).replace(/^chr/i, '').toUpperCase();
+        if (k) have[k] = true;
+      });
+    });
+    if (!seenAny) return null;
+    var auto = [], gon = [];
+    for (var c = 1; c <= 22; c++) if (!have[String(c)]) auto.push('chr' + c);
+    if (!have['X']) gon.push('chrX');
+    if (!have['Y']) gon.push('chrY');
+    if (!auto.length && !gon.length) return null;
+    return { autosomes: auto, gonosomes: gon };
+  }
+
   function buildChromosomeOverview(root) {
+    // Prominent "Missing chromosomes" card first: lists every chromosome
+    // absent from the BED as a red chip, grouped by class, so the user
+    // sees the scope gap before the inventory table.  This is the
+    // "missing chromosome should be displayed" the user asked for.
+    var missing = missingChromosomesDetailed();
+    if (missing) {
+      var chips = h('div', { class: 'chips' });
+      if (missing.autosomes.length) {
+        chips.appendChild(h('span', { class: 'muted small', text: 'Autosomes: ' }));
+        missing.autosomes.forEach(function (c) { chips.appendChild(chip('fail', c)); });
+      }
+      if (missing.gonosomes.length) {
+        chips.appendChild(h('span', { class: 'muted small', text: (missing.autosomes.length ? ' \u00b7 ' : '') + 'Gonosomes: ' }));
+        missing.gonosomes.forEach(function (c) { chips.appendChild(chip('fail', c)); });
+      }
+      var missingBody = h('div', { class: 'stack tight' },
+        chips,
+        h('p', { class: 'note', text: missing.autosomes.length + missing.gonosomes.length +
+          ' chromosome(s) are absent from the panel BED file. No CNV call can be made for these regions in any run; absence of calls is not a negative result. Re-run with a BED that includes them, or accept the scope limitation.' }));
+      root.appendChild(card('Missing chromosomes', 'Chromosomes absent from the BED file', missingBody, 'flagged'));
+    }
     var scopeCard = chromosomeScopeCard();
     if (scopeCard) { scopeCard.id = 'chromosome-scope'; root.appendChild(scopeCard); }
     var inv = CHR.inventory;
     if (inv && inv.n) {
+      // Pad the inventory to the full canonical set (chr1-22, X, Y, M) so
+      // chromosomes absent from the BED also appear as rows (with 0 targets
+      // and a "not in BED" status), matching the "Missing chromosomes" card
+      // above and the announced scope.
+      inv = completeChromosomeInventory(inv);
       var invHost = h('div'), barBox = plotBox('short');
       tableView(invHost, inv, { filename: 'chromosomes', pageSize: 30,
         labels: { targets_in_bed: 'targets in BED', targets_analysed: 'targets analysed' },
-        render: { analysed: function (v) { return v ? chip('ok', 'analysed') : chip('warn', 'not analysed'); } },
-        cellClass: { targets_analysed: function (v, i) { return tcol(inv, 'analysed')[i] ? '' : 'warn'; } } });
-      root.appendChild(card('Chromosome inventory', 'Targets in BED and analysed status by chromosome', invHost));
+        render: { analysed: function (v, i) {
+          // Three states: analysed (green), in BED but not analysed (yellow),
+          // not in BED (red).  The latter only happens for synthesised rows
+          // (targets_in_bed == 0) so missing chromosomes read as failures.
+          if (v) return chip('ok', 'analysed');
+          return Number(tcol(inv, 'targets_in_bed')[i]) === 0 ? chip('fail', 'not in BED') : chip('warn', 'not analysed');
+        } },
+        cellClass: { targets_in_bed: function (v, i) { return Number(v) === 0 ? 'fail' : ''; },
+                     targets_analysed: function (v, i) { return tcol(inv, 'analysed')[i] ? '' : 'warn'; } } });
+      root.appendChild(card('Chromosome inventory', 'Targets in BED and analysed status by chromosome; chromosomes absent from the BED are listed with 0 targets', invHost));
       root.appendChild(card('Targets per chromosome', 'Targets in BED vs. analysed', barBox));
       plot(barBox, function (t) {
         var c = tcol(inv, 'chromosome');
@@ -1701,9 +2085,16 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       root.appendChild(h('div', { class: 'grid g2' },
         card('Sex check', 'chrX vs chrY depth ratio', sbox), card('Sex check table', null, sh)));
       plot(sbox, function (t) {
+        var sem = SEM[t];
         var names = asArray(X.sample), xr = asArray(X.x_ratio), yr = asArray(X.y_ratio);
+        var mismatch = asArray(X.mismatch);
+        var failedSet = {}; notAnalysedSampleNames().forEach(function (n) { failedSet[n] = true; });
         return { data: [{ type: 'scatter', mode: 'markers+text', x: xr, y: yr, text: names, textposition: 'top right',
-          marker: { color: asArray(X.mismatch).map(function (v) { return v ? SEM[t].warn : SEM[t].ok; }), size: 9 },
+          // Failed samples win: red 'x' marker; sex mismatch is yellow;
+          // everything else is green.
+          marker: { color: names.map(function (n, i) { return failedSet[n] ? sem.fail : mismatch[i] ? sem.warn : sem.ok; }),
+                    symbol: names.map(function (n) { return failedSet[n] ? 'x' : 'circle'; }),
+                    size: names.map(function (n) { return failedSet[n] ? 13 : 9; }) },
           hovertemplate: '%{text}<br>chrX ratio %{x}<br>chrY ratio %{y}<extra></extra>' }],
           layout: baseLayout(t, { xlab: 'chrX ratio', ylab: 'chrY ratio' }),
           onClick: function (ev) { var p = ev.points && ev.points[0]; if (p && p.text) setSample(p.text); } };
@@ -1760,13 +2151,33 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
         : [h('p', { text: 'CANOPE is a CANOES-derived exome CNV caller. For every sample it selects the most correlated reference samples, combines them with non-negative weights into an expected coverage per exon, and models the read count with a negative binomial whose variance is estimated from the references. A hidden Markov model with distance-decayed transitions (Viterbi) calls deletions and duplications; Q_SOME is the phred-scaled probability that at least one exon of the call is abnormal, and MLCN the most likely copy number.' }),
            h('p', { text: 'One run covers one chromosome mode: autosomes (A), chrX with female references (XX) or chrX/chrY with male references (XY).' })])));
 
-    // 5. Warning glossary
+    // 5. Sample outlier detection (sample_qc) -- the metric that produces the
+    //    "Outlier: noise z = X (> Y)" tag in the sample table.  Plain-English
+    //    explanation + formula + analogy + a pointer to the QC figure.
+    var qcZ = TH.qc_zscore;
+    var outlierTitle = 'How outlier samples are detected (sample_qc)';
+    var outlierBody = h('div', { class: 'prose' },
+      h('p', { text: 'Before CNV calling, the pipeline flags outlier samples and removes them from both the test list and the reference list ("used neither as test nor reference"). An outlier sample is excluded even when its depth, read count and pairwise correlation all pass their thresholds -- the outlier check is a separate metric.' }),
+      h('p', { text: 'Plain-English version: for every sample, the pipeline measures how "wiggly" its coverage is across all the targeted exons. Most samples in a cohort wiggle in a similar way -- their coverage goes up and down from exon to exon in a comparable pattern. A sample whose coverage wiggles a lot more (or a lot less) than the cohort average cannot be modelled by ExomeDepth, because the expected coverage it would compute for that sample would not match what is observed, and CNV calls would be unreliable. Such a sample is flagged as an outlier and excluded from calling, which is why References = 0 for it in the sample table.' }),
+      h('p', { text: 'Formula (matches detect_outlier_samples() in echo_utils.R):' }),
+      h('ol', null,
+        h('li', { text: 'For every target (exon) of every sample, compute log2(counts + 0.5).' }),
+        h('li', { text: 'For each sample, take the MAD (median absolute deviation, scaled by 1.4826) of those log2 values across all targets -- one "noise score" per sample. This is the cross-target dispersion of the sample\'s log-coverage profile.' }),
+        h('li', { text: 'Compute the cohort median and cohort MAD of those per-sample noise scores.' }),
+        h('li', { text: 'Robust z-score = (sample noise score - cohort median) / cohort MAD. The robust z is in "cohort MAD" units, so a value of 3 means "3 dispersion-units away from the typical sample".' }),
+        h('li', null, h('span', { text: 'Flag the sample as an outlier when |robust z| > ' }),
+                h('strong', { text: String(qcZ != null ? qcZ : 3) }),
+                h('span', { text: ' (the qc_zscore threshold). Excluded samples cannot be used as test or as reference, so they end up with 0 references and no CNV calls.' }))),
+      h('p', { text: 'See the value for every sample in QC & warnings > Sample variability ("Sample noise (robust z of the exon-count dispersion)"); the dashed line on that chart is the qc_zscore threshold, and bars above it are the outliers excluded from calling.' }));
+    stack.appendChild(detailCard(outlierTitle, 'The "Outlier: noise z = X (> Y)" tag in the sample table refers to this metric.', outlierBody));
+
+    // 6. Warning glossary
     var glossary = [
       ['Chromosomes not analysed', 'The BED/count table contains targets that this run did not call. A missing call there is not a negative result.'],
-      ['Sample failed / excluded', 'Failed samples raised an error while calling; excluded samples were dropped before calling. Neither has CNV calls, and excluded samples are not used as references.'],
+      ['Sample failed / excluded', 'Failed samples raised an error while calling; excluded samples were dropped before calling. Neither has CNV calls, and excluded samples are not used as references. The "Outlier: noise z" tag means the sample was dropped by the sample_qc step -- see "How outlier samples are detected" above.'],
       ['Low depth / low reads', 'Median target depth or total reads below the QC threshold: reduced sensitivity, especially for single-exon events.'],
       ['Low correlation / few references', 'No other sample resembles this one (batch, capture kit, tissue), so the expected coverage is poor and false calls are likely.'],
-      ['Noisy sample', 'The exon-count dispersion is an outlier within the cohort (robust z-score).'],
+      ['Noisy sample (outlier)', 'The cross-target dispersion of the sample\'s log-coverage profile is an outlier within the cohort (robust z-score on the per-sample MAD of log2 coverage). See "How outlier samples are detected" above for the formula and the QC chart.'],
       ['Genotyping skipped', 'Too many calls were produced; Q_SOME and MLCN were not computed and every call is LOW.'],
       ['Sex / mode mismatch', 'The annotated sex disagrees with chrX/chrY coverage, or the sample does not match the sex expected by the mode.'],
       ['Background calibration', 'A high share of non-called exons around a call fall outside their 95% interval, meaning the expected-coverage model is miscalibrated.']];
@@ -1883,16 +2294,16 @@ REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
       noticeHost.appendChild(alertBox('fail', 'Chromosome class missing from the BED file', missingClasses.join(', ') + ' not present in BED file.', scopeLink));
     }
     if (noticeHost) {
-      var sampleData = S.data || {}, sampleNames = sampleData.sample || sampleData.Sample || SAMPLES;
-      var analysed = sampleData.Analysed || sampleData.analysed || [];
-      var statuses = sampleData.status || [];
-      var notAnalysedNames = sampleNames.filter(function (name, i) {
-        return (analysed.length && /^(no|false|0)$/i.test(String(analysed[i]))) ||
-          (!analysed.length && /^(excluded|failed|not analysed|not analyzed)$/i.test(String(statuses[i] || '')));
-      });
-      if (notAnalysedNames.length) {
-        noticeHost.appendChild(alertBox('fail', 'Samples not analysed (' + notAnalysedNames.length + ')',
-          notAnalysedNames.join(', ') + ' not analysed.'));
+      var notAnalysedAlert = notAnalysedSampleNames();
+      if (notAnalysedAlert.length) {
+        // Show each name followed by its reason (in parentheses) when present,
+        // so the failure banner explains why each sample was excluded.
+        var body = notAnalysedAlert.map(function (n) {
+          var r = EXCLUSION_REASONS[n];
+          return r ? n + ' (' + r + ')' : n;
+        }).join(', ');
+        noticeHost.appendChild(alertBox('fail', 'Samples not analysed (' + notAnalysedAlert.length + ')',
+          body + ' not analysed.'));
       }
     }
 

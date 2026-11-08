@@ -154,7 +154,12 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     min_corr = as.numeric(settings$min_corr %||% 0.98),
     qc_max_exon_cv = as.numeric(settings$max_exon_cv %||% 0.5),
     max_exon_cv = as.numeric(settings$max_exon_cv %||% 0.5),
-    qc_zscore = NA_real_
+    # qc_zscore drives the sample_qc outlier filter in run_cnv_calling()
+    # (detect_outlier_samples(): robust z of per-sample MAD of log2 coverage,
+    #  default threshold 3).  Surface it in the thresholds block so the
+    #  "Sample variability" metric bar can draw the dashed cut-off line and
+    #  the exclusion reason can cite the exact value a sample exceeded.
+    qc_zscore = as.numeric(settings$qc_zscore %||% 3)
   )
 
   # ---- chromosome scope (ECHO) ----
@@ -167,7 +172,10 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     add <- scope_rows[!paste(scope_rows$Type, scope_rows$Details) %in% have, , drop = FALSE]
     if (nrow(add)) qc <- rbind(qc, data.frame(Sample = "All", Exon = "All", Type = add$Type, Details = add$Details, Gene = "All", Severity = add$Severity, stringsAsFactors = FALSE))
   }
-  qc$Severity[!qc$Severity %in% c("error", "warning", "info")] <- "warning"
+  qc$Severity[!qc$Severity %in% c("error", "warning", "info", "fail")] <- "warning"
+
+  # ---- pipeline log (read early so samples_df can carry exclusion reasons) ----
+  log_info <- read_report_log(log_file)
 
   # chr tables for the genome-wide map
   chr_df <- chrom_table(bed_file$chromosome, modechrom)
@@ -182,6 +190,27 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     if (!is.null(cor_mat)) { cm <- cor_mat; diag(cm) <- NA_real_; max_corr <- apply(cm, 1, function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)) }
   }
 
+  # ---- sample_qc outlier metric (must match detect_outlier_samples() in
+  #      echo_utils.R exactly, so the value shown in the report is the same
+  #      value that triggered the exclusion in run_cnv_calling()) ----
+  # noise_score = MAD of log2(counts + 0.5) across all targets, per sample.
+  # noise_z     = robust z of noise_score across the cohort:
+  #               (sample_noise - cohort_median) / cohort_MAD.
+  # |noise_z| > qc_zscore (default 3) => outlier => excluded from calling.
+  noise_score <- rep(NA_real_, length(all_samples))
+  noise_z     <- rep(NA_real_, length(all_samples))
+  if (length(all_samples) >= 2L && nrow(mat) > 0L) {
+    log_mat     <- log2(mat + 0.5)
+    noise_score <- apply(log_mat, 2, stats::mad, na.rm = TRUE)
+    cohort_med  <- stats::median(noise_score, na.rm = TRUE)
+    cohort_mad  <- stats::mad(noise_score,     na.rm = TRUE)
+    if (is.finite(cohort_mad) && cohort_mad > 0)
+      noise_z <- (noise_score - cohort_med) / cohort_mad
+    else noise_z <- rep(0, length(noise_score))
+    names(noise_score) <- all_samples
+    names(noise_z)     <- all_samples
+  }
+
   models <- rd$models %||% list(); refs <- rd$refs %||% list()
   n_refs <- vapply(all_samples, function(s) length(refs[[s]] %||% character()), integer(1))
 
@@ -192,11 +221,35 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   qc_s <- qc[qc$Sample %in% all_samples, , drop = FALSE]
   status <- vapply(all_samples, function(s) {
     sv <- qc_s$Severity[qc_s$Sample == s]
-    if (!s %in% analysed) "Excluded" else if ("error" %in% sv) "Fail" else if ("warning" %in% sv) "Warning" else "OK"
+    if (!s %in% analysed) "Excluded" else if ("error" %in% sv || "fail" %in% sv) "Fail" else if ("warning" %in% sv) "Warning" else "OK"
   }, character(1))
+  # A sample that was not analysed is a FAILURE, not a warning: the cohort
+  # severity filter and the Sample QC status tiles must treat excluded
+  # samples as failures.
   level <- vapply(all_samples, function(s) {
-    if (!s %in% analysed) "warn"
-    else { sv <- qc_s$Severity[qc_s$Sample == s]; if ("error" %in% sv) "fail" else if ("warning" %in% sv) "warn" else "ok" }
+    if (!s %in% analysed) "fail"
+    else { sv <- qc_s$Severity[qc_s$Sample == s]; if ("error" %in% sv || "fail" %in% sv) "fail" else if ("warning" %in% sv) "warn" else "ok" }
+  }, character(1))
+  # Why each not-analysed sample was excluded: recover the pipeline log line
+  # verbatim, then enrich it with observable QC context (cohort ranges,
+  # references=0, threshold checks) so the report explains WHY the sample
+  # was flagged as an outlier instead of just paraphrasing the log message.
+  excl_reasons <- recover_exclusion_reasons(all_samples, log_info)
+  # Cohort context used by enrich_exclusion_reason() below. Computed once
+  # here because the per-sample metrics (med_depth / total_reads / max_corr /
+  # n_refs / noise_z) are already materialised up-front.  noise_z is the
+  # exact metric the sample_qc step uses to flag outliers, so it gets a
+  # real threshold + direction.
+  cohort_ctx <- list(
+    med_depth   = list(values = med_depth,   thr = thresholds$min_cov,           dir = "below", label = "median depth"),
+    total_reads = list(values = total_reads, thr = thresholds$min_total_reads,   dir = "below", label = "total reads"),
+    max_corr    = list(values = max_corr,    thr = thresholds$min_corr,          dir = "below", label = "max correlation"),
+    n_refs      = list(values = n_refs,      thr = NA_real_,                     dir = NA,      label = "references"),
+    noise_z     = list(values = noise_z,     thr = thresholds$qc_zscore,         dir = "above", label = "noise z (MAD of log2 coverage)")
+  )
+  reason_col <- vapply(seq_along(all_samples), function(i) {
+    s <- all_samples[i]
+    if (s %in% analysed) "" else enrich_exclusion_reason(s, excl_reasons[[s]], i, all_samples, cohort_ctx, thresholds)
   }, character(1))
   flags_txt <- vapply(all_samples, function(s) {
     k <- which(qc_s$Sample == s)
@@ -216,13 +269,35 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
     n_del = vapply(all_samples, type_count, numeric(1), ty = "DEL"),
     n_dup = vapply(all_samples, type_count, numeric(1), ty = "DUP"),
     median_depth = med_depth, total_reads = total_reads, max_corr = max_corr, n_refs = n_refs,
-    sex_inferred = NA_character_, noise_z = NA_real_, ref_cor = NA_real_, n_targets = NA_real_, n_dropped = NA_real_,
+    sex_inferred = NA_character_, noise_z = noise_z, ref_cor = NA_real_, n_targets = NA_real_, n_dropped = NA_real_,
+    reason = reason_col,
     check.names = FALSE, stringsAsFactors = FALSE)
   sdf <- rd$sample_df
   if (!is.null(sdf)) {
     m <- match(all_samples, as.character(sdf$sample_name))
     extra <- setdiff(colnames(sdf), "sample_name"); extra <- utils::head(extra, 8)
     for (cn in extra) { nm <- sub("^gender$", "Gender", cn); v <- sdf[[cn]][m]; samples_df[[nm]] <- if (is.numeric(v)) v else ifelse(is.na(v), "", as.character(v)) }
+  }
+
+  # ---- qc_flags: a Whole-sample / fail row for each not-analysed sample ----
+  # Documents WHY the sample was excluded from calling (with the enriched
+  # reason that includes QC context + cohort ranges), so the Sample QC flags
+  # card and the global severity filter treat it as a failure.
+  excl_samples <- all_samples[!all_samples %in% analysed]
+  if (length(excl_samples)) {
+    # Look up the enriched reason by sample name (reason_col is aligned with
+    # all_samples, so match() gives us the right index).
+    excl_idx <- match(excl_samples, all_samples)
+    excl_reason_enriched <- reason_col[excl_idx]
+    new_rows <- data.frame(
+      Sample = excl_samples, Exon = "All", Type = "Whole sample",
+      Details = sprintf("Not analysed: %s", excl_reason_enriched),
+      Gene = "All", Severity = "fail", stringsAsFactors = FALSE)
+    # idempotent: drop new entries whose (Sample, Type, Details) already exist in qc.
+    existing <- paste(qc$Sample, qc$Type, qc$Details)
+    dup <- paste(new_rows$Sample, new_rows$Type, new_rows$Details) %in% existing
+    if (any(dup)) new_rows <- new_rows[!dup, , drop = FALSE]
+    if (nrow(new_rows)) qc <- rbind(qc, new_rows)
   }
 
   # ---- CNV table (lowercase unified column names) ----
@@ -279,8 +354,9 @@ build_report_payload <- function(rd, settings, config, log_file, prefix, focus =
   depth_hist <- NULL
   if (length(lm) > 1) { br <- seq(0, max(1, ceiling(max(lm) * 10) / 10), length.out = 41); hh <- graphics::hist(lm, breaks = br, plot = FALSE, include.lowest = TRUE); depth_hist <- list(mid = I(round(hh$mids, 3)), counts = I(hh$counts)) }
 
-  # ---- log, alerts, settings, scoring ----
-  log_info <- read_report_log(log_file)
+  # ---- alerts, settings, scoring ----
+  # (log_info was read earlier, just after qc, so samples_df can carry the
+  #  exclusion reason recovered from the log.)
   alerts <- build_report_alerts(qc, scope_rows, analysed, all_samples, cnv_df, calib, modechrom, thresholds, log_info, qc_available = !is.null(rd$qc))
   settings_kv <- report_settings_kv(settings, modechrom)
   scoring <- report_scoring(settings)
@@ -475,7 +551,9 @@ build_report_alerts <- function(qc, scope_rows, analysed, all_samples,
   if (length(excl)) {
     excl_txt <- paste(utils::head(excl, 10), collapse = ", ")
     if (length(excl) > 10) excl_txt <- paste0(excl_txt, ", ...")
-    add("sample", "warning",
+    # Not-analysed samples are a failure, not a warning, so the global
+    # severity filter and the header alert banner treat them as failures.
+    add("sample", "fail",
         paste0(length(excl), " sample(s) excluded"),
         excl_txt, "samples", excl)
   }
@@ -527,6 +605,88 @@ read_report_log <- function(log_file, tail_n = 400L) {
        tail = I(utils::tail(ln, tail_n)),
        session = si,
        truncated = length(ln) > tail_n)
+}
+
+# Recover the "why" for each excluded sample from the pipeline log lines.
+# Matches both shapes produced by the ECHO/CANOPE pipelines:
+#   "...excluding N outlier sample(s) from calling (used neither as test nor
+#    reference): SGT2501756"
+#   "N sample(s) excluded: SGT2501756"
+# An explicit samples$reason / samples$exclusion_reason column always wins;
+# this helper is called BEFORE the samples$reason column is materialised, so
+# callers can fold its output straight into samples_df.
+recover_exclusion_reasons <- function(sample_names, log_info) {
+  out <- stats::setNames(rep(NA_character_, length(sample_names)), sample_names)
+  log_lines <- c(as.character(log_info$warnings %||% character()),
+                as.character(log_info$tail     %||% character()))
+  pat1 <- "excluding[[:space:]]+[0-9]+[[:space:]]+outlier sample\\(s\\)[[:space:]]+from calling[[:space:]]*\\(([^)]*)\\)[[:space:]]*:[[:space:]]*(.+)$"
+  pat2 <- "([0-9]+)[[:space:]]+sample\\(s\\)[[:space:]]+excluded[[:space:]]*:[[:space:]]*(.+)$"
+  for (ln in log_lines) {
+    m <- regmatches(ln, regexec(pat1, ln, perl = TRUE))[[1]]
+    if (length(m) >= 3) {
+      why <- trimws(m[2])
+      for (nm in strsplit(m[3], ",[[:space:]]*")[[1]]) {
+        nm <- trimws(nm)
+        if (nzchar(nm) && is.na(out[nm])) out[nm] <- sprintf("Outlier sample excluded from calling (%s)", why)
+      }
+      next
+    }
+    m <- regmatches(ln, regexec(pat2, ln, perl = TRUE))[[1]]
+    if (length(m) >= 3) {
+      for (nm in strsplit(m[3], ",[[:space:]]*")[[1]]) {
+        nm <- trimws(nm)
+        if (nzchar(nm) && is.na(out[nm])) out[nm] <- "Sample excluded from calling (sample QC failure)"
+      }
+    }
+  }
+  as.list(out)
+}
+
+# Build a SHORT tag explaining why a not-analysed sample was excluded.
+# The full plain-English explanation (formula, analogy, threshold) lives in
+# the Methods tab of the report (see "How outlier samples are detected" in
+# report_assets_refactored_v13.R), so the sample table, cohort snapshot,
+# qc_flags and header alert only need a one-line tag.
+#
+# Tag priority:
+#   1. noise_z outlier  -> "Outlier: noise z = 3.42 (> 3)"
+#   2. failed threshold -> "Low median depth: 78 (< 100)" / "High noise z: ..."
+#   3. fallback         -> the bare log-line reason, or a generic message.
+#
+# `idx` is the 1-based position of `sample` in `all_samples`; `cohort_ctx`
+# is the list built in build_report_payload() with one entry per metric:
+#   list(values = <numeric vec>, thr = <num|NA>, dir = "below"|"above"|NA,
+#        label = <string>)
+enrich_exclusion_reason <- function(sample, base_reason, idx, all_samples,
+                                    cohort_ctx, thresholds) {
+  fmt_short <- function(v, thr) {
+    if (is.na(v) || !is.finite(v)) return("n/a")
+    # integers stay integer; ratios show 2 decimals; everything else 3 sig figs.
+    if (is.finite(thr) && thr == round(thr) && v == round(v)) return(format(v, scientific = FALSE))
+    sprintf("%.2f", v)
+  }
+  # 1. noise_z outlier (the exact metric detect_outlier_samples() uses).
+  nz_ctx <- cohort_ctx$noise_z
+  if (!is.null(nz_ctx)) {
+    nz_val <- nz_ctx$values[idx]; nz_thr <- nz_ctx$thr
+    if (is.finite(nz_val) && is.finite(nz_thr) && abs(nz_val) > nz_thr)
+      return(sprintf("Outlier: noise z = %s (> %s)",
+                     fmt_short(nz_val, nz_thr), fmt_short(nz_thr, nz_thr)))
+  }
+  # 2. Any standard per-sample threshold that failed.
+  for (nm in names(cohort_ctx)) {
+    ctx <- cohort_ctx[[nm]]
+    val <- ctx$values[idx]; thr <- ctx$thr; dir <- ctx$dir
+    if (is.na(thr) || !is.finite(thr) || is.na(dir)) next
+    if (is.na(val) || !is.finite(val)) next
+    if (dir == "below" && val < thr)
+      return(sprintf("Low %s: %s (< %s)", ctx$label, fmt_short(val, thr), fmt_short(thr, thr)))
+    if (dir == "above" && abs(val) > thr)
+      return(sprintf("High %s: %s (> %s)", ctx$label, fmt_short(val, thr), fmt_short(thr, thr)))
+  }
+  # 3. Fallback.
+  if (!is.null(base_reason) && nzchar(base_reason)) base_reason
+  else "Excluded from calling by sample QC"
 }
 
 report_settings_kv <- function(settings, modechrom) {
