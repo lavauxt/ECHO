@@ -99,17 +99,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     x <- gsub("\\", "_", as.character(x), fixed = TRUE)
     gsub('"', "_", x, fixed = TRUE)
   }
-  info_escape <- function(x) {
-    x <- enc2utf8(as.character(x))
-    x <- gsub("%", "%25", x, fixed = TRUE)
-    x <- gsub(";", "%3B", x, fixed = TRUE)
-    x <- gsub("=", "%3D", x, fixed = TRUE)
-    x <- gsub(",", "%2C", x, fixed = TRUE)
-    x <- gsub("\t", "%09", x, fixed = TRUE)
-    x <- gsub("\n", "%0A", x, fixed = TRUE)
-    x <- gsub("\r", "%0D", x, fixed = TRUE)
-    x
-  }
+  info_escape <- vcf_info_escape   # shared with CANOPE
   safe_char <- function(x, default = ".") {
     if (length(x) == 0L || is.na(x[1]) || as.character(x[1]) == "NA") {
       default
@@ -133,6 +123,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     '##INFO=<ID=NCOMP,Number=1,Type=Integer,Description="Number of reference samples">',
     '##INFO=<ID=BF,Number=1,Type=Float,Description="Bayes factor">',
     '##INFO=<ID=READS_RATIO,Number=1,Type=Float,Description="Observed/expected read ratio">',
+    '##INFO=<ID=CARRIERS,Number=1,Type=Integer,Description="Number of samples of the cohort carrying an overlapping call of the same type">',
+    '##INFO=<ID=RECURRENT,Number=0,Type=Flag,Description="Call recurs in many samples of the cohort (likely a technical artefact or a common CNV)">',
     '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">',
     '##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Estimated copy number state (1=DEL,2=normal,3=DUP)">',
     '##FORMAT=<ID=FR,Number=1,Type=Float,Description="Observed/expected fold change">',
@@ -154,13 +146,7 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
                Type = character(0), stringsAsFactors = FALSE)
   }
 
-  chrom_order <- function(chr) {
-    stripped <- sub("^chr", "", chr, ignore.case = TRUE)
-    num <- suppressWarnings(as.integer(stripped))
-    special <- match(toupper(stripped), c("X", "Y", "M", "MT"))
-    ifelse(!is.na(num), num,
-           ifelse(!is.na(special), 22 + special, Inf))
-  }
+  chrom_order <- vcf_chrom_order   # shared with CANOPE
   if (nrow(key_df) > 0L) {
     key_df <- key_df[order(chrom_order(key_df$Chromosome), key_df$Chromosome,
                            key_df$Start, key_df$End, key_df$Type), , drop = FALSE]
@@ -246,7 +232,9 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
                     info_value("N.comp", "NCOMP"),
                     info_value("BF", "BF"),
                     info_value("Reads.ratio", "READS_RATIO",
-                               function(v) round(as.numeric(v), 2)))
+                               function(v) round(as.numeric(v), 2)),
+                    info_value("Carriers", "CARRIERS"),
+                    if ("Recurrent" %in% names(representative) && isTRUE(representative$Recurrent[1])) "RECURRENT")
 
     chrom_vec[i] <- chrom
     pos_vec[i]   <- start
@@ -262,60 +250,8 @@ export_cnvs_to_vcf <- function(cnv_calls, output_vcf, sample_name = NULL,
     }
   }
 
-  # ---- fixed fields ----
-  if (n_recs > 0L) {
-    fix <- data.frame(
-      CHROM  = chrom_vec,
-      POS    = pos_vec,
-      ID     = id_vec,
-      REF    = rep("N", n_recs),
-      ALT    = alt_vec,
-      QUAL   = rep(".", n_recs),
-      FILTER = rep("PASS", n_recs),
-      INFO   = info_vec,
-      stringsAsFactors = FALSE
-    )
-  } else {
-    fix <- data.frame(
-      CHROM = character(0), POS = integer(0), ID = character(0),
-      REF   = character(0), ALT = character(0),
-      QUAL  = character(0), FILTER = character(0), INFO = character(0),
-      stringsAsFactors = FALSE
-    )
-  }
-
-  # ---- genotype fields ----
-  gt <- data.frame(FORMAT = if (n_recs > 0L) rep("GT:CN:FR", n_recs) else character(0),
-                   stringsAsFactors = FALSE)
-  if (n_samp > 0) {
-    for (s in vcf_samples) {
-      gt[[s]] <- if (n_recs > 0L) sample_mat[, s] else character(0)
-    }
-  }
-
-  dir.create(dirname(output_vcf), showWarnings = FALSE, recursive = TRUE)
-
-  # ---- write the file (plain-text VCF 4.2) ----
-  # Written directly: vcfR exports no object constructor (new_vcf() does not
-  # exist) and vcfR::write.vcf() always opens a gzfile() connection, i.e. it
-  # gzips the output even for a ".vcf" file name. Writing the bytes ourselves
-  # keeps the promised plain-text VCF at exactly `output_vcf` and makes the
-  # output identical on every OS (UTF-8, LF line endings).
-  header_cols <- c("#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO")
-  if (n_samp > 0L) header_cols <- c(header_cols, "FORMAT", vcf_samples)
-  lines <- c(meta, paste(header_cols, collapse = "\t"))
-  if (n_recs > 0L) {
-    body <- cbind(fix, FORMAT = gt$FORMAT)
-    if (n_samp > 0L) {
-      for (s in vcf_samples) body[[s]] <- gt[[s]]
-    }
-    lines <- c(lines, apply(body, 1L, paste, collapse = "\t"))
-  }
-  txt <- paste0(paste(lines, collapse = "\n"), "\n")
-  con <- file(output_vcf, open = "wb")
-  on.exit(close(con), add = TRUE)
-  writeBin(charToRaw(enc2utf8(txt)), con)
-
-  message("[INFO] Wrote ", n_recs, " CNV record(s) to ", output_vcf)
+  records <- data.frame(CHROM = chrom_vec, POS = pos_vec, ID = id_vec, ALT = alt_vec,
+                        INFO = info_vec, stringsAsFactors = FALSE)
+  vcf_write(output_vcf, meta, vcf_samples, records, format = "GT:CN:FR", sample_fields = sample_mat)
   invisible(output_vcf)
 }

@@ -93,6 +93,9 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
 #'   cross-target noise) before calling.
 #' @param exon_qc Logical. Exclude problematic exons before calling.
 #' @param qc_zscore Numeric. Robust z-score threshold for \code{sample_qc}.
+#' @param outlier_sides \code{"upper"} (default; only unusually noisy samples are
+#'   outliers, like CANOPE) or \code{"both"} (also unusually clean ones; the
+#'   pre-1.x ECHO behaviour). See \code{\link{detect_outlier_samples}}.
 #' @param exon_mad_quantile Numeric. MAD quantile threshold for \code{exon_qc}.
 #' @param gc_extreme_filter Numeric[2] or \code{NULL}. Min/max GC fraction to retain.
 #' @param min_exon_mean Numeric. Minimum mean count to retain a target.
@@ -100,6 +103,15 @@ score_cnv_confidence <- function(cnv_calls, bed_file, current_cor, num_refs,
 #'   first/last exons of a gene (after scoring). Default FALSE.
 #' @param penalize_terminal_only Logical. If TRUE, force such calls to LOW
 #'   confidence (instead of removing them). Default FALSE.
+#' @param recurrence_action What to do with calls that recur in many samples of
+#'   the cohort (a hallmark of a noisy target rather than a germline CNV):
+#'   \code{"flag"} (default; adds \code{Carriers}/\code{Recurrent}),
+#'   \code{"downgrade"} (also force LOW confidence), \code{"remove"} or
+#'   \code{"off"}. See \code{\link{cnv_apply_recurrence}}.
+#' @param recurrence_min_samples,recurrence_min_fraction,recurrence_min_overlap
+#'   A call is recurrent when >= \code{min_samples} samples (and >=
+#'   \code{min_fraction} of the analysed cohort) carry a same-type call with
+#'   >= \code{min_overlap} reciprocal overlap.
 #' @param ... Additional parameters passed to \code{score_cnv_confidence}.
 #'
 #' @return Invisibly returns \code{NULL}. Writes TSV and RData outputs to disk.
@@ -119,106 +131,76 @@ run_cnv_calling <- function(rdata_file,
                             sample_qc              = TRUE,
                             exon_qc                = TRUE,
                             qc_zscore              = 3,
+                            outlier_sides          = "upper",
                             exon_mad_quantile      = 0.90,
                             gc_extreme_filter      = c(0.15, 0.85),
                             min_exon_mean          = 20,
                             remove_terminal_only   = FALSE,
                             penalize_terminal_only = FALSE,
+                            recurrence_action      = "flag",
+                            recurrence_min_samples = 3L,
+                            recurrence_min_fraction = 0.25,
+                            recurrence_min_overlap = 0.5,
                             ...) {
-  message("[INFO] ", Sys.time(), " BEGIN CNV calls")
-  modechrom <- toupper(as.character(modechrom %||% "A")[1])
-  if (!modechrom %in% c("A", "X", "Y")) {
-    stop("[ERROR] modechrom must be 'A' (autosomes), 'X' or 'Y' (got '", modechrom, "').")
-  }
-  objs         <- load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file"))
-  counts       <- objs$counts
-  sample_names <- as.character(objs$sample_names)
-  reference_sample_names <- as.character(objs$reference_sample_names %||% character(0))
-  candidate_sample_names <- unique(c(sample_names, reference_sample_names))
-  missing_count_cols <- setdiff(candidate_sample_names, colnames(counts))
-  if (length(missing_count_cols)) {
-    stop("[ERROR] Sample columns missing from coverage counts: ",
-         paste(missing_count_cols, collapse = ", "))
-  }
-  bed_file     <- objs$bed_file
+  message("[INFO] BEGIN CNV calls")
+  md <- echo_mode_data(objs = load_rdata(rdata_file, required = c("counts", "sample_names", "bed_file")),
+                       modechrom = modechrom, sample_table = sample_table)
+  modechrom              <- md$modechrom
+  counts                 <- md$counts
+  bed_file               <- md$bed_file
+  sample_names           <- md$sample_names
+  reference_sample_names <- md$reference_sample_names
+  candidate_sample_names <- md$candidate
+  gender_map             <- md$gender_map
+  n_targets_mode         <- nrow(counts)
 
-  # Same classification as the QC metrics and the report (chromosome_class()).
-  mode_class <- switch(modechrom, X = "X", Y = "Y", "autosome")
-  message("[INFO] ", switch(modechrom, X = "Mode X: restricting to chromosome X",
-                            Y = "Mode Y: restricting to chromosome Y",
-                            "Mode A: autosomes only (excluding X and Y)"))
-  keep_idx <- which(chromosome_class(bed_file$chromosome) == mode_class)
-  if (length(keep_idx) == 0) {
-    stop("[ERROR] No ", switch(modechrom, X = "chrX", Y = "chrY", "autosomal"), " intervals found")
-  }
-  bed_file <- bed_file[keep_idx, ]
-  counts   <- counts[keep_idx, ]
+  # ONE QC decision for both pipelines and for the QC-metrics step (see
+  # cnv_apply_qc()): outlier samples among all candidate samples, then the
+  # problematic targets among the samples that remain.
+  gc_for_qc <- if ("GC" %in% colnames(counts)) as.numeric(counts$GC) else NULL
+  if (isTRUE(exon_qc) && is.null(gc_for_qc) && !is.null(gc_extreme_filter))
+    message("[INFO] exon_qc: no 'GC' column in the coverage RData (re-run ",
+            "run_bam_coverage() to pick it up); skipping the GC-extreme check.")
+  qc <- cnv_apply_qc(
+    counts[, candidate_sample_names, drop = FALSE], chromosomes = counts$chromosome, gc = gc_for_qc,
+    sample_qc = sample_qc, exon_qc = exon_qc, qc_zscore = qc_zscore, outlier_sides = outlier_sides,
+    exon_mad_quantile = exon_mad_quantile, min_exon_mean = min_exon_mean, gc_range = gc_extreme_filter)
 
-  gender_map <- NULL
-  if (modechrom %in% c("X", "Y")) {
-    if (is.null(sample_table) || !file.exists(sample_table))
-      stop("[ERROR] sample_table required for mode ", modechrom)
-    gender_df <- utils::read.table(sample_table, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-    if (!all(c("sample_name", "gender") %in% colnames(gender_df)))
-      stop("[ERROR] sample_table must have 'sample_name' and 'gender'")
-    gender_df$gender <- toupper(substr(gender_df$gender, 1, 1))
-    gender_map <- setNames(gender_df$gender, gender_df$sample_name)
-    missing <- setdiff(candidate_sample_names, names(gender_map))
-    if (length(missing) > 0) {
-      stop("[ERROR] Missing gender for analysis/reference samples: ",
-           paste(missing, collapse = ", "))
-    }
+  excl <- qc$excluded_samples$sample
+  if (length(excl) > 0) {
+    message(sprintf("[WARNING] sample_qc: excluding %d outlier sample(s) from calling (used neither as test nor reference): %s",
+                    length(excl), paste(sprintf("%s (z = %.2f)", excl,
+                      qc$sample_qc$robust_z[match(excl, qc$sample_qc$sample)]), collapse = ", ")))
+    sample_names           <- setdiff(sample_names, excl)
+    reference_sample_names <- setdiff(reference_sample_names, excl)
+    candidate_sample_names <- setdiff(candidate_sample_names, excl)
+    if (length(sample_names) == 0)
+      stop("[ERROR] sample_qc excluded every analysis sample; relax qc_zscore or set sample_qc = FALSE.")
   }
 
-  if (modechrom == "Y") {
-    male_samples <- names(gender_map[gender_map == "M"])
-    sample_names <- intersect(sample_names, male_samples)
-    reference_sample_names <- intersect(reference_sample_names, male_samples)
-    candidate_sample_names <- unique(c(sample_names, reference_sample_names))
-    if (length(sample_names) == 0) stop("[ERROR] No male analysis samples for mode Y")
-    message("[INFO] Mode Y: keeping ", length(sample_names), " male analysis sample(s) and ",
-            length(reference_sample_names), " male external reference sample(s)")
+  removed_targets <- NULL
+  if (isTRUE(exon_qc) && length(qc$keep_targets) < nrow(counts)) {
+    drop_idx <- setdiff(seq_len(nrow(counts)), qc$keep_targets)
+    removed_targets <- data.frame(
+      chromosome = as.character(bed_file$chromosome[drop_idx]), start = bed_file$start[drop_idx],
+      end = bed_file$end[drop_idx], gene = as.character(bed_file$gene[drop_idx]),
+      label = target_labels(bed_file)[drop_idx], reason = qc$target_qc$reason[drop_idx],
+      stringsAsFactors = FALSE)
+    message(sprintf("[INFO] exon_qc: excluding %d/%d problematic target(s) before calling",
+                    length(drop_idx), nrow(counts)))
+    counts   <- counts[qc$keep_targets, , drop = FALSE]
+    bed_file <- bed_file[qc$keep_targets, , drop = FALSE]
+    rownames(counts)   <- NULL
+    rownames(bed_file) <- NULL
   }
-
-  if (sample_qc) {
-    sqc  <- detect_outlier_samples(counts[, candidate_sample_names, drop = FALSE], z_threshold = qc_zscore)
-    excl <- sqc$sample[sqc$is_outlier]
-    if (length(excl) > 0) {
-      message(sprintf("[WARNING] sample_qc: excluding %d outlier sample(s) from calling (used neither as test nor reference): %s",
-                       length(excl), paste(excl, collapse = ", ")))
-      sample_names <- setdiff(sample_names, excl)
-      reference_sample_names <- setdiff(reference_sample_names, excl)
-      candidate_sample_names <- setdiff(candidate_sample_names, excl)
-      if (length(sample_names) == 0)
-        stop("[ERROR] sample_qc excluded every analysis sample; relax qc_zscore or set sample_qc = FALSE.")
-    }
-  }
-
-  if (exon_qc) {
-    gc_for_exon_qc <- if ("GC" %in% colnames(counts)) as.numeric(counts$GC) else NULL
-    if (is.null(gc_for_exon_qc) && !is.null(gc_extreme_filter)) {
-      message("[INFO] exon_qc: no 'GC' column in the coverage RData (re-run ",
-              "run_bam_coverage() to pick it up); skipping the GC-extreme check.")
-    }
-    eqc <- detect_problematic_exons(
-      counts[, candidate_sample_names, drop = FALSE],
-      chromosomes  = counts$chromosome,
-      mad_quantile = exon_mad_quantile,
-      min_mean     = min_exon_mean,
-      gc           = gc_for_exon_qc,
-      gc_min       = if (!is.null(gc_extreme_filter)) gc_extreme_filter[1] else 0.10,
-      gc_max       = if (!is.null(gc_extreme_filter)) gc_extreme_filter[2] else 0.90
-    )
-    good_exons <- eqc$exon[!eqc$problematic]
-    if (length(good_exons) < nrow(counts)) {
-      message(sprintf("[INFO] exon_qc: excluding %d/%d problematic target(s) before calling",
-                       nrow(counts) - length(good_exons), nrow(counts)))
-      counts   <- counts[good_exons, , drop = FALSE]
-      bed_file <- bed_file[good_exons, , drop = FALSE]
-      rownames(counts)   <- NULL
-      rownames(bed_file) <- NULL
-    }
-  }
+  qc_info <- list(
+    params = list(sample_qc = sample_qc, exon_qc = exon_qc, qc_zscore = qc_zscore,
+                  outlier_sides = outlier_sides, exon_mad_quantile = exon_mad_quantile,
+                  min_exon_mean = min_exon_mean, gc_extreme_filter = gc_extreme_filter),
+    sample_qc = qc$sample_qc, excluded_samples = qc$excluded_samples,
+    removed_targets = removed_targets,
+    n_targets = list(mode = n_targets_mode, analysed = nrow(counts)),
+    candidate_samples = md$candidate)
 
   results      <- list()
   ed_objects   <- list()
@@ -244,7 +226,8 @@ run_cnv_calling <- function(rdata_file,
     "CNV.ID", "Sample",
     unname(ifelse(ed_call_columns %in% names(cnv_rename_map),
                   cnv_rename_map[ed_call_columns], ed_call_columns)),
-    "Gene", "Confidence", "Correlation", "N.comp", "Comparator.name", "Genomic.ID"
+    "Gene", "Confidence", "Correlation", "N.comp", "Comparator.name", "Genomic.ID",
+    "Carriers", "Recurrent"
   )
   cnv_tsv_columns <- setdiff(cnv_tsv_columns, cnv_exclude_cols)
 
@@ -298,6 +281,10 @@ run_cnv_calling <- function(rdata_file,
     }
 
     ref_counts <- rowSums(counts[, best_refs, drop = FALSE])
+    message(sprintf("[DEBUG] %s: %d reference(s) selected from %d candidate(s); correlation with the pooled reference %.4f; first references: %s",
+                    sample, length(best_refs), length(ref_samples),
+                    suppressWarnings(as.numeric(stats::cor(counts[, sample], ref_counts))),
+                    paste(utils::head(best_refs, 5L), collapse = ", ")))
     suppressWarnings({
       ed <- methods::new("ExomeDepth", test = test_counts, reference = ref_counts,
                          formula = formula, data = data)
@@ -381,6 +368,16 @@ run_cnv_calling <- function(rdata_file,
   cnv_calls <- if (length(all_calls_list) > 0)
     as.data.frame(data.table::rbindlist(all_calls_list, fill = TRUE)) else data.frame()
   if (nrow(cnv_calls) > 0) {
+    # Cohort-level recurrence: the same call in many samples is a noisy target,
+    # not a germline CNV (applied once, on the whole cohort).
+    cnv_calls <- cnv_apply_recurrence(
+      cnv_calls, list(sample = "Sample", chr = "Chromosome", start = "Start", end = "End",
+                      type = "Type", confidence = "Confidence"),
+      n_samples = length(sample_names), action = recurrence_action,
+      min_samples = recurrence_min_samples, min_fraction = recurrence_min_fraction,
+      min_overlap = recurrence_min_overlap)
+  }
+  if (nrow(cnv_calls) > 0) {
     cnv_calls  <- cbind(CNV.ID = seq_len(nrow(cnv_calls)), cnv_calls)
     tsv_cols     <- setdiff(colnames(cnv_calls), cnv_exclude_cols)
     utils::write.table(cnv_calls[, tsv_cols, drop = FALSE], file = output_file,
@@ -403,14 +400,16 @@ run_cnv_calling <- function(rdata_file,
             output_file)
   }
 
+  qc_info$recurrence <- list(action = recurrence_action, min_samples = recurrence_min_samples,
+                             min_fraction = recurrence_min_fraction, min_overlap = recurrence_min_overlap)
   if (save_ed_objects) {
     save(counts, cnv_calls, refs, models, bed_file, ed_objects, gender_map,
-         sample_names, reference_sample_names, file = out_rdata)
+         sample_names, reference_sample_names, qc_info, modechrom, file = out_rdata)
   } else {
     save(counts, cnv_calls, refs, models, bed_file, gender_map,
-         sample_names, reference_sample_names, file = out_rdata)
+         sample_names, reference_sample_names, qc_info, modechrom, file = out_rdata)
   }
   message("[INFO] Saved summary RData to: ", out_rdata)
-  message("[INFO] ", Sys.time(), " END CNV calls")
+  message("[INFO] END CNV calls")
   invisible(NULL)
 }

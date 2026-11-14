@@ -456,6 +456,19 @@ run_bam_coverage <- function(
 
   bed_file$chromosome <- trimws(as.character(bed_file$chromosome))
 
+  # Every interval that cannot be analysed is recorded with the reason, so the
+  # QC table, the log and the report can say exactly what was lost (a silent
+  # loss of whole chromosomes is the worst failure mode of a CNV caller).
+  bed_dropped <- data.frame(chromosome = character(), start = numeric(), end = numeric(),
+                            gene = character(), reason = character(), stringsAsFactors = FALSE)
+  note_drop <- function(rows, reason, chrom = rows$chromosome) {
+    if (!nrow(rows)) return(invisible(NULL))
+    bed_dropped <<- rbind(bed_dropped, data.frame(
+      chromosome = as.character(chrom), start = as.numeric(rows$start), end = as.numeric(rows$end),
+      gene = as.character(rows$gene), reason = reason, stringsAsFactors = FALSE))
+    invisible(NULL)
+  }
+
   # BEDs can be passed through unchanged (bed_process = "NO"). In that case
   # column 4 may still contain transcript/exon/coordinate annotations rather
   # than a parsed gene symbol. Normalize only recognizable structured names;
@@ -485,6 +498,7 @@ run_bam_coverage <- function(
   removed_rows            <- is.na(bed_file$chromosome)
   if (any(removed_rows)) {
     if (verbose) message("[WARNING] Removed ", sum(removed_rows), " rows with chromosomes not in FASTA")
+    note_drop(bed_file[removed_rows, ], "chromosome not in the reference FASTA", chrom = bed_file$original_chrom[removed_rows])
     bed_file <- bed_file[!removed_rows, ]
   }
 
@@ -493,6 +507,7 @@ run_bam_coverage <- function(
   valid_coords   <- which(bed_file$start > 0 & bed_file$end >= bed_file$start)
   if (length(valid_coords) < nrow(bed_file)) {
     message("[WARNING] Removing ", nrow(bed_file) - length(valid_coords), " rows with invalid coordinates")
+    note_drop(bed_file[-valid_coords, ], "invalid coordinates (start < 1 or end < start)")
     bed_file <- bed_file[valid_coords, ]
   }
 
@@ -500,6 +515,7 @@ run_bam_coverage <- function(
   out_of_bounds <- which(bed_file$end > chr_len | bed_file$start < 1)
   if (length(out_of_bounds) > 0) {
     message("[WARNING] Removing ", length(out_of_bounds), " rows outside chromosome boundaries")
+    note_drop(bed_file[out_of_bounds, ], "outside the chromosome boundaries of the FASTA")
     bed_file <- bed_file[-out_of_bounds, ]
   }
 
@@ -545,6 +561,7 @@ run_bam_coverage <- function(
       if (skip_invalid_intervals) {
         message("[WARNING] Removing ", length(removed),
                 " interval(s) that cannot be extracted from the reference sequence:\n", detail)
+        note_drop(bed_file[removed, ], "sequence cannot be extracted from the FASTA (stale/truncated FASTA or .fai?)")
         bed_file <- bed_file[keep, ]
       } else {
         stop("[ERROR] ", length(removed), " interval(s) cannot be extracted from the reference sequence ",
@@ -566,6 +583,13 @@ run_bam_coverage <- function(
   bed_file$chromosome     <- as.character(bed_file$chromosome)
   bed_file$original_chrom <- NULL
   if (verbose) message("[INFO] BED file cleaned. Final rows: ", nrow(bed_file))
+  if (nrow(bed_dropped)) {
+    n_in <- nrow(bed_file) + nrow(bed_dropped)
+    by_chr <- sort(table(bed_dropped$chromosome), decreasing = TRUE)
+    message(sprintf("[WARNING] %d of %d BED interval(s) (%.1f%%) were dropped before counting; chromosomes affected: %s.",
+                    nrow(bed_dropped), n_in, 100 * nrow(bed_dropped) / n_in,
+                    paste(sprintf("%s (%d)", names(by_chr), as.integer(by_chr)), collapse = ", ")))
+  }
   if (nrow(bed_file) == 0) stop("[ERROR] No valid intervals remain.")
 
   # ExomeDepth::getBamCounts() follows the BED convention: it expects 0-based
@@ -671,7 +695,7 @@ run_bam_coverage <- function(
   if ("GC" %in% colnames(counts)) bed_file$GC <- counts$GC
 
   save(counts, bams, bed_file, sample_names, reference_sample_names,
-       fasta, name_mapping, file = data_out)
+       fasta, name_mapping, bed_dropped, file = data_out)
   if (verbose) message("[INFO] ", Sys.time(), " END bam coverage calculation")
   invisible(NULL)
 }

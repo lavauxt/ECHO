@@ -1,0 +1,3013 @@
+# ============================================================================
+# Unified report assets: CSS + JavaScript + HTML assembly.
+#
+# Shared by the ECHO and CANOPE report generators so both packages emit
+# byte-identical HTML structure, styling and client-side behaviour.  The only
+# thing that differs between an ECHO and a CANOPE report is the JSON payload
+# (the data blob embedded in <script id="unified-data">).
+#
+# Both echo_report.R and canope_report.R source() this file (or it is loaded
+# once per package) and call report_html(payload, settings, out_file).
+#
+# Requires R >= 4.0 for raw strings (r"---(...)---").
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Stylesheet  (merged ECHO + CANOPE design system)
+# ----------------------------------------------------------------------------
+
+REPORT_CSS <- r"---(/* Unified interactive report -- design tokens, layout and components.
+   Merges the ECHO and CANOPE stylesheets so both packages share one look.
+   Categorical hues are applied by JS in fixed order; chrome (surface / ink /
+   grid) swaps between light and dark.  Colour is never the only cue: every
+   status colour is paired with an icon, symbol or text label. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.10);
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --accent-soft: #e7f0fc;
+  --good: #006300;
+  --warn: #8a5a00;
+  --fail: #b3261e;
+  --bad: #c42b2b;
+  --ok-ink: #0b6b3a;
+  --fail-soft: #fdeceb;
+  --warn-soft: #fff3d6;
+  --ok-soft: #e4f5ea;
+  --info-soft: #e7f0fc;
+  --bad-soft: #fdeaea;
+  --c-del: #D55E00; --c-dup: #0072B2;
+  --c-high: #1B9E77; --c-medium: #E69F00; --c-low: #8C8C86; --c-na: #C3C2B7;
+  --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.10); --accent: #3987e5; --accent-ink: #0b0b0b;
+    --accent-soft: #1c2a3d; --good: #0ca30c; --warn: #fab219;
+    --fail: #ff8a80; --bad: #f08080; --ok-ink: #5fd38d;
+    --fail-soft: #3a1c1a; --warn-soft: #3a2d0b; --ok-soft: #12301f;
+    --info-soft: #1c2a3d; --bad-soft: #3a1c1c;
+    --c-del: #F08A4B; --c-dup: #56B4E9; --c-high: #3CC59A; --c-medium: #F2B134; --c-low: #8C8C86; --c-na: #555552;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7;
+  --muted: #898781; --grid: #2c2c2a; --axis: #383835;
+  --ring: rgba(255, 255, 255, 0.10); --accent: #3987e5; --accent-ink: #0b0b0b;
+  --accent-soft: #1c2a3d; --good: #0ca30c; --warn: #fab219;
+  --fail: #ff8a80; --bad: #f08080; --ok-ink: #5fd38d;
+  --fail-soft: #3a1c1a; --warn-soft: #3a2d0b; --ok-soft: #12301f;
+  --info-soft: #1c2a3d; --bad-soft: #3a1c1c;
+  --c-del: #F08A4B; --c-dup: #56B4E9; --c-high: #3CC59A; --c-medium: #F2B134; --c-low: #8C8C86; --c-na: #555552;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--page); color: var(--text);
+  font: 14px/1.5 var(--font); -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h2 { font-size: 18px; } h3 { font-size: 14px; }
+code, pre { font-family: var(--mono); font-size: 12px; }
+pre { margin: 0; padding: 12px; overflow: auto; background: var(--page);
+      border: 1px solid var(--ring); border-radius: 8px; max-height: 420px; }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ---- Header & tabs ---- */
+.top { position:sticky; top:0; z-index:100; background:var(--surface); border-bottom:1px solid var(--ring); box-shadow:0 2px 10px var(--ring); }
+.top-inner { max-width: 1440px; margin: 0 auto; padding: 14px 16px 0; }
+.title-row { display:flex; align-items:center; column-gap:24px; row-gap:14px; flex-wrap:wrap; }
+.title-row h1 { font-size: 20px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+         border-radius: 999px; background: var(--accent-soft); color: var(--text-2);
+         font-size: 12px; border: 1px solid var(--ring); }
+.badge.demo { background: transparent; border-color: var(--warn); color: var(--warn); font-weight: 600; }
+.badge.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); font-weight: 600; cursor: pointer; }
+.badge.bad, .badge.fail { background: var(--fail-soft); border-color: var(--fail); color: var(--fail); font-weight: 600; cursor: pointer; }
+.badge.ok { color: var(--good); }
+.spacer { flex: 1; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: thin; margin-top: 10px; }
+.tab { appearance: none; border: 0; background: none; color: var(--text-2); font: inherit;
+       padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent;
+       white-space: nowrap; border-radius: 6px 6px 0 0; }
+.tab:hover { background: var(--accent-soft); color: var(--text); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+main { max-width: 1440px; margin: 0 auto; padding: 16px; }
+.panel[hidden] { display: none; }
+
+/* ---- Cards, grids, controls ---- */
+.collapsible-section { padding: 0; overflow: hidden; }
+.collapsible-section > summary { cursor:pointer; padding:14px 16px; font-weight:650; list-style:none; }
+.collapsible-section > summary::-webkit-details-marker { display:none; }
+.collapsible-section > summary::after { content:'＋'; float:right; color:var(--text-2); }
+.collapsible-section[open] > summary::after { content:'−'; }
+.collapsible-section > .stack { padding:0 14px 14px; }
+.card { background: var(--surface); border: 1px solid var(--ring); border-radius: var(--radius);
+        padding: 14px; min-width: 0; }
+.card > header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.card > header .hint { margin-left: auto; }
+.card.flagged { border-color: var(--warn); }
+.grid { display: grid; gap: 12px; }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
+.g3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.g-main { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+.g-viewer { grid-template-columns: 340px minmax(0, 1fr); align-items: start; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack.tight { gap: 6px; }
+.toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.toolbar:last-child { margin-bottom: 0; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); min-width: 0; max-width: 100%; }
+.field.inline { flex-direction: row; align-items: center; gap: 6px; }
+.field.inline input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+select, input[type="text"], input[type="number"], input[type="search"] {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--axis);
+  border-radius: 6px; padding: 5px 8px; min-width: 120px; max-width: 280px; }
+input[type="range"] { accent-color: var(--accent); }
+button.btn { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+             border: 1px solid var(--axis); background: var(--surface); color: var(--text); }
+button.btn:hover { background: var(--accent-soft); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+button.btn.small-btn { padding: 1px 9px; font-size: 12px; margin-left: 6px; }
+.plot { width: 100%; min-height: 360px; }
+.plot.tall { min-height: 560px; } .plot.short { min-height: 280px; }
+.plot.strip { min-height: 70px; height: 70px; }
+.plot.mid { min-height: 240px; }
+.plot.viewer { height: 760px; }
+.empty { padding: 28px 12px; text-align: center; color: var(--muted); }
+
+/* ---- Stat tiles ---- */
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.tile { background: var(--surface); border: 1px solid var(--ring); border-radius: var(--radius); padding: 12px 14px; }
+.tile .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.tile .l { color: var(--text-2); font-size: 12px; }
+.tile .detail { display:block; margin-top:3px; color:var(--muted); font-size:11px; }
+.tile.ok { border: 1px solid var(--c-high); border-left: 4px solid var(--c-high); }
+.tile.warn { border: 1px solid var(--warn); border-left: 4px solid var(--warn); background: var(--warn-soft); }
+.tile.fail, .tile.bad { border: 1px solid var(--fail); border-left: 4px solid var(--fail); background: var(--fail-soft); }
+.tile.warn .v { color: var(--warn); } .tile.fail .v, .tile.bad .v { color: var(--fail); } .tile.ok .v { color: var(--ok-ink); }
+.scope { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 12px; }
+.scope .tile .l { margin-top: 2px; }
+
+/* ---- Legend (HTML so categories can be toggled) ---- */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--text-2); }
+.legend button { appearance: none; border: 0; background: none; font: inherit; color: inherit;
+                 display: inline-flex; gap: 6px; align-items: center; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.legend button:hover { background: var(--accent-soft); }
+.legend button[aria-pressed="false"] { opacity: 0.4; text-decoration: line-through; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.swatch.conf.HIGH { background: var(--c-high); } .swatch.conf.MEDIUM { background: var(--c-medium); }
+.swatch.conf.LOW { background: var(--c-low); } .swatch.conf.NA { background: var(--c-na); }
+
+/* ---- Tables ---- */
+.tbl-wrap { overflow: auto; border: 1px solid var(--ring); border-radius: 8px; max-height: 520px; }
+table.tbl { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.tbl th, .tbl td { padding: 5px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+.tbl th { position: sticky; top: 0; background: var(--surface); cursor: pointer; user-select: none;
+          font-weight: 600; color: var(--text-2); border-bottom: 1px solid var(--axis); z-index: 1; }
+.tbl th[aria-sort="ascending"]::after { content: " \25B2"; font-size: 9px; }
+.tbl th[aria-sort="descending"]::after { content: " \25BC"; font-size: 9px; }
+.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl td.wrap { white-space: normal; min-width: 260px; max-width: 520px; }
+.tbl tbody tr:hover { background: var(--accent-soft); }
+.tbl tbody tr.clickable, .tbl tbody tr.pick { cursor: pointer; }
+.tbl tbody tr.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.tbl td.warn { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.tbl td.fail { background: var(--fail-soft); color: var(--fail); font-weight: 600; }
+.tbl-bar { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.pager { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
+
+/* ---- Table tools, toasts, shortcuts, log viewer ---- */
+.col-chooser { position: relative; }
+.col-chooser > summary { list-style: none; cursor: pointer; display: inline-block; padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--axis); background: var(--surface); color: var(--text); }
+.col-chooser > summary:hover, .col-chooser[open] > summary { background: var(--accent-soft); }
+.col-chooser > summary::-webkit-details-marker { display: none; }
+.col-menu { position: absolute; z-index: 20; top: 110%; left: 0; min-width: 190px; max-height: 320px; overflow: auto; padding: 8px 10px;
+  background: var(--surface); border: 1px solid var(--axis); border-radius: var(--radius); box-shadow: 0 6px 24px var(--ring);
+  display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.col-menu label { display: flex; gap: 6px; align-items: center; white-space: nowrap; cursor: pointer; }
+.locus-tools { display: flex; gap: 6px; margin: 4px 0 10px; flex-wrap: wrap; }
+.locus-tools button.small-btn { margin-left: 0; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--surface); padding: 8px 14px; border-radius: 999px; font-size: 13px; transition: opacity .18s, transform .18s; z-index: 60; }
+.toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.kbd-help { position: fixed; z-index: 70; top: 14%; left: 50%; transform: translateX(-50%); width: min(420px, 92vw);
+  background: var(--surface); border: 1px solid var(--axis); border-radius: var(--radius); box-shadow: 0 12px 40px var(--ring); padding: 14px 18px; }
+.kbd-help h3 { margin: 0 0 8px; }
+kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--axis); border-bottom-width: 2px; border-radius: 5px; background: var(--page); }
+pre.logv { max-height: 480px; overflow: auto; margin: 6px 0 0; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.ll-ERROR { color: var(--fail); font-weight: 600; } .ll-WARNING { color: var(--warn); } .ll-DEBUG { color: var(--muted); }
+
+/* ---- Selection bars / kv / notes ---- */
+.bars { display: flex; flex-direction: column; gap: 5px; }
+.bar-row { display: grid; grid-template-columns: 110px 1fr 70px; gap: 8px; align-items: center; font-size: 12px; }
+.bar-row .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.bar-track { background: var(--grid); border-radius: 4px; height: 10px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; }
+.bar-fill.lv-ok { background: var(--c-high); }
+.bar-fill.lv-warn { background: var(--c-medium); }
+.bar-fill.lv-fail { background: var(--c-del); }
+.note { font-size: 12px; color: var(--muted); }
+.note-flag { font-size: 11.5px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 12.5px; }
+.kv dt { color: var(--text-2); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.prose { width:100%; max-width:none; }
+.prose p { margin: 0 0 10px; width:100%; max-width:none; }
+
+/* ---- Alerts (always an icon + text, never colour alone) ---- */
+.alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.alert { display: flex; gap: 10px; align-items: flex-start; padding: 9px 14px; border-radius: 8px;
+         border: 1px solid var(--ring); border-left: 4px solid var(--muted); background: var(--surface); font-size: 13px; }
+.alert .ico, .alert .ic { font-weight: 700; flex: none; width: 18px; text-align: center; line-height: 1.35; }
+.alert .body { min-width: 0; overflow-wrap: anywhere; }
+.alert .ttl { font-weight: 600; }
+.alert.fail, .alert.error { border: 1px solid var(--fail); border-left: 4px solid var(--fail); background: var(--fail-soft); }
+.alert.fail .ico, .alert.fail .ic, .alert.fail .ttl, .alert.error .ico, .alert.error .ic, .alert.error .ttl { color: var(--fail); }
+.alert.warn, .alert.warning { border: 1px solid var(--warn); border-left: 4px solid var(--warn); background: var(--warn-soft); }
+.alert.warn .ico, .alert.warn .ic, .alert.warn .ttl, .alert.warning .ico, .alert.warning .ic, .alert.warning .ttl { color: var(--warn); }
+.alert.ok { border: 1px solid var(--c-high); border-left: 4px solid var(--c-high); background: var(--ok-soft); }
+.alert.ok .ico, .alert.ok .ic { color: var(--ok-ink); }
+.alert.info { border: 1px solid var(--c-high); border-left: 4px solid var(--c-high); background: var(--ok-soft); }
+.alert.info .ico, .alert.info .ic, .alert.info .ttl { color: var(--ok-ink); }
+.alert a { cursor: pointer; }
+
+/* Alert content is controlled by the single global severity selector. */
+
+/* ---- Chips ---- */
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 999px; font-size: 11.5px;
+        font-weight: 600; line-height: 20px; border: 1px solid var(--ring); white-space: nowrap; background: var(--page); color: var(--text-2); }
+.chip .ico { font-size: 11px; }
+.chip.ok { color: var(--ok-ink); background: var(--ok-soft); border-color: var(--c-high); }
+.chip.warn, .chip.warning { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+.chip.fail, .chip.error { color: var(--fail); background: var(--fail-soft); border-color: var(--fail); }
+.chip.info { color: var(--ok-ink); background: var(--ok-soft); border-color: var(--c-high); }
+.chip.cat { font-weight: 500; }
+.chip.type.DEL, .chip.DEL { color: var(--c-del); border-color: var(--c-del); background: transparent; }
+.chip.type.DUP, .chip.DUP { color: var(--c-dup); border-color: var(--c-dup); background: transparent; }
+.chip.conf.HIGH, .chip.HIGH { color: var(--ok-ink); background: var(--ok-soft); border-color: var(--c-high); }
+.chip.conf.MEDIUM, .chip.MEDIUM { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+.chip.conf.LOW, .chip.LOW { color: var(--text-2); background: var(--page); border-color: var(--muted); }
+.chip.conf.NA, .chip.NA { color: var(--text-2); background: var(--page); border-color: var(--axis); }
+.chip-btn { appearance: none; font: inherit; font-size: 11.5px; font-weight: 600; display: inline-flex; gap: 4px; align-items: center;
+            padding: 0 8px; line-height: 20px; border-radius: 999px; cursor: pointer; border: 1px solid var(--ring); background: var(--page); color: var(--text); }
+.chip-btn:hover { background: var(--accent-soft); }
+.chip-btn.warn { color: var(--warn); background: var(--warn-soft); }
+.chip-btn.fail { color: var(--fail); background: var(--fail-soft); }
+.chip-btn.link { color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.count-badge { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px;
+               text-align: center; background: var(--warn); color: var(--page); font-weight: 700; }
+.pill-list { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---- Segmented control ---- */
+.seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+.seg button { font: inherit; border: 0; background: var(--surface); color: var(--text-2); padding: 4px 10px; cursor: pointer;
+              border-right: 1px solid var(--axis); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+
+/* ---- Sub-tabs (inner switch within a tab) ---- */
+.subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--ring); margin-bottom: 14px; overflow-x: auto; scrollbar-width: thin; }
+.subtab { appearance: none; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 13px;
+          padding: 8px 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; border-radius: 6px 6px 0 0; }
+.subtab:hover { background: var(--accent-soft); color: var(--text); }
+.subtab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.subpanel[hidden] { display: none; }
+
+/* ---- Header filters ---- */
+.sample-pick { display:flex; align-items:center; column-gap:22px; row-gap:12px; flex-wrap:wrap; font-size:12px; color:var(--text-2); }
+.sample-pick select { width:min(260px, 30vw); min-width:170px; }
+.sample-pick > label { font-weight:650; white-space:nowrap; }
+.global-alert-filter { display:inline-flex; align-items:center; gap:10px; margin-left:4px; padding-left:20px; border-left:1px solid var(--ring); white-space:nowrap; }
+.global-notice { max-width:100%; padding:0 0 8px; }
+.global-notice:empty { display:none; }
+.global-notice .alert { margin:0; padding:7px 12px; font-size:12.5px; }
+.global-notice .alert .btn { margin-left:8px; padding:2px 9px; font-size:11.5px; }
+.global-alert-filter > span { font-weight:650; font-size:12px; color:var(--text-2); }
+.global-alert-filter .seg button { padding:5px 10px; font-size:11.5px; }
+#theme-btn { margin-left:10px; }
+.alert[hidden] { display:none !important; }
+
+/* ---- Independently collapsible Methods and Run blocks ---- */
+.collapsible-section { padding:0; overflow:hidden; }
+.collapsible-section > summary { cursor:pointer; padding:12px 15px; font-weight:650; list-style:none; display:flex; align-items:baseline; gap:10px; }
+.collapsible-section > summary::-webkit-details-marker { display:none; }
+.collapsible-section > summary::after { content:'＋'; margin-left:auto; color:var(--text-2); }
+.collapsible-section[open] > summary::after { content:'−'; }
+.collapsible-section .collapse-hint { color:var(--muted); font-size:11.5px; font-weight:400; }
+.collapsible-body { padding:0 14px 14px; }
+@media (max-width:760px) {
+  .sample-pick { column-gap:12px; row-gap:9px; }
+  .sample-pick select { width:min(220px, 65vw); min-width:145px; }
+  .global-alert-filter { margin-left:0; padding-left:12px; gap:6px; flex-wrap:wrap; }
+  .global-alert-filter .seg button { padding:4px 6px; }
+  #theme-btn { margin-left:0; }
+}
+
+/* ---- Chromosome strip ---- */
+.chrom-strip { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.chrom-box { border: 1px solid var(--ring); border-left: 4px solid var(--muted); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.chrom-box .nm { font-weight: 600; }
+.chrom-box.ok { border-color: var(--c-high); border-left: 4px solid var(--c-high); }
+.chrom-box.warn { border-color: var(--warn); border-left: 4px solid var(--warn); background: var(--warn-soft); }
+.chrom-box.fail { border-color: var(--fail); border-left: 4px solid var(--fail); background: var(--fail-soft); }
+.chrom-box.info { border-color: var(--accent); border-left: 4px solid var(--accent); }
+
+/* ---- Gallery (per-call plots) ---- */
+.gallery { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.shot { background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; margin: 0; }
+.shot button { all: unset; display: block; cursor: zoom-in; width: 100%; }
+.shot img { display: block; width: 100%; height: 190px; object-fit: contain; background: #fff; }
+.shot figcaption { padding: 6px 10px; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.shot .nopreview { height: 190px; display: grid; place-items: center; color: var(--muted); background: var(--page); }
+dialog.lightbox { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; }
+dialog.lightbox::backdrop { background: rgba(0, 0, 0, 0.7); }
+dialog.lightbox img { max-width: 96vw; max-height: 92vh; background: #fff; border-radius: 8px; display: block; }
+
+/* ---- Call viewer detail ---- */
+.detail-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; margin-bottom: 8px; }
+.detail-head h2 { font-size: 16px; }
+
+@media (max-width: 1000px) { .g-main, .g-viewer, .g2, .g3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 720px) { main { padding: 12px; } .bar-row { grid-template-columns: 80px 1fr 56px; } }
+
+
+/* ---- Overview: unified cohort summary ---- */
+.overview-summary { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.15fr); gap:18px; align-items:stretch; padding:16px; border:1px solid var(--ring); border-radius:var(--radius); background:var(--page); }
+.overview-summary-single { grid-template-columns:minmax(0, 1fr); }
+.overview-summary-single .overview-summary-stats, .overview-summary-single .overview-not-analysed { grid-column:1 / -1; }
+.overview-summary-status, .overview-summary-stats { min-width:0; display:flex; flex-direction:column; }
+.overview-summary-status { padding-right:16px; border-right:1px solid var(--ring); }
+.overview-section-label { font-size:12px; font-weight:700; color:var(--text-2); margin:0 0 12px; }
+.overview-summary .health-tile-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); align-content:center; flex:1; }
+.overview-summary .health-tile { min-width:0; min-height:112px; }
+.overview-summary .tiles { grid-template-columns:repeat(3, minmax(0, 1fr)); grid-auto-rows:1fr; align-content:stretch; flex:1; }
+.overview-summary .tile { min-width:0; padding:10px; }
+.overview-summary .tile .v { font-size:22px; overflow-wrap:anywhere; }
+.overview-summary .tile .l { font-size:11px; line-height:1.3; }
+.overview-not-analysed { margin-top:12px; padding:11px 12px; border:1px solid var(--fail); border-left:4px solid var(--fail); border-radius:8px; background:var(--fail-bg); color:var(--text); }
+.overview-not-analysed strong { display:block; margin-bottom:5px; color:var(--fail); font-size:12px; }
+.overview-not-analysed ul { margin:0; padding-left:18px; display:flex; flex-wrap:wrap; gap:3px 22px; font-size:12px; }
+.overview-noise-figure { margin-top:10px; padding:10px 12px; border:1px solid var(--ring); border-radius:8px; background:var(--surface); }
+.overview-noise-figure > strong { display:block; margin-bottom:6px; font-size:12px; color:var(--text-2); }
+.overview-noise-figure .plot { min-height:200px; }
+.overview-not-analysed .chip { margin-left:6px; }
+.global-notice { max-width:100%; padding:4px 0 6px; }
+.global-notice .alert { margin:0; padding:4px 12px; min-height:0; font-size:12.5px; line-height:1.3; }
+.global-notice .alert .btn { margin-left:8px; padding:2px 9px; font-size:11.5px; }
+@media (max-width:900px) { .overview-summary { grid-template-columns:minmax(0, 1fr); } .overview-summary-status { padding:0 0 16px; border-right:0; border-bottom:1px solid var(--ring); } }
+@media (max-width:560px) { .overview-summary .tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+/* Gene labels use an HTML track so long symbols remain readable at every width. */
+.gene-track-container { position:relative; width:100%; min-width:0; height:84px; box-sizing:border-box; padding:10px 12px; overflow:hidden; border:1px solid var(--ring); border-radius:8px; background:var(--surface); }
+.gene-track { position:absolute; top:10px; height:62px; }
+.gene-track-segment { position:absolute; top:0; height:62px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px; padding:6px 4px; border:1px solid var(--track-border, var(--accent)); border-bottom:3px solid var(--track-border, var(--accent)); border-radius:7px; text-align:center; background:var(--track-bg, var(--accent-soft)); }
+.gene-track-segment.off { border-style:dashed; border-color:var(--axis); background:var(--page); }
+.gene-track-name { min-width:0; max-width:100%; font-size:12.5px; font-weight:700; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+.gene-track-meta { max-width:100%; font-size:11px; color:var(--text-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gene-track-segment { min-width:0; overflow:hidden; }
+.metric-help { display:inline-block; margin-left:6px; color:var(--muted); font-size:11px; font-weight:500; text-decoration:none; vertical-align:middle; }
+.metric-help:hover, .metric-help:focus { color:var(--accent); text-decoration:underline; }
+.tile[role='button'] { cursor:pointer; transition:transform .12s ease, box-shadow .12s ease; }
+.tile[role='button']:hover { transform:translateY(-1px); box-shadow:0 2px 8px var(--ring); }
+.tile[role='button']:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.gene-track-segment.track-a { --track-border:var(--accent); --track-bg:var(--accent-soft); }
+.gene-track-segment.track-b { --track-border:var(--c-high); --track-bg:var(--ok-soft); }
+.gene-track-segment.track-c { --track-border:var(--c-medium); --track-bg:var(--warn-soft); }
+.gene-track-segment.track-d { --track-border:var(--c-del); --track-bg:var(--bad-soft); }
+.gene-track-segment.track-e { --track-border:var(--c-dup); --track-bg:var(--info-soft); }
+.gene-track-segment.track-f { --track-border:var(--muted); --track-bg:var(--page); }
+
+/* ---- Overview: compact square QC status tiles ---- */
+.health-tile-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+.health-tile { min-width:0; min-height:78px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:10px; border-radius:var(--radius); }
+.health-tile .v { font-size:22px; font-weight:600; }
+.health-tile .l { font-size:11px; line-height:1.3; font-weight:650; }
+.health-tile .detail { font-size:11px; color:var(--muted); margin-top:3px; }
+.calls-toolbar { align-items:flex-end; }
+.calls-toolbar .field { min-width:max-content; }
+.calls-toolbar .seg button { padding:4px 8px; font-size:11px; }
+@media (max-width:560px) {
+  .health-tile-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .health-tile { min-height:98px; }
+}
+
+@media print {
+  .top { position:static; box-shadow:none; }
+  .tabs, .toolbar, .btn, .subtabs, .sample-pick, .seg { display: none !important; }
+  .panel[hidden], .subpanel[hidden] { display: block !important; }
+  .collapsible-section:not([open]) > :not(summary) { display: block !important; }
+  .collapsible-section > summary { cursor: default; padding: 8px 0; }
+  .collapsible-section > summary::after { content: ''; }
+  .card { break-inside: avoid; }
+}
+@media (forced-colors: active) { .bar-fill, .swatch { forced-color-adjust: none; } }
+)---"
+
+
+# ----------------------------------------------------------------------------
+# Client-side application  (unified -- handles both ECHO and CANOPE payloads)
+# ----------------------------------------------------------------------------
+
+REPORT_JS <- r"---(/* Unified interactive report -- client-side application.
+   Reads the JSON blob in #unified-data and builds lazily-rendered tabs:
+   Overview (Samples / Chromosomes / Call landscape) · Samples · QC & warnings · CNV calls · Methods · Run. The header contains one sample filter and one global severity filter. The payload's meta.source field ("ECHO" or "CANOPE") selects
+   which source-specific call columns and panels are shown.  The ECHO call table
+   follows the legacy report's explicit fields; CANOPE exposes its own model fields.
+
+   Architecture follows the SPARKS / ECHO / CANOPE report family: h() DOM
+   helper, tableView, theme switch, hash navigation, independently collapsible Methods and Run cards, a compact global severity filter,
+   direct QC subtabs and a global sample filter.  No server and no network access are
+   needed once plotly.js is loaded. */
+(function () {
+  'use strict';
+
+  // ================================================================ data & utils
+  var DATA = JSON.parse(document.getElementById('unified-data').textContent);
+  var META = DATA.meta || {};
+  var IS_ECHO = META.source === 'ECHO';
+  var IS_CANOPE = META.source === 'CANOPE';
+  var TH = DATA.thresholds || {};
+  var SUM = DATA.summary || {};
+  var S = DATA.samples || { cols: [], data: {}, n: 0 };
+  var CALLS = DATA.calls || { cols: [], data: {}, n: 0 };
+  var PLOTS = DATA.plots || DATA.windows || {};
+  var CHR = DATA.chromosomes || {};
+  var SCOPE = DATA.scope || { cols: [], data: {}, n: 0 };
+  var QC = DATA.qc || null;             // CANOPE QC metrics block
+  var QC_FLAGS = DATA.qc_flags || null;  // ECHO QC flags table
+  var PCA = DATA.pca || null;
+  var DEPTH_HIST = DATA.depth_hist || null;
+  var CONF_RULES = DATA.conf_rules || {};
+  var PARAMS = DATA.params || {};
+  var SCORING = DATA.scoring || null;
+  var SETTINGS = DATA.settings || [];
+  var LOG = DATA.log || {};
+
+  var SAMPLES = (S.data.sample || S.data.Sample || []).slice();
+  var SAMPLE_KEY = S.data.sample ? 'sample' : 'Sample';
+  var SIDX = {}; SAMPLES.forEach(function (s, i) { SIDX[s] = i; });
+
+  // ---- analysis completeness (shared by the cohort snapshot, the sample
+  //      table and the header notice) --------------------------------------
+  // A sample counts as not analysed when the payload says so explicitly
+  // (Analysed = no/false/0) or, failing that, when its status is
+  // excluded / failed / not analysed.
+  function isNotAnalysed(i) {
+    var analysed = tcol(S, 'Analysed');
+    if (analysed.length) return /^(no|false|0)$/i.test(String(analysed[i]));
+    return /^(excluded|failed|not analysed|not analyzed)$/i.test(String(tcol(S, 'status')[i] || ''));
+  }
+  function notAnalysedSampleNames() {
+    return SAMPLES.filter(function (name, i) { return isNotAnalysed(i); });
+  }
+  // Why a sample was not analysed: prefer an explicit column from the payload,
+  // otherwise recover the reason from the pipeline log lines, e.g.
+  // "sample_qc: excluding 1 outlier sample(s) from calling (used neither as
+  //  test nor reference): SGT2501756".
+  function buildExclusionReasons() {
+    var out = {};
+    ['reason', 'exclusion_reason', 'Reason', 'Exclusion reason'].forEach(function (c) {
+      var col = tcol(S, c);
+      if (col.length) SAMPLES.forEach(function (nm, i) {
+        var v = String(col[i] || '').trim();
+        if (v) out[nm] = v;
+      });
+    });
+    asArray(LOG.warnings).concat(asArray(LOG.tail)).forEach(function (ln) {
+      var m = /excluding\s+\d+\s+outlier sample\(s\)\s+from calling\s*\(([^)]*)\)\s*:\s*(.+)$/.exec(String(ln));
+      if (!m) return;
+      var why = m[1].trim();
+      m[2].split(/,\s*/).forEach(function (nm) {
+        nm = nm.trim();
+        if (nm && !out[nm]) out[nm] = 'Outlier sample excluded from calling (' + why + ')';
+      });
+    });
+    asArray(LOG.warnings).concat(asArray(LOG.tail)).forEach(function (ln) {
+      var m = /(\d+)\s+sample\(s\)\s+excluded\s*:\s*(.+)$/.exec(String(ln));
+      if (!m) return;
+      m[2].split(/,\s*/).forEach(function (nm) {
+        nm = nm.trim();
+        if (nm && !out[nm]) out[nm] = 'Sample excluded from calling (sample QC failure)';
+      });
+    });
+    return out;
+  }
+  var EXCLUSION_REASONS = buildExclusionReasons();
+  // A sample that was not analysed is reported as a failure, never as a
+  // warning.  Normalise the level column at load time so the cohort severity
+  // filter, the health tiles and the sample table all agree.
+  (function normalizeNotAnalysedLevels() {
+    var levels = S.data && S.data.level;
+    if (!levels) return;
+    SAMPLES.forEach(function (nm, i) {
+      if (isNotAnalysed(i) && String(levels[i] || '').toLowerCase() !== 'fail') levels[i] = 'fail';
+    });
+  })();
+
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') el.addEventListener(k.slice(2), v);
+      else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else el.setAttribute(k, v === true ? '' : v);
+    });
+    for (var i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, kid) {
+    if (kid === null || kid === undefined || kid === false) return;
+    if (Array.isArray(kid)) kid.forEach(function (k) { append(el, k); });
+    else if (kid.nodeType) el.appendChild(kid);
+    else el.appendChild(document.createTextNode(String(kid)));
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  function range(n) { var a = new Array(n); for (var i = 0; i < n; i++) a[i] = i; return a; }
+  function uniq(a) { var seen = {}; return a.filter(function (v) { var k = String(v); if (seen[k]) return false; seen[k] = true; return true; }); }
+  function asArray(x) { return x === null || x === undefined ? [] : Array.isArray(x) ? x : [x]; }
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function fmtInt(n) { return Number(n).toLocaleString('en-US'); }
+  function fmt(v) {
+    if (v === null || v === undefined || (typeof v === 'number' && !isFinite(v))) return '';
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (typeof v !== 'number') return String(v);
+    if (Number.isInteger(v)) return String(v);
+    if (v !== 0 && Math.abs(v) < 1e-3) return v.toExponential(2);
+    return String(Number(v.toPrecision(4)));
+  }
+  function orNa(v) { return (v === null || v === undefined || v === '' || (typeof v === 'number' && !isFinite(v))) ? 'n/a' : fmt(v); }
+  function download(name, text, type) {
+    var blob = new Blob([text], { type: type || 'text/csv;charset=utf-8' });
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+  function csvField(v) {
+    var s = v === null || v === undefined ? '' : String(v);
+    return /[",\n\r\t]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function toCSV(cols, rowFn, n) {
+    var lines = [cols.map(csvField).join(',')];
+    for (var i = 0; i < n; i++) lines.push(cols.map(function (c) { return csvField(rowFn(c, i)); }).join(','));
+    return lines.join('\n') + '\n';
+  }
+  function store(key, val) {
+    try { if (val === undefined) return window.localStorage.getItem(key); window.localStorage.setItem(key, val); } catch (e) {}
+    return null;
+  }
+  var toastTimer = null;
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    if (!el) { el = h('div', { id: 'toast', class: 'toast', role: 'status', 'aria-live': 'polite' }); document.body.appendChild(el); }
+    el.textContent = msg; el.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('on'); }, 2200);
+  }
+  function copyText(text, okMsg) {
+    function fallback() {
+      var ta = h('textarea', { style: { position: 'fixed', opacity: '0' } }); ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast(okMsg || 'Copied'); } catch (e) { toast('Copy failed'); }
+      ta.remove();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { toast(okMsg || 'Copied'); }, fallback);
+    else fallback();
+  }
+  function sendToIgv(locus) {
+    try {
+      fetch('http://127.0.0.1:60151/goto?locus=' + encodeURIComponent(locus), { mode: 'no-cors' })
+        .then(function () { toast('Sent ' + locus + ' to IGV'); }, function () { toast('IGV is not reachable on port 60151'); });
+    } catch (e) { toast('IGV is not reachable on port 60151'); }
+  }
+  function plural(n, w, ws) { return n + ' ' + (n === 1 ? w : (ws || w + 's')); }
+  function pretty(c) { return String(c).replace(/_/g, ' '); }
+
+  // table helper: get a column array from a table object
+  function tcol(T, c) { return (T && T.data && T.data[c]) || []; }
+  function sval(s, col) { var i = SIDX[s]; return i === undefined ? null : tcol(S, col)[i]; }
+  function hasCol(T, c) { return T && T.data && T.data[c] && T.data[c].length; }
+
+  // ---- icons & levels ----
+  var ICON = { fail: '\u2716', error: '\u2716', warn: '\u25b2', warning: '\u25b2', info: '\u2139', ok: '\u2714' };
+  var LEVEL_LABEL = { fail: 'Fail', error: 'Fail', warn: 'Warning', warning: 'Warning', info: 'Note', ok: 'OK' };
+
+  // ================================================================ theme & palette
+  var CHROME = {
+    light: { surface: '#fcfcfb', text: '#0b0b0b', secondary: '#52514e', muted: '#898781', grid: '#e1e0d9', axis: '#c3c2b7', mid: '#f0efec', band: '#f0efec' },
+    dark: { surface: '#1a1a19', text: '#f0efec', secondary: '#c3c2b7', muted: '#898781', grid: '#2c2c2a', axis: '#383835', mid: '#383835', band: '#232321' }
+  };
+  var CAT = {
+    light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+    dark: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767']
+  };
+  var SEM = {
+    light: { DEL: '#D55E00', DUP: '#0072B2', HIGH: '#1B9E77', MEDIUM: '#E69F00', LOW: '#8C8C86', NA: '#C3C2B7',
+             fail: '#B3261E', error: '#B3261E', warn: '#B36B00', warning: '#B36B00', ok: '#0B6B3A', info: '#2A78D6',
+             test: '#3B4A5A', ref: '#B4B4AE', flank: '#8C8C86', hit: '#D55E00', del: '#D55E00', dup: '#0072B2',
+             high: '#1B9E77', medium: '#E69F00', low: '#8C8C86', bad: '#B3261E' },
+    dark: { DEL: '#F08A4B', DUP: '#56B4E9', HIGH: '#3CC59A', MEDIUM: '#F2B134', LOW: '#8C8C86', NA: '#555552',
+            fail: '#FF8A80', error: '#FF8A80', warn: '#FAB219', warning: '#FAB219', ok: '#5FD38D', info: '#6AA6F0',
+            test: '#A9BCD0', ref: '#6F6E68', flank: '#8C8C86', hit: '#F08A4B', del: '#F08A4B', dup: '#56B4E9',
+            high: '#3CC59A', medium: '#F2B134', low: '#8C8C86', bad: '#F08080' }
+  };
+  // The R side owns the palette (cnv_palette(), also used by the PDF plots);
+  // whatever it sends overrides the defaults above so both outputs always agree.
+  (function applyPalette() {
+    var P = META.palette;
+    if (!P || typeof P !== 'object') return;
+    function one(x) { var a = Array.isArray(x) ? x[0] : x; return typeof a === 'string' && /^#[0-9a-fA-F]{6}$/.test(a) ? a : null; }
+    var map = { del: ['DEL', 'del', 'hit'], dup: ['DUP', 'dup'], high: ['HIGH', 'high'], medium: ['MEDIUM', 'medium'], low: ['LOW', 'low'],
+                na: ['NA'], fail: ['fail', 'error', 'bad'], warn: ['warn', 'warning'], ok: ['ok'], info: ['info'], test: ['test'], reference: ['ref'] };
+    ['light', 'dark'].forEach(function (mode) {
+      var over = mode === 'dark' && P.dark && typeof P.dark === 'object' ? P.dark : {};
+      Object.keys(map).forEach(function (k) {
+        var v = one(over[k]) || (mode === 'light' ? one(P[k]) : null);
+        if (v) map[k].forEach(function (name) { SEM[mode][name] = v; });
+      });
+    });
+  })();
+  var SEQ = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
+  var DIV = ['#e34948', '#f0a3a2', '#f0efec', '#9ec5f4', '#2a78d6'];
+  var FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+
+  var themePref = store('unified-report-theme') || 'auto';
+  function resolved() {
+    if (themePref === 'light' || themePref === 'dark') return themePref;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function applyThemeAttr() {
+    if (themePref === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', themePref);
+  }
+  function tint(hex, amt, toward) {
+    if (!amt) return hex;
+    var n = function (s) { return [1, 3, 5].map(function (i) { return parseInt(s.slice(i, i + 2), 16); }); };
+    var a = n(hex), b = n(toward);
+    return '#' + a.map(function (v, i) { return ('0' + Math.round(v + (b[i] - v) * amt).toString(16)).slice(-2); }).join('');
+  }
+  function catColors(n, theme) {
+    var base = CAT[theme], out = [], tints = [0, 0.38, 0.62];
+    for (var i = 0; i < n; i++) out.push(tint(base[i % 8], tints[Math.min(Math.floor(i / 8), 2)], theme === 'light' ? '#ffffff' : '#000000'));
+    return out;
+  }
+  function alpha(hex, a) {
+    var v = [1, 3, 5].map(function (i) { return parseInt(hex.slice(i, i + 2), 16); });
+    return 'rgba(' + v.join(',') + ',' + a + ')';
+  }
+
+  // ================================================================ plotly helpers
+  var registry = [];
+  var CONFIG = { displaylogo: false, responsive: true, modeBarButtonsToRemove: ['autoScale2d', 'lasso2d', 'select2d'] };
+
+  function baseLayout(t, o) {
+    o = o || {};
+    var c = CHROME[t];
+    var ax = function (label, extra) {
+      return Object.assign({
+        title: { text: label || '', font: { color: c.secondary } },
+        gridcolor: c.grid, zerolinecolor: c.axis, linecolor: c.axis,
+        tickfont: { color: c.muted }, automargin: true
+      }, extra || {});
+    };
+    return {
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { family: FONT, size: 12, color: c.secondary },
+      xaxis: ax(o.xlab, o.xaxis), yaxis: ax(o.ylab, o.yaxis),
+      showlegend: !!o.legend,
+      legend: Object.assign({ orientation: 'h', y: -0.2, font: { color: c.secondary } }, o.legendOpts || {}),
+      margin: o.margin || { l: 56, r: 16, t: 16, b: 48 },
+      hoverlabel: { font: { family: FONT } },
+      hovermode: o.hovermode || 'closest',
+      annotations: o.annotations, shapes: o.shapes, barmode: o.barmode, dragmode: o.dragmode, bargap: o.bargap
+    };
+  }
+  function plot(div, build) {
+    if (div._note) { clear(div); div._note = false; }
+    div._render = function () {
+      var s = build(resolved());
+      var cfg = Object.assign({}, CONFIG, s.config || {});
+      s.layout.autosize = true;
+      var renderPromise = window.Plotly.react(div, s.data, s.layout, cfg);
+      if (renderPromise && typeof renderPromise.then === 'function')
+        renderPromise.then(function () { if (div._echoGeneTrackSync) div._echoGeneTrackSync(); });
+      if (s.onClick && div.on) {
+        if (div.removeAllListeners) div.removeAllListeners('plotly_click');
+        div.on('plotly_click', s.onClick);
+      }
+      div._dirty = false;
+    };
+    if (registry.indexOf(div) < 0) registry.push(div);
+    div._render();
+    return div;
+  }
+  function rerenderAll() {
+    registry = registry.filter(function (d) { return document.body.contains(d) && d._render; });
+    registry.forEach(function (d) { if (d.offsetParent !== null) d._render(); else d._dirty = true; });
+  }
+  function showNote(div, text) {
+    if (window.Plotly && div.data) window.Plotly.purge(div);
+    clear(div); div._render = null; div._note = true; div._dirty = false;
+    div.appendChild(emptyNote(text));
+  }
+  function refreshVisible(root) {
+    $$('.plot', root).forEach(function (d) {
+      if (!d._render) return;
+      if (d._dirty) d._render(); else if (window.Plotly && d.data) window.Plotly.Plots.resize(d);
+    });
+  }
+  // WebGL scatter only for big point clouds: browsers cap the number of WebGL contexts, so small plots stay on SVG.
+  function glType(n) { return n >= 800 ? 'scattergl' : 'scatter'; }
+  function plotBox(cls) { return h('div', { class: 'plot ' + (cls || '') }); }
+  function emptyNote(text) { return h('div', { class: 'empty', text: text }); }
+
+  // ================================================================ widgets
+  function chip(level, text) {
+    return h('span', { class: 'chip ' + level },
+      h('span', { class: 'ico', 'aria-hidden': 'true', text: ICON[level] || '' }), text === undefined ? LEVEL_LABEL[level] : text);
+  }
+  function confChip(v) { return h('span', { class: 'chip conf ' + (v || 'NA') }, v === 'NA' || !v ? 'n/a' : v); }
+  function typeChip(v) {
+    if (v !== 'DEL' && v !== 'DUP') return fmt(v);
+    return h('span', { class: 'chip type ' + v }, h('span', { class: 'ico', 'aria-hidden': 'true', text: v === 'DEL' ? '\u25BC' : '\u25B2' }), v);
+  }
+  function sevChip(v) { return v ? chip(v, v) : ''; }
+  function card(title, hint, body, cls) {
+    return h('section', { class: 'card' + (cls ? ' ' + cls : '') },
+      h('header', null, h('h3', { text: title }), hint ? h('span', { class: 'muted small hint', text: hint }) : null), body);
+  }
+  function detailCard(title, hint, body, open) {
+    var details = h('details', { class: 'card collapsible-section' });
+    var summary = h('summary', null, h('span', { text: title }), hint ? h('span', { class: 'collapse-hint', text: hint }) : null);
+    details.appendChild(summary);
+    details.appendChild(h('div', { class: 'collapsible-body' }, body));
+    if (open) details.open = true;
+    return details;
+  }
+  function tile(value, label, level, detail, onclick) {
+    var el = h('div', { class: 'tile' + (level ? ' ' + level : '') },
+      h('div', { class: 'v', text: String(value) }),
+      h('div', { class: 'l', text: label }),
+      detail ? h('span', { class: 'detail', text: detail }) : null);
+    if (typeof onclick === 'function') {
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', label + ': ' + String(value) + '. Activate to inspect details.');
+      el.addEventListener('click', onclick);
+      el.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onclick(ev); }
+      });
+    }
+    return el;
+  }
+  function alertBox(level, title, text, extra) {
+    return h('div', { class: 'alert ' + level, role: level === 'fail' || level === 'error' ? 'alert' : 'note' },
+      h('span', { class: 'ico', 'aria-hidden': 'true', text: ICON[level] }),
+      h('div', { class: 'body' },
+        title ? h('span', { class: 'ttl', text: title }) : null, title && text ? ' ' : null, text || null, extra || null));
+  }
+  function kv(pairs) {
+    var dl = h('dl', { class: 'kv' });
+    pairs.forEach(function (p) {
+      if (p[1] === null || p[1] === undefined || p[1] === '') return;
+      dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', null, p[1]));
+    });
+    return dl;
+  }
+  function runKv() {
+    return kv([
+      ['Report version', META.version],
+      ['Genome build', META.genome_build || META.genome_version],
+      ['Generated', META.generated]
+    ]);
+  }
+  function field(label, el) { return h('label', { class: 'field' }, label, el); }
+  function selectOf(options, value, onchange, aria) {
+    var sel = h('select', { 'aria-label': aria || 'Select' }, options.map(function (o) {
+      return typeof o === 'string' ? h('option', { value: o, text: o }) : h('option', { value: o.value, text: o.text });
+    }));
+    if (value !== undefined) sel.value = value;
+    if (onchange) sel.addEventListener('change', function () { onchange(sel.value); });
+    return sel;
+  }
+
+  // ================================================================ tables
+  function colType(T, c) {
+    var arr = tcol(T, c);
+    for (var i = 0; i < arr.length; i++) { if (arr[i] !== null && arr[i] !== undefined) return typeof arr[i]; }
+    return 'string';
+  }
+  // T = {cols, data: {col: [..]}, n}. opts: filename, pageSize, render {col: fn(v,i)->node},
+  // cellClass {col: fn(v,i)->class}, labels {col: header}, sort [col,'asc'|'desc'],
+  // onRow fn(i), selected fn()->row index, wrap [cols], note
+  function tableView(host, T, opts) {
+    opts = opts || {};
+    var n = T.n, pageSize = opts.pageSize || 25, page = 0, filter = '', pred = null;
+    var cols = (T.cols || []).slice();
+    var memo = opts.filename ? 'unified-report-tbl-' + opts.filename : null, hiddenCols = {};
+    (opts.hidden || []).forEach(function (c) { hiddenCols[c] = true; });
+    if (memo) {
+      try {
+        var saved = JSON.parse(store(memo) || 'null');
+        if (saved && typeof saved === 'object') {
+          if (saved.size && isFinite(Number(saved.size))) pageSize = Number(saved.size);
+          if (saved.hidden) { hiddenCols = {}; saved.hidden.forEach(function (c) { if (cols.indexOf(c) >= 0) hiddenCols[c] = true; }); }
+        }
+      } catch (e) {}
+    }
+    function persist() { if (memo) store(memo, JSON.stringify({ size: pageSize, hidden: Object.keys(hiddenCols) })); }
+    function shown() { return cols.filter(function (c) { return !hiddenCols[c]; }); }
+    var sortCol = opts.sort ? opts.sort[0] : null, sortDir = opts.sort ? opts.sort[1] : 'asc';
+    var types = {}; cols.forEach(function (c) { types[c] = colType(T, c); });
+    var idx = range(n);
+    var search = h('input', { type: 'search', placeholder: 'Filter rows\u2026', 'aria-label': 'Filter rows' });
+    var count = h('span', { class: 'muted small' });
+    var pager = h('span', { class: 'pager' });
+    var tbody = h('tbody'), thead = h('thead');
+    var table = h('table', { class: 'tbl' }, thead, tbody);
+    var wrap = h('div', { class: 'tbl-wrap' }, table);
+    var dl = h('button', { class: 'btn', type: 'button', text: 'Download CSV', onclick: function () {
+      download((opts.filename || 'table') + '.csv', toCSV(cols, function (c, k) { return tcol(T, c)[idx[k]]; }, idx.length));
+    } });
+    var chooser = null, sizeSel = null;
+    if (cols.length > 5) {
+      var menu = h('div', { class: 'col-menu' });
+      cols.forEach(function (c) {
+        var cb = h('input', { type: 'checkbox', checked: !hiddenCols[c] });
+        cb.addEventListener('change', function () { if (cb.checked) delete hiddenCols[c]; else hiddenCols[c] = true; persist(); draw(); });
+        menu.appendChild(h('label', null, cb, ' ' + ((opts.labels && opts.labels[c]) || pretty(c))));
+      });
+      chooser = h('details', { class: 'col-chooser' }, h('summary', { class: 'btn', text: 'Columns' }), menu);
+    }
+    if (n > 10) {
+      var sizes = [10, 20, 50, 100, 250];
+      if (sizes.indexOf(pageSize) < 0) { sizes.push(pageSize); sizes.sort(function (a, b) { return a - b; }); }
+      sizeSel = selectOf(sizes.map(function (s) { return { value: String(s), text: s + ' / page' }; }), String(pageSize),
+        function (v) { pageSize = Number(v); page = 0; persist(); draw(); }, 'Rows per page');
+    }
+    var view = { visible: function () { return idx.slice(); } };
+    var extraTools = (opts.tools || []).map(function (t) { return typeof t === 'function' ? t(view) : t; });
+    host.appendChild(h('div', { class: 'tbl-bar' }, search, count, chooser, sizeSel, extraTools, dl, pager));
+    host.appendChild(wrap);
+    if (opts.note) host.appendChild(h('div', { class: 'note', text: opts.note }));
+
+    function recompute() {
+      var f = filter.toLowerCase();
+      idx = [];
+      for (var i = 0; i < n; i++) {
+        if (pred && !pred(i)) continue;
+        if (f) {
+          var hit = false;
+          for (var j = 0; j < cols.length && !hit; j++) {
+            var v = tcol(T, cols[j])[i];
+            if (v !== null && v !== undefined && String(v).toLowerCase().indexOf(f) >= 0) hit = true;
+          }
+          if (!hit) continue;
+        }
+        idx.push(i);
+      }
+      if (sortCol) {
+        var arr = tcol(T, sortCol), dir = sortDir === 'asc' ? 1 : -1, num = types[sortCol] === 'number';
+        idx.sort(function (a, b) {
+          var x = arr[a], y = arr[b];
+          if (x === null || x === undefined) return 1;
+          if (y === null || y === undefined) return -1;
+          return (num ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * dir;
+        });
+      }
+      page = Math.min(page, Math.max(0, Math.ceil(idx.length / pageSize) - 1));
+      draw();
+    }
+    function draw() {
+      var tr = h('tr');
+      shown().forEach(function (c) {
+        tr.appendChild(h('th', {
+          scope: 'col', tabindex: '0', text: (opts.labels && opts.labels[c]) || pretty(c),
+          'aria-sort': sortCol === c ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none',
+          onclick: function () { sortDir = sortCol === c && sortDir === 'asc' ? 'desc' : 'asc'; sortCol = c; recompute(); },
+          onkeydown: function (e) { if (e.key === 'Enter') this.click(); }
+        }));
+      });
+      clear(thead).appendChild(tr);
+      clear(tbody);
+      var sel = opts.selected ? opts.selected() : -1;
+      var start = page * pageSize, end = Math.min(idx.length, start + pageSize);
+      var wrapCols = opts.wrap || [];
+      for (var k = start; k < end; k++) {
+        var i = idx[k];
+        var row = h('tr', { class: (opts.onRow ? 'clickable ' : '') + (i === sel ? 'sel' : '') });
+        if (opts.onRow) (function (ii) {
+          row.tabIndex = 0;
+          row.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('button,a')) return; opts.onRow(ii); });
+          row.addEventListener('keydown', function (e) { if (e.key === 'Enter') opts.onRow(ii); });
+        })(i);
+        shown().forEach(function (c) {
+          var v = tcol(T, c)[i], r = opts.render && opts.render[c];
+          var cc = opts.cellClass && opts.cellClass[c] ? opts.cellClass[c](v, i) : '';
+          var cls = ((types[c] === 'number' ? 'num ' : '') + (wrapCols.indexOf(c) >= 0 ? 'wrap ' : '') + (cc || '')).trim();
+          row.appendChild(h('td', { class: cls || false }, r ? r(v, i) : fmt(v)));
+        });
+        tbody.appendChild(row);
+      }
+      count.textContent = fmtInt(idx.length) + (idx.length === n ? '' : ' of ' + fmtInt(n)) + ' rows' +
+        (T.truncated ? ' (truncated from ' + fmtInt(T.n_total) + ')' : '');
+      var pages = Math.max(1, Math.ceil(idx.length / pageSize));
+      clear(pager);
+      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '\u2039', 'aria-label': 'Previous page', disabled: page === 0, onclick: function () { page--; draw(); } }));
+      pager.appendChild(h('span', { class: 'small', text: (page + 1) + ' / ' + pages }));
+      pager.appendChild(h('button', { class: 'btn', type: 'button', text: '\u203a', 'aria-label': 'Next page', disabled: page >= pages - 1, onclick: function () { page++; draw(); } }));
+    }
+    var timer = null;
+    search.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { filter = search.value; page = 0; recompute(); }, 120);
+    });
+    recompute();
+    return { setPredicate: function (fn) { pred = fn; page = 0; recompute(); }, refresh: recompute, redraw: draw, count: function () { return idx.length; }, visible: function () { return idx.slice(); }, select: function (i) {
+      var k = idx.indexOf(i);
+      if (k >= 0) page = Math.floor(k / pageSize);
+      draw();
+      var s = tbody.querySelector('tr.sel');
+      if (s && s.scrollIntoView) s.scrollIntoView({ block: 'nearest' });
+    } };
+  }
+  function simpleTable(T, opts) { var host = h('div'); tableView(host, T, opts); return host; }
+  function subTable(T, cols) {
+    var out = { cols: cols, data: {}, n: T.n };
+    cols.forEach(function (c) { out.data[c] = tcol(T, c); });
+    return out;
+  }
+
+  // ================================================================ global state & filters
+  var state = { sample: META.focus || '', call: null, alertFilter: 'all', listeners: [] };
+  var headerPicker = null, globalSeverityControl = null;
+  function onState(cb) { state.listeners.push(cb); }
+  function severityGroup(level) {
+    if (level === 'error' || level === 'fail') return 'fail';
+    if (level === 'warn' || level === 'warning') return 'warning';
+    if (level === 'info') return 'note';
+    if (level === 'ok') return 'ok';
+    return 'note';
+  }
+  function severityMatches(level, filter) {
+    if (!filter || filter === 'all') return true;
+    if (filter === 'hide') return false;
+    return severityGroup(level) === filter;
+  }
+  function applyGlobalAlertFilter() {
+    var filter = state.alertFilter || 'all';
+    document.body.setAttribute('data-alert-filter', filter);
+    $$('.alert').forEach(function (el) {
+      var classes = (el.className || '').split(/\s+/);
+      var level = classes.filter(function (c) { return /^(fail|error|warn|warning|info|ok)$/.test(c); })[0] || 'info';
+      el.hidden = !severityMatches(level, filter);
+    });
+    if (globalSeverityControl) globalSeverityControl.set(filter);
+  }
+  function notify() {
+    state.listeners.forEach(function (cb) { try { cb(); } catch (e) { if (window.console) console.error(e); } });
+    applyGlobalAlertFilter();
+  }
+  // A single cohort-wide sample filter lives in the report header.
+  function setSample(s, quiet) {
+    var next = s || '';
+    if (next !== state.sample) state.call = null;
+    state.sample = next;
+    if (headerPicker) headerPicker.value = state.sample;
+    if (!quiet) notify();
+  }
+  function setAlertFilter(filter) {
+    state.alertFilter = filter || 'all';
+    notify();
+  }
+  function makeSeveritySegments(current, options, onChange, ariaLabel) {
+    var buttons = {}, seg = h('div', { class: 'seg', role: 'group', 'aria-label': ariaLabel || 'Filter by severity' });
+    options.forEach(function (opt) {
+      var b = h('button', { type: 'button', 'aria-pressed': opt.value === current ? 'true' : 'false', text: opt.label,
+        onclick: function () { current = opt.value; sync(); if (onChange) onChange(current); } });
+      buttons[opt.value] = b; seg.appendChild(b);
+    });
+    function sync() { Object.keys(buttons).forEach(function (k) { buttons[k].setAttribute('aria-pressed', k === current ? 'true' : 'false'); }); }
+    return { el: seg, set: function (value) { current = value; sync(); } };
+  }
+
+  // ================================================================ sub-tabs
+  // Builds an inner segmented control + panels.  items: [{id, label, build(root)}]
+  function subTabs(items, defaultId) {
+    var current = defaultId || items[0].id;
+    var bar = h('div', { class: 'subtabs', role: 'tablist' });
+    var panels = {};
+    var container = h('div');
+    items.forEach(function (it) {
+      var btn = h('button', { class: 'subtab', role: 'tab', type: 'button', 'aria-selected': it.id === current ? 'true' : 'false',
+        text: it.label, onclick: function () { switchTo(it.id); } });
+      bar.appendChild(btn);
+      var p = h('div', { class: 'subpanel', role: 'tabpanel', hidden: it.id === current ? false : true });
+      panels[it.id] = { btn: btn, panel: p, built: false, build: it.build };
+      container.appendChild(p);
+    });
+    function switchTo(id) {
+      current = id;
+      Object.keys(panels).forEach(function (k) {
+        var on = k === id; panels[k].panel.hidden = !on;
+        panels[k].btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      if (!panels[id].built) { panels[id].built = true; try { panels[id].build(panels[id].panel); } catch (e) { panels[id].panel.appendChild(h('div', { class: 'empty', text: 'Error: ' + e.message })); if (window.console) console.error(e); } }
+      else refreshVisible(panels[id].panel);
+      applyGlobalAlertFilter();
+      setTimeout(function () { refreshVisible(panels[id].panel); applyGlobalAlertFilter(); }, 60);
+    }
+    container.insertBefore(bar, container.firstChild);
+    // build the default panel immediately
+    if (!panels[current].built) { panels[current].built = true; panels[current].build(panels[current].panel); }
+    return { el: container, switchTo: switchTo, refresh: function () { if (panels[current].built) refreshVisible(panels[current].panel); } };
+  }
+
+  // ================================================================ call helpers
+  var CALL_ROW = {};
+  tcol(CALLS, 'id').forEach(function (id, i) { CALL_ROW[id] = i; });
+  if (!hasCol(CALLS, 'id') && hasCol(CALLS, 'ID')) tcol(CALLS, 'ID').forEach(function (id, i) { CALL_ROW[id] = i; });
+
+  function callsOf(s) {
+    var out = [], sm = tcol(CALLS, 'sample');
+    if (!sm.length) sm = tcol(CALLS, 'Sample');
+    for (var i = 0; i < CALLS.n; i++) if (!s || sm[i] === s) out.push(i);
+    return out;
+  }
+  var CONF_RANK = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+  function callOrder(rows) {
+    var q = tcol(CALLS, 'q_some'), bf = tcol(CALLS, 'bf'), cf = tcol(CALLS, 'confidence');
+    if (!cf.length) cf = tcol(CALLS, 'Confidence');
+    return rows.slice().sort(function (a, b) {
+      var d = (CONF_RANK[cf[b]] || 0) - (CONF_RANK[cf[a]] || 0);
+      if (d) return d;
+      var qa = isNum(q[a]) ? q[a] : isNum(bf[a]) ? bf[a] : -1;
+      var qb = isNum(q[b]) ? q[b] : isNum(bf[b]) ? bf[b] : -1;
+      return qb - qa;
+    });
+  }
+  function hasPlot(i) {
+    var hp = tcol(CALLS, 'has_plot'); if (hp.length) return !!hp[i];
+    var v = tcol(CALLS, 'view'); return !!v[i];
+  }
+  function callId(i) { return tcol(CALLS, 'id')[i] !== undefined ? tcol(CALLS, 'id')[i] : tcol(CALLS, 'ID')[i]; }
+  function callSample(i) { return tcol(CALLS, 'sample')[i] || tcol(CALLS, 'Sample')[i]; }
+  function callType(i) { return tcol(CALLS, 'type')[i] || tcol(CALLS, 'Type')[i]; }
+  function callConf(i) { return tcol(CALLS, 'confidence')[i] || tcol(CALLS, 'Confidence')[i]; }
+  function callGene(i) { return tcol(CALLS, 'gene')[i] || tcol(CALLS, 'Gene')[i] || ''; }
+  function callInterval(i) { return tcol(CALLS, 'interval')[i] || tcol(CALLS, 'Genomic')[i] || ''; }
+
+  // ================================================================ TABS registry
+  // Keep the tab registry separate from call-selection helpers: the shell
+  // uses it to create and activate the report panels during init().
+  var TABS = [];
+  var CALLS_NAV = null;   // set by the calls tab: j / k keyboard navigation
+  function tab(id, label, available, build) {
+    var t = { id: id, label: label, available: available, build: build, built: false };
+    TABS.push(t); return t;
+  }
+
+  // ================================================================ OVERVIEW
+  function overviewBars() {
+    var host = h('div'), box = plotBox('');
+    var order = selectOf([{ value: 'input', text: 'Input order' }, { value: 'calls', text: 'Most calls first' }, { value: 'flags', text: 'Most flags first' }], 'calls', null, 'Sample order');
+    host.appendChild(h('div', { class: 'toolbar' }, field('Order', order)));
+    host.appendChild(box);
+    if (!SAMPLES.length) { host.appendChild(emptyNote('No samples.')); return host; }
+    function draw() {
+      var nC = tcol(S, 'n_cnvs'), nC2 = hasCol(S, 'CNV calls') ? tcol(S, 'CNV calls') : nC;
+      var nH = tcol(S, 'n_high'), nH2 = hasCol(S, 'HIGH') ? tcol(S, 'HIGH') : nH;
+      var nM = tcol(S, 'n_medium'), nM2 = hasCol(S, 'MEDIUM') ? tcol(S, 'MEDIUM') : nM;
+      var nL = tcol(S, 'n_low'), nL2 = hasCol(S, 'LOW') ? tcol(S, 'LOW') : nL;
+      var ids = range(S.n);
+      if (order.value === 'calls') ids.sort(function (a, b) { return (nC2[b] || 0) - (nC2[a] || 0); });
+      plot(box, function (t) {
+        var c = SEM[t], x = ids.map(function (i) { return SAMPLES[i]; });
+        var mk = function (name, arr, col) { return { type: 'bar', name: name, x: x, y: ids.map(function (i) { return arr[i] || 0; }), marker: { color: col }, hovertemplate: '%{x}<br>' + name + ': %{y}<extra></extra>' }; };
+        var data = [mk('HIGH', nH2.length ? nH2 : nH, c.HIGH || c.high), mk('MEDIUM', nM2.length ? nM2 : nM, c.MEDIUM || c.medium), mk('LOW', nL2.length ? nL2 : nL, c.LOW || c.low)];
+        // Excluded samples have 0 calls so their stacked bar is invisible.
+        // Add a thin red "excluded" baseline marker so they are still
+        // visible in the figure (one bar per excluded sample at y=0 with
+        // a red marker line).
+        var exclIds = ids.filter(function (i) { return isNotAnalysed(i); });
+        if (exclIds.length) {
+          data.push({ type: 'scatter', mode: 'markers', name: 'Excluded', x: exclIds.map(function (i) { return SAMPLES[i]; }), y: exclIds.map(function () { return 0; }),
+            marker: { color: c.fail, symbol: 'x', size: 10, line: { width: 2, color: c.fail } },
+            hovertemplate: '%{x}<br>Excluded from calling<extra></extra>', showlegend: true });
+        }
+        var L = baseLayout(t, { ylab: 'CNV calls', barmode: 'stack', legend: true, xaxis: { type: 'category', tickangle: -45 }, margin: { l: 56, r: 16, t: 16, b: 90 } });
+        L.yaxis.rangemode = 'tozero';
+        return { data: data, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
+      });
+    }
+    order.addEventListener('change', draw); draw();
+    return host;
+  }
+  function healthStatusTiles() {
+    var counts = { ok: 0, warn: 0, fail: 0 };
+    var lvCol = tcol(S, 'level'), stCol = tcol(S, 'status');
+    if (lvCol.length) lvCol.forEach(function (l) {
+      var key = String(l || '').toLowerCase();
+      // "excluded" means the sample was not analysed -- a failure, not a warning.
+      if (key === 'warning') key = 'warn';
+      if (key === 'excluded' || key === 'error') key = 'fail';
+      if (counts[key] !== undefined) counts[key]++;
+    });
+    else if (stCol.length) stCol.forEach(function (l) {
+      var key = ({ OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'fail', failed: 'fail', excluded: 'fail' })[l] || 'ok';
+      counts[key]++;
+    });
+    var grid = h('div', { class: 'health-tile-grid' });
+    [
+      ['ok', 'No flags', 'Samples without QC flags'],
+      ['warn', 'Warnings', 'Samples with QC warnings'],
+      ['fail', 'Fail', 'Samples failing QC']
+    ].forEach(function (p) {
+      var pct = S.n ? Math.round(100 * counts[p[0]] / S.n) : 0;
+      var el = tile(counts[p[0]], p[1], p[0], pct + '% of samples');
+      el.classList.add('health-tile');
+      el.title = p[2];
+      grid.appendChild(el);
+    });
+    return grid;
+  }
+
+  function missingBedChromosomeClasses() {
+    var missing = [];
+    if (SCOPE && SCOPE.n) {
+      range(SCOPE.n).forEach(function (i) {
+        var cls = String(tcol(SCOPE, 'class')[i] || '').toLowerCase();
+        var present = !!tcol(SCOPE, 'present')[i];
+        if (!present && cls !== 'other' && (cls === 'autosome' || cls === 'x' || cls === 'y')) {
+          var label = cls === 'autosome' ? 'Autosomes (chr1-22)' : 'chr' + cls.toUpperCase();
+          missing.push({ label: label, cls: cls });
+        }
+      });
+    } else if (CHR.status && CHR.status.n) {
+      range(CHR.status.n).forEach(function (i) {
+        var cls = String(tcol(CHR.status, 'class')[i] || '').toLowerCase();
+        var inInput = !!tcol(CHR.status, 'in_input')[i];
+        if (!inInput && cls !== 'other' && (cls === 'autosome' || cls === 'x' || cls === 'y')) {
+          missing.push({ label: cls === 'autosome' ? 'Autosomes (chr1-22)' : 'chr' + cls.toUpperCase(), cls: cls });
+        }
+      });
+    }
+    // One combined entry when neither gonosome is in the BED.
+    var gx = missing.filter(function (m) { return m.cls === 'x'; })[0];
+    var gy = missing.filter(function (m) { return m.cls === 'y'; })[0];
+    if (gx && gy) {
+      missing = missing.filter(function (m) { return m.cls !== 'x' && m.cls !== 'y'; });
+      missing.push({ label: 'Gonosomes (chrX & chrY)', cls: 'gonosome' });
+    }
+    return uniq(missing.map(function (m) { return m.label; }));
+  }
+
+  var overviewSubtabs = null;
+  function buildOverviewSamples(root) {
+    var del = 0, dup = 0, high = 0;
+    var typeCol = tcol(CALLS, 'type'); if (!typeCol.length) typeCol = tcol(CALLS, 'Type');
+    typeCol.forEach(function (t) { if (t === 'DEL') del++; else if (t === 'DUP') dup++; });
+    var confCol = tcol(CALLS, 'confidence'); if (!confCol.length) confCol = tcol(CALLS, 'Confidence');
+    confCol.forEach(function (c) { if (c === 'HIGH') high++; });
+    var called = Number(SUM.samples_called !== undefined ? SUM.samples_called : (META.n_analysed || 0));
+    var requested = Number(SUM.samples_requested !== undefined ? SUM.samples_requested : (META.n_samples || S.n));
+    var notAnalysed = Math.max(0, requested - called);
+    // Names (and reasons) of the samples that were not analysed.
+    var notAnalysedNames = notAnalysedSampleNames();
+    // Overview > Samples contains the cohort snapshot and the sample QC table.
+    // Cohort-wide Sample QC status tiles remain in QC & warnings.
+    var summary = h('div', { class: 'overview-summary overview-summary-single' });
+    var stats = h('div', { class: 'overview-summary-stats' },
+      h('div', { class: 'tiles' },
+        tile(called + ' / ' + requested, 'samples analysed / requested', called < requested ? 'fail' : 'ok'),
+        tile(notAnalysed, 'samples not analysed', notAnalysed > 0 ? 'fail' : 'ok',
+          notAnalysedNames.length ? notAnalysedNames.join(', ') : null,
+          notAnalysedNames.length ? function () {
+            if (notAnalysedNames.length === 1) {
+              setSample(notAnalysedNames[0]);
+            } else {
+              setSample('');
+              var sampleTable = $('#sample-qc-table');
+              if (sampleTable && sampleTable.scrollIntoView)
+                sampleTable.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+          } : null),
+        // The four count tiles below are informational (no threshold to fail);
+        // render them green (ok) so the cohort snapshot reads as a status
+        // board rather than a mix of coloured and plain boxes.
+        tile(fmtInt(CALLS.n), 'CNV calls (' + del + ' DEL, ' + dup + ' DUP)', 'ok'),
+        tile(fmtInt(high), 'HIGH-confidence calls', 'ok'),
+        tile(SUM.samples_with_calls || 0, 'samples with at least one call', 'ok'),
+        tile(fmtInt(META.n_targets || SUM.targets || 0), 'targets analysed', 'ok')));
+    summary.appendChild(stats);
+    // Cohort snapshot must show WHICH samples were not analysed and why, not
+    // only how many: names and reasons sit under the count tiles.  The
+    // sample_qc outlier tag is rendered as a fail chip next to the name.
+    // (The noise_z figure used to live here; it is now a separate card at
+    // the end of the subtab so the snapshot stays a compact summary.)
+    var nzCol = tcol(S, 'noise_z');
+    var nzThr = TH.qc_zscore;
+    var hasNz = nzCol.length && nzThr !== null && nzThr !== undefined;
+    if (notAnalysedNames.length) {
+      summary.appendChild(h('div', { class: 'overview-not-analysed' },
+        h('strong', { text: 'Samples not analysed (' + notAnalysedNames.length + ')' }),
+        h('ul', null, notAnalysedNames.map(function (n) {
+          var reason = EXCLUSION_REASONS[n] || '';
+          var li = h('li', null, h('strong', { text: String(n) }));
+          if (reason) {
+            // The "Outlier: noise z" tag is rendered as a fail chip so it is
+            // visually distinct from a plain text reason; everything else
+            // stays as a dash-prefixed text.
+            if (/^Outlier:\s*noise z/i.test(reason)) {
+              li.appendChild(h('span', { text: ' ' }));
+              li.appendChild(chip('fail', reason));
+            } else {
+              li.appendChild(document.createTextNode(' \u2014 ' + reason));
+            }
+          }
+          return li;
+        }))));
+    }
+    // Card order in Overview > Samples:
+    //   1. Cohort snapshot (summary boxes + not-analysed list)
+    //   2. Sample QC table (per-sample detail)
+    //   3. Sample noise (robust z) figure (separate card at the end)
+    root.appendChild(card('Cohort snapshot', 'Cohort-level summary and analysis completeness', summary));
+    buildSampleTable(root);
+    // Separate noise_z figure card: one bar per sample, dashed threshold
+    // line, failed/excluded samples in red, threshold-crossers in yellow.
+    // Only shown when noise_z values are present in the payload.
+    if (hasNz) {
+      var nzBox = plotBox('short');
+      root.appendChild(card('Sample noise (robust z)',
+        'Outliers above the dashed line (qc_zscore = ' + fmt(nzThr) + ') are excluded from calling by the sample_qc step. See Methods for the formula.',
+        nzBox));
+      plot(nzBox, function (t) {
+        var c = SEM[t];
+        var ids = range(S.n).filter(function (i) { return isNum(nzCol[i]); });
+        var d = [{ type: 'bar', x: ids.map(function (i) { return SAMPLES[i]; }), y: ids.map(function (i) { return nzCol[i]; }),
+          marker: { color: ids.map(function (i) { return isNotAnalysed(i) ? c.fail : Math.abs(nzCol[i]) > nzThr ? c.warn : CAT[t][0]; }) },
+          hovertemplate: '%{x}<br>noise z: %{y:.2f}<extra></extra>' }];
+        var lo = Math.min(0, Math.min.apply(null, nzCol)), hi = Math.max(Math.max.apply(null, nzCol), nzThr);
+        // OUTLIER arrow annotation on every bar above the threshold, same as
+        // the QC > Sample variability chart, so the figure is self-explanatory
+        // here too.
+        var annotations = [];
+        ids.forEach(function (i) {
+          if (Math.abs(nzCol[i]) > nzThr) {
+            annotations.push({
+              x: SAMPLES[i], y: nzCol[i], xref: 'x', yref: 'y',
+              text: 'OUTLIER', showarrow: true, arrowhead: 2, arrowsize: 0.8,
+              arrowcolor: c.fail, font: { color: c.fail, size: 10, weight: 'bold' },
+              ax: 0, ay: -28, bordercolor: c.fail, borderpad: 2, borderwidth: 1,
+              bgcolor: t === 'dark' ? 'rgba(40,12,10,0.85)' : 'rgba(253,236,235,0.95)'
+            });
+          }
+        });
+        var L = baseLayout(t, { ylab: 'noise z', yaxis: { type: 'linear', range: [lo < 0 ? lo * 1.1 : 0, hi > 0 ? hi * 1.18 : 1] },
+          xaxis: { type: 'category', tickangle: -45, showticklabels: ids.length <= 60 },
+          shapes: [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: nzThr, y1: nzThr, line: { color: c.fail, dash: 'dash', width: 1.5 } }],
+          annotations: annotations,
+          margin: { l: 50, r: 12, t: 24, b: ids.length <= 60 ? 70 : 20 } });
+        return { data: d, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
+      });
+    }
+  }
+  function buildOverviewCalls(root) {
+    root.appendChild(card('Calls per sample', 'Select a bar to filter the report to that sample', overviewBars()));
+    if (CALLS.n) {
+      var overviewMap = plotBox('');
+      root.appendChild(card('Genome-wide map of calls', 'DEL and DUP calls per chromosome; filtered by the selected sample', overviewMap));
+      genomeCallHistogram(overviewMap);
+      onState(function () { if (overviewMap._render) overviewMap._render(); });
+    } else root.appendChild(emptyNote('No CNV calls are available for the genome-wide distribution.'));
+  }
+  tab('overview', 'Overview', function () { return true; }, function (root) {
+    var st = subTabs([
+      { id: 'samples', label: 'Samples', build: buildOverviewSamples },
+      { id: 'chromosomes', label: 'Chromosomes', build: buildChromosomeOverview },
+      { id: 'calls', label: 'Call landscape', build: buildOverviewCalls }
+    ], 'samples');
+    overviewSubtabs = st;
+    st.el.firstChild.setAttribute('aria-label', 'Overview sections');
+    root.appendChild(st.el);
+    onState(function () { st.refresh(); });
+  });
+
+  // ================================================================ QC & WARNINGS
+  // QC_METRICS for the metric bars
+  var QC_METRICS = [
+    { col: 'median_depth', col2: 'Median depth', label: 'Median target depth', thr: function () { return TH.qc_min_cov || TH.min_cov; }, dir: 'below', hint: 'below the line = low coverage' },
+    { col: 'total_reads', col2: 'Total reads', label: 'Total reads on the analysed targets', thr: function () { return TH.qc_min_total_reads || TH.min_total_reads; }, dir: 'below', hint: 'below the line = too few reads' },
+    { col: 'max_corr', col2: 'Max correlation', label: 'Best Spearman correlation with another sample', thr: function () { return TH.qc_min_corr || TH.min_corr; }, dir: 'below', hint: 'below the line = no comparable reference' },
+    { col: 'noise_z', col2: '', label: 'Sample noise (robust z of the exon-count dispersion)', thr: function () { return TH.qc_zscore; }, dir: 'above', hint: 'above the line = noisy sample' },
+    { col: 'n_refs', col2: 'References', label: 'Reference samples used', thr: function () { return IS_CANOPE ? 5 : null; }, dir: 'below', hint: 'below the line = weak reference set' },
+    { col: 'n_cnvs', col2: 'CNV calls', label: 'CNV calls', thr: function () { return null; }, dir: null, hint: 'outliers suggest a noisy sample / batch effect' }
+  ];
+  function isOutlierZ(v, thr) { return isNum(v) && (TH.outlier_sides === 'both' ? Math.abs(v) > thr : v > thr); }
+  function qcTypeChip(v) {
+    var lv = v === 'Missing Chromosome' ? 'fail' : (v === 'Chromosome not analysed' || v === 'Whole sample' || v === 'Target removed' || v === 'Analysis scope') ? 'warn' : 'info';
+    return h('span', { class: 'chip ' + lv }, h('span', { class: 'ico', 'aria-hidden': 'true', text: ICON[lv] }), v);
+  }
+  function metricBars(m, orderSel) {
+    var box = plotBox('short');
+    var vals = tcol(S, m.col);
+    if (!vals.length && m.col2) vals = tcol(S, m.col2);
+    var ids = range(S.n).filter(function (i) { return isNum(vals[i]); });
+    if (!ids.length) return null;
+    function draw() {
+      var o = orderSel.value, order = ids.slice();
+      if (o === 'asc') order.sort(function (a, b) { return vals[a] - vals[b]; });
+      else if (o === 'desc') order.sort(function (a, b) { return vals[b] - vals[a]; });
+      plot(box, function (t) {
+        var c = SEM[t], thr = m.thr();
+        // A sample is shown "bad" (yellow) when its metric value crosses the
+        // threshold, and shown "fail" (red) when the SAMPLE itself is
+        // excluded/failed -- a failed sample is red in every figure even if
+        // the individual metric value happens to pass.
+        var bad = function (i) { return thr !== null && thr !== undefined && (m.dir === 'below' ? vals[i] < thr : vals[i] > thr); };
+        var failed = function (i) { return isNotAnalysed(i); };
+        var shapes = (thr !== null && thr !== undefined) ? [{ type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: thr, y1: thr, line: { color: c.fail, dash: 'dash', width: 1.5 } }] : [];
+        // For the noise_z outlier metric, label every bar above the
+        // threshold with an "OUTLIER" text annotation so the figure is
+        // self-explanatory and cross-references the sample-table tag and
+        // the Methods section.
+        var annotations = [];
+        if (m.col === 'noise_z' && thr !== null && thr !== undefined) {
+          order.forEach(function (i) {
+            if (isOutlierZ(vals[i], thr)) {
+              annotations.push({
+                x: SAMPLES[i], y: vals[i], xref: 'x', yref: 'y',
+                text: 'OUTLIER', showarrow: true, arrowhead: 2, arrowsize: 0.8,
+                arrowcolor: c.fail, font: { color: c.fail, size: 10, weight: 'bold' },
+                ax: 0, ay: -28, bordercolor: c.fail, borderpad: 2, borderwidth: 1,
+                bgcolor: t === 'dark' ? 'rgba(40,12,10,0.85)' : 'rgba(253,236,235,0.95)'
+              });
+            }
+          });
+        }
+        var d = [{ type: 'bar', x: order.map(function (i) { return SAMPLES[i]; }), y: order.map(function (i) { return vals[i]; }),
+          marker: { color: order.map(function (i) { return failed(i) ? c.fail : bad(i) ? c.warn : CAT[t][0]; }) },
+          hovertemplate: '%{x}<br>' + m.label + ': %{y}<extra></extra>' }];
+        var lo = Math.min(0, Math.min.apply(null, ids.map(function (i) { return vals[i]; }))), hi = Math.max(Math.max.apply(null, ids.map(function (i) { return vals[i]; })), thr !== null && thr !== undefined ? thr : -Infinity);
+        var L = baseLayout(t, { ylab: '', yaxis: { type: 'linear', range: [lo < 0 ? lo * 1.1 : 0, hi > 0 ? hi * 1.18 : 1] }, xaxis: { type: 'category', tickangle: -45, showticklabels: order.length <= 60 }, shapes: shapes, annotations: annotations, margin: { l: 60, r: 16, t: 24, b: order.length <= 60 ? 80 : 20 } });
+        return { data: d, layout: L, onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
+      });
+    }
+    orderSel.addEventListener('change', draw);
+    draw();
+    var nbad = m.thr() === null || m.thr() === undefined ? 0 : ids.filter(function (i) { return m.dir === 'below' ? vals[i] < m.thr() : vals[i] > m.thr(); }).length;
+    var metricCard = card(m.label, (m.thr() !== null && m.thr() !== undefined ? 'threshold ' + fmt(m.thr()) + ' \u2013 ' : '') + m.hint + (nbad ? ' \u2013 ' + nbad + ' sample(s) flagged' : ''), box, nbad ? 'flagged' : '');
+    var metricTitle = metricCard.querySelector('header h3');
+    if (metricTitle) metricTitle.appendChild(h('a', {
+      class: 'metric-help', href: '#tab=methods',
+      title: 'See the Methods tab for the metric definition',
+      'aria-label': 'Help: ' + m.label + ' definition', text: '(?)'
+    }));
+    return metricCard;
+  }
+
+  // ---- Cohort metrics ----
+  function buildCohortMetricsSubtab(root, metrics) {
+    var stack = h('div', { class: 'stack' });
+    var orderSel = selectOf([{ value: 'input', text: 'Input order' }, { value: 'asc', text: 'Lowest first' }, { value: 'desc', text: 'Highest first' }], 'input', null, 'Order');
+    stack.appendChild(h('div', { class: 'toolbar' }, field('Sort bars', orderSel), h('span', { class: 'note', text: 'Dashed lines mark QC thresholds. Select a bar to inspect that sample across the report.' })));
+    var grid = h('div', { class: 'grid g2' });
+    metrics.forEach(function (m) { var c = metricBars(m, orderSel); if (c) grid.appendChild(c); });
+    if (grid.children.length) stack.appendChild(grid);
+    else stack.appendChild(emptyNote('No metrics in this group were provided.'));
+    root.appendChild(stack);
+  }
+  function buildPcaSubtab(root) {
+    if (!PCA) { root.appendChild(emptyNote('PCA needs at least 3 samples with variable coverage.')); return; }
+    var pbox = plotBox('tall');
+    root.appendChild(card('Cohort PCA of coverage profiles', (PCA.n_samples || PCA.names && PCA.names.length) + ' samples · ' + fmtInt(PCA.n_targets || PCA.n_rows || 0) + ' targets (log2 counts)', pbox));
+    pcaPlot(pbox);
+  }
+  function buildDepthHistogramSubtab(root) {
+    if (!DEPTH_HIST || !DEPTH_HIST.counts || !DEPTH_HIST.counts.length) {
+      root.appendChild(emptyNote('No target-depth distribution was provided.')); return;
+    }
+    var dbox = plotBox('mid');
+    root.appendChild(card('Target depth distribution', 'Median depth of each target; dashed line = QC threshold', dbox));
+    depthHist(dbox);
+  }
+
+  function buildDepthCorrelationSubtab(root) {
+    var stack = h('div', { class: 'stack' });
+    var depth = tcol(S, 'median_depth'); if (!depth.length) depth = tcol(S, 'Median depth');
+    var corr = tcol(S, 'max_corr'); if (!corr.length) corr = tcol(S, 'Max correlation');
+    var okIds = range(S.n).filter(function (i) { return isNum(depth[i]) && isNum(corr[i]); });
+    if (okIds.length >= 2) {
+      var sc = plotBox('tall');
+      stack.appendChild(card('Depth vs. best correlation', 'dashed lines = QC thresholds; click a point to select the sample', sc));
+      plot(sc, function (t) {
+        var c = SEM[t], data = [];
+        var lvCol = tcol(S, 'level'), stCol = tcol(S, 'status');
+        ['ok', 'warn', 'fail'].forEach(function (lv) {
+          var ids = okIds.filter(function (i) {
+            if (lvCol.length) return lvCol[i] === lv;
+            if (stCol.length) { var m = { OK: 'ok', Warning: 'warn', Fail: 'fail', Excluded: 'fail' }[stCol[i]] || 'ok'; return m === lv; }
+            return lv === 'ok';
+          });
+          if (!ids.length) return;
+          data.push({ type: glType(okIds.length), mode: 'markers', name: LEVEL_LABEL[lv], x: ids.map(function (i) { return depth[i]; }), y: ids.map(function (i) { return corr[i]; }),
+            text: ids.map(function (i) { return SAMPLES[i]; }), customdata: ids.map(function (i) { return SAMPLES[i]; }),
+            marker: { color: c[lv], size: 9, symbol: lv === 'ok' ? 'circle' : lv === 'warn' ? 'diamond' : 'x', line: { width: 1, color: CHROME[t].surface } },
+            hovertemplate: '<b>%{text}</b><br>depth %{x}<br>corr %{y}<extra>' + LEVEL_LABEL[lv] + '</extra>' });
+        });
+        var shapes = [];
+        if (TH.qc_min_cov || TH.min_cov) shapes.push({ type: 'line', xref: 'x', yref: 'paper', x0: TH.qc_min_cov || TH.min_cov, x1: TH.qc_min_cov || TH.min_cov, y0: 0, y1: 1, line: { color: c.fail, dash: 'dash' } });
+        if (TH.qc_min_corr || TH.min_corr) shapes.push({ type: 'line', xref: 'paper', yref: 'y', x0: 0, x1: 1, y0: TH.qc_min_corr || TH.min_corr, y1: TH.qc_min_corr || TH.min_corr, line: { color: c.fail, dash: 'dash' } });
+        return { data: data, layout: baseLayout(t, { xlab: 'median depth', ylab: 'best correlation', legend: true, shapes: shapes }), onClick: function (ev) { var p = ev.points && ev.points[0]; if (p && p.customdata) setSample(p.customdata); } };
+      });
+    } else stack.appendChild(emptyNote('At least two samples with both depth and correlation values are needed.'));
+    root.appendChild(stack);
+  }
+
+  // ---- sub-tab: Flags ----
+  function buildSampleQcFlags(root) {
+    var stack = h('div', { class: 'stack' });
+    // ECHO QC flags table
+    if (QC_FLAGS && QC_FLAGS.n) {
+      var host = h('div');
+      var typ = '';
+      var tv = null;
+      var bar = h('div', { class: 'toolbar' });
+      var types = uniq(tcol(QC_FLAGS, 'Type')).sort();
+      var typeSel = h('select', { 'aria-label': 'Flag type' }, h('option', { value: '', text: 'All types' }), types.map(function (x) { return h('option', { value: x, text: x }); }));
+      typeSel.addEventListener('change', function () { typ = typeSel.value; apply(); });
+      bar.appendChild(h('span', { class: 'note', text: 'This table is filtered by sample and flag type; the global severity selector does not affect it.' }));
+      bar.appendChild(field('Flag type', typeSel));
+      host.appendChild(bar);
+      var tblHost = h('div'); host.appendChild(tblHost);
+      tv = tableView(tblHost, QC_FLAGS, { filename: 'qc_flags', pageSize: 20, wrap: ['Details'], sort: ['Severity', 'asc'],
+        note: META.qc_capped ? 'Table capped at ' + fmtInt(QC_FLAGS.n) + ' of ' + fmtInt(META.qc_rows_total) + ' rows; the complete list is in the QC TSV.' : null,
+        render: { Severity: function (v) { return sevChip(v); }, Details: function (v) { return v; } } });
+      function apply() {
+        var bySample = function (i) { var s = state.sample; if (!s) return true; var v = tcol(QC_FLAGS, 'Sample')[i]; return v === s || v === 'All'; };
+        tv.setPredicate(function (i) {
+          return bySample(i) && (!typ || tcol(QC_FLAGS, 'Type')[i] === typ);
+        });
+      }
+      apply();
+      // React only to sample changes. Severity changes must not alter this table.
+      var lastSample = state.sample;
+      onState(function () {
+        if (lastSample !== state.sample) { lastSample = state.sample; apply(); }
+      });
+      stack.appendChild(card('Sample QC flags', 'Whole sample \u00b7 Whole exon \u00b7 Exon variability \u00b7 Target removed \u00b7 Cohort size \u00b7 Missing Chromosome', host));
+    }
+    // CANOPE QC metrics block
+    if (QC && QC.rows && QC.rows.n) {
+      var host2 = h('div'), typeBox = plotBox('short');
+      var tcounts = tcol(QC.types, 'Freq'), tnames = tcol(QC.types, 'Type');
+      stack.appendChild(h('div', { class: 'grid g-main' },
+        card('Exon-level QC flags by type', QC.n_total + ' flags in total', tnames.length ? typeBox : emptyNote('No QC flags.')),
+        card('Genes with the most QC flags', 'top 60', QC.genes && QC.genes.n ? simpleTable(QC.genes, { filename: 'qc_genes', pageSize: 10 }) : emptyNote('No exon-level flags.'))));
+      if (tnames.length) plot(typeBox, function (t) {
+        return { data: [{ type: 'bar', orientation: 'h', y: tnames, x: tcounts, marker: { color: CAT[t][3] }, hovertemplate: '%{y}: %{x}<extra></extra>' }],
+          layout: baseLayout(t, { xlab: 'flags', yaxis: { autorange: 'reversed' }, margin: { l: 170, r: 16, t: 10, b: 40 } }) };
+      });
+      var tv2 = tableView(host2, QC.rows, { filename: 'qc_metrics_flags', pageSize: 20, render: { Type: qcTypeChip },
+        note: QC.capped ? 'Table capped at ' + fmtInt(QC.rows.n) + ' rows; full list in the QC TSV.' : null });
+      var sm = tcol(QC.rows, 'Sample');
+      var apply2 = function () { tv2.setPredicate(state.sample ? function (i) { return sm[i] === state.sample || sm[i] === 'All'; } : null); };
+      onState(apply2); apply2();
+      stack.appendChild(card('Exon-level QC details', 'Filtered by the selected sample', host2));
+    }
+    if (!stack.children.length) stack.appendChild(card('Sample QC flags', null, emptyNote('No QC metrics file was provided.')));
+    root.appendChild(stack);
+  }
+
+  // ---- Chromosome scope: one canonical summary, preferring target counts when available ----
+  // Canonical autosomes (chr1-22) that are absent from the BED, computed from
+  // the per-chromosome inventory when it is available.
+  function autosomesMissingFromBed() {
+    var have = {}, seenAny = false;
+    [CHR && CHR.inventory, DATA.chr_all, DATA.chr].forEach(function (T) {
+      if (!T || !T.n || !hasCol(T, 'chromosome')) return;
+      seenAny = true;
+      range(T.n).forEach(function (i) {
+        var k = String(tcol(T, 'chromosome')[i]).replace(/^chr/i, '').toUpperCase();
+        if (k) have[k] = true;
+      });
+    });
+    if (!seenAny) return [];
+    var missing = [];
+    for (var c = 1; c <= 22; c++) if (!have[String(c)]) missing.push('chr' + c);
+    return missing;
+  }
+  // 'chr4, chr6, chr17-22' -- consecutive chromosomes are compressed into ranges.
+  function compressChromList(names) {
+    var nums = uniq(names.map(function (n) { return parseInt(String(n).replace(/^chr/i, ''), 10); }))
+      .filter(function (n) { return isFinite(n); }).sort(function (a, b) { return a - b; });
+    var parts = [], i = 0;
+    while (i < nums.length) {
+      var j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      if (j - i >= 2) parts.push('chr' + nums[i] + '-' + nums[j]);
+      else if (j - i === 1) parts.push('chr' + nums[i] + ', chr' + nums[j]);
+      else parts.push('chr' + nums[i]);
+      i = j + 1;
+    }
+    return parts.join(', ');
+  }
+  function scopeTileFor(row) {
+    var status = !row.present ? 'Not in BED' : row.analysed ? 'Analysed' : 'In BED, not analysed';
+    var lvl = !row.present ? 'fail' : row.analysed ? 'ok' : 'fail';
+    return tile(fmtInt(row.targets), row.label, lvl, status);
+  }
+  function chromosomeScopeCard() {
+    if (SCOPE && SCOPE.n) {
+      // Index scope rows by class so the autosome / gonosome / other branches
+      // below can pick the rows they need regardless of payload order.
+      var rows = scopeRows();
+      var byCls = {};
+      rows.forEach(function (r) { byCls[r.cls] = r; });
+      var tiles = [];
+      // Autosome box: names the autosomes missing from the BED so that
+      // "Autosomes (chr1-22)" never reads as full chr1-22 coverage.
+      var auto = byCls['autosome'];
+      if (auto) {
+        var missing = autosomesMissingFromBed();
+        var lvl = !auto.present ? 'fail' : auto.analysed ? (missing.length ? 'warn' : 'ok') : 'fail';
+        var detail = !auto.present ? 'Not in BED' : auto.analysed ? 'Analysed' : 'In BED, not analysed';
+        if (auto.present && missing.length) {
+          detail += ' \u00b7 ' + (22 - missing.length) + '/22 chromosomes in BED'
+            + ' \u00b7 not in BED: ' + compressChromList(missing);
+        }
+        tiles.push(tile(fmtInt(auto.targets), auto.label, lvl, detail));
+      }
+      // Gonosomes: one merged box when neither chrX nor chrY is in the BED.
+      var gx = byCls['x'], gy = byCls['y'];
+      if (gx && gy && !gx.present && !gy.present) {
+        tiles.push(tile(fmtInt(gx.targets + gy.targets), 'Gonosomes (chrX & chrY)', 'fail', 'Not in BED'));
+      } else {
+        [gx, gy].forEach(function (r) { if (r) tiles.push(scopeTileFor(r)); });
+      }
+      // Other contigs: only shown when the BED actually contains some; an empty
+      // class with 0 targets must not be reported as "Not in BED".
+      var other = byCls['other'];
+      if (other && other.present) tiles.push(scopeTileFor(other));
+      return card('Run scope by chromosome class', META.mode_label || META.modechrom_label || ('Mode ' + (META.modechrom || 'n/a')),
+        h('div', null, h('div', { class: 'scope' }, tiles),
+          h('p', { class: 'note', text: 'A run analyses one chromosome mode. Chromosomes listed as not in BED are absent from the panel BED, so absence of calls is not a negative result for those regions; classes present in the BED but not analysed require a separate run. Other contigs are omitted when the BED contains none.' })));
+    }
+    if (CHR.status && CHR.status.n) {
+      return card('Run scope by chromosome class', META.mode_label || META.modechrom_label, chromStrip());
+    }
+    return null;
+  }
+  // Decode the SCOPE table rows into a small array of {cls,label,targets,present,analysed}.
+  function scopeRows() {
+    var rows = [];
+    if (SCOPE && SCOPE.n) {
+      range(SCOPE.n).forEach(function (i) {
+        rows.push({ cls: String(tcol(SCOPE, 'class')[i] || '').toLowerCase(),
+          label: String(tcol(SCOPE, 'label')[i] || ''),
+          targets: Number(tcol(SCOPE, 'targets')[i] || 0),
+          present: !!tcol(SCOPE, 'present')[i],
+          analysed: !!tcol(SCOPE, 'analysed')[i] });
+      });
+    } else if (CHR.status && CHR.status.n) {
+      range(CHR.status.n).forEach(function (i) {
+        rows.push({ cls: String(tcol(CHR.status, 'class')[i] || '').toLowerCase(),
+          label: String(tcol(CHR.status, 'label')[i] || ''),
+          targets: 0,
+          present: !!tcol(CHR.status, 'in_input')[i],
+          analysed: !!tcol(CHR.status, 'analysed')[i] });
+      });
+    }
+    return rows;
+  }
+
+  tab('qc', 'QC & warnings', function () { return true; }, function (root) {
+    // Sample QC status belongs with the severity/warning view, not Overview.
+    root.appendChild(card('Sample QC status', 'Cohort-wide distribution of sample QC levels', healthStatusTiles()));
+    // Sample-level QC flags remain independent from the global severity filter.
+    buildSampleQcFlags(root);
+    var st = subTabs([
+      { id: 'coverage', label: 'Coverage', build: function (r) { buildCohortMetricsSubtab(r, QC_METRICS.filter(function (m) { return m.col === 'median_depth' || m.col === 'total_reads'; })); } },
+      { id: 'depth-hist', label: 'Target depth', build: buildDepthHistogramSubtab },
+      { id: 'reference', label: 'Reference quality', build: function (r) { buildCohortMetricsSubtab(r, QC_METRICS.filter(function (m) { return m.col === 'max_corr' || m.col === 'n_refs'; })); } },
+      { id: 'variation', label: 'Sample variability', build: function (r) { buildCohortMetricsSubtab(r, QC_METRICS.filter(function (m) { return m.col === 'noise_z' || m.col === 'n_cnvs'; })); } },
+      { id: 'depth-corr', label: 'Depth vs. best correlation', build: buildDepthCorrelationSubtab },
+      { id: 'pca', label: 'Cohort PCA', build: buildPcaSubtab }
+    ], 'coverage');
+    root.appendChild(st.el);
+    onState(function () { st.refresh(); });
+  });
+
+  // Sample QC table is embedded in Overview > Samples.
+  function buildSampleTable(root) {
+    // Build a display table with both ECHO and CANOPE columns
+    var dispCols = ['sample', 'status', 'level', 'n_cnvs', 'n_del', 'n_dup', 'n_high', 'n_medium', 'n_low',
+                    'median_depth', 'total_reads', 'max_corr', 'n_refs', 'noise_z', 'sex_inferred'];
+    // Map ECHO column names
+    var colMap = {};
+    dispCols.forEach(function (c) {
+      if (hasCol(S, c)) colMap[c] = c;
+      else if (c === 'sample' && hasCol(S, 'Sample')) colMap[c] = 'Sample';
+      else if (c === 'status' && hasCol(S, 'status')) colMap[c] = 'status';
+      else if (c === 'level' && hasCol(S, 'Status')) colMap[c] = 'Status';
+      else if (c === 'n_cnvs' && hasCol(S, 'CNV calls')) colMap[c] = 'CNV calls';
+      else if (c === 'n_high' && hasCol(S, 'HIGH')) colMap[c] = 'HIGH';
+      else if (c === 'n_medium' && hasCol(S, 'MEDIUM')) colMap[c] = 'MEDIUM';
+      else if (c === 'n_low' && hasCol(S, 'LOW')) colMap[c] = 'LOW';
+      else if (c === 'n_del' && hasCol(S, 'DEL')) colMap[c] = 'DEL';
+      else if (c === 'n_dup' && hasCol(S, 'DUP')) colMap[c] = 'DUP';
+      else if (c === 'median_depth' && hasCol(S, 'Median depth')) colMap[c] = 'Median depth';
+      else if (c === 'total_reads' && hasCol(S, 'Total reads')) colMap[c] = 'Total reads';
+      else if (c === 'max_corr' && hasCol(S, 'Max correlation')) colMap[c] = 'Max correlation';
+      else if (c === 'n_refs' && hasCol(S, 'References')) colMap[c] = 'References';
+    });
+    var useCols = Object.keys(colMap);
+    var T = { cols: useCols.map(function (c) { return colMap[c]; }), n: S.n, data: {} };
+    useCols.forEach(function (c) { T.data[colMap[c]] = tcol(S, colMap[c]); });
+    // add flags count column (CANOPE)
+    if (IS_CANOPE) {
+      var nf = SAMPLES.map(function (s) { var f = DATA.flags && DATA.flags[s]; return f ? f.filter(function (x) { return x.level === 'fail' || x.level === 'warn'; }).length : 0; });
+      T.cols.push('flags'); T.data.flags = nf;
+    }
+    // Add sample-sheet attrs
+    if (DATA.sample_attrs) Object.keys(DATA.sample_attrs).forEach(function (k) { T.cols.push(k); T.data[k] = asArray(DATA.sample_attrs[k]); });
+    // Reason a sample was not analysed (explicit payload column or pipeline log);
+    // only added when at least one sample carries a reason.
+    var reasonArr = SAMPLES.map(function (s) { return EXCLUSION_REASONS[s] || ''; });
+    if (reasonArr.some(function (r) { return r; })) { T.cols.push('reason'); T.data.reason = reasonArr; }
+
+    var tv = null;
+    var labels = { n_cnvs: 'CNVs', n_del: 'DEL', n_dup: 'DUP', n_high: 'HIGH', n_medium: 'MEDIUM', n_low: 'LOW',
+                   median_depth: 'median depth', total_reads: 'total reads', max_corr: 'best corr.', n_refs: 'refs', noise_z: 'noise z', sex_inferred: 'sex (inferred)', flags: 'flags', reason: 'reason not analysed' };
+    var cellClass = {};
+    var render = {
+      level: function (v) { return chip(v, LEVEL_LABEL[v] || v); },
+      status: function (v) { return v === 'called' ? 'analysed' : v === 'Yes' ? 'analysed' : v === 'No' ? 'excluded' : v; },
+      sample: function (v) { return h('strong', { text: v }); }
+    };
+    // Highlight the noise_z cell when it exceeds the qc_zscore threshold (the
+    // exact metric that triggers sample_qc outlier exclusion in ECHO).  This
+    // applies to both ECHO and CANOPE -- the CANOPE-only block below adds the
+    // other numeric flag checks on top.
+    if (colMap.noise_z && TH.qc_zscore) {
+      cellClass[colMap.noise_z] = function (v) {
+        return isNum(v) && Math.abs(v) > TH.qc_zscore ? 'warn' : '';
+      };
+    }
+    // numeric flag checks (CANOPE)
+    if (IS_CANOPE) {
+      var NF = {
+        median_depth: function (v) { return isNum(v) && v < (TH.qc_min_cov || 0); },
+        total_reads: function (v) { return isNum(v) && v < (TH.qc_min_total_reads || 0); },
+        max_corr: function (v) { return isNum(v) && v < (TH.qc_min_corr || 0); },
+        noise_z: function (v) { return isNum(v) && v > (TH.qc_zscore || 99); },
+        n_refs: function (v) { return isNum(v) && v < 5; }
+      };
+      Object.keys(NF).forEach(function (k) { if (colMap[k]) cellClass[colMap[k]] = function (v) { return NF[k](v) ? 'warn' : ''; }; });
+      cellClass.status = function (v) { return v === 'failed' || v === 'excluded' ? 'fail' : ''; };
+    }
+    var host = h('div');
+    host.id = 'sample-qc-table';
+    root.appendChild(card('Sample QC table', 'Select a row to filter the other report views; select it again or choose All samples to clear.', host));
+    tv = tableView(host, T, { filename: 'samples', pageSize: 20, sort: ['flags', 'desc'], labels: labels, render: render, cellClass: cellClass,
+      wrap: ['reason'],
+      selected: function () { return state.sample ? SIDX[state.sample] : -1; },
+      onRow: function (i) { setSample(SAMPLES[i] === state.sample ? '' : SAMPLES[i]); } });
+    onState(function () { tv.redraw(); });
+  }
+
+  // ================================================================ CNV CALLS (with folded 4-panel viewer)
+  function chrNum(c) {
+    var s = String(c).replace(/^chr/i, '').toUpperCase(), n = parseInt(s, 10);
+    if (s === 'X') return 23; if (s === 'Y') return 24; if (s === 'M' || s === 'MT') return 25;
+    return isFinite(n) ? n : 99;
+  }
+  // ---- Canonical human chromosome helpers --------------------------------
+  // Normalise any naming style: "1", "chr1", "CHR1", "23"->X, "24"->Y, "MT"/"25"->M.
+  function chrKey(name) {
+    var s = String(name === null || name === undefined ? '' : name).trim().replace(/^chr/i, '').toUpperCase();
+    if (s === '23') return 'X';
+    if (s === '24') return 'Y';
+    if (s === '25' || s === 'MT') return 'M';
+    return s;
+  }
+  function chrRank(name) {
+    var k = chrKey(name);
+    if (/^([1-9]|1[0-9]|2[0-2])$/.test(k)) return parseInt(k, 10);
+    if (k === 'X') return 23;
+    if (k === 'Y') return 24;
+    if (k === 'M') return 25;
+    return 1000;  // non-canonical contigs sort last, original order kept
+  }
+  // Pad the chromosome inventory to the full canonical set (chr1-22, X, Y, M)
+  // so the table always matches the announced scope ("Autosomes (chr1-22)")
+  // and the missing chromosomes the user sees in the "Missing chromosomes"
+  // card also appear as rows in the inventory table (with 0 targets and a
+  // "not in BED" status).  Without this padding the table only lists the
+  // chromosomes that are actually in the BED, so the missing ones are
+  // invisible in the inventory.
+  function completeChromosomeInventory(inv) {
+    var CANON = (function () { var a = [], i; for (i = 1; i <= 22; i++) a.push(String(i)); return a.concat(['X', 'Y', 'M']); })();
+    var have = {}, prefix = '';
+    range(inv.n).forEach(function (i) {
+      var nm = String(tcol(inv, 'chromosome')[i] === undefined ? '' : tcol(inv, 'chromosome')[i]);
+      if (/^chr/i.test(nm)) prefix = 'chr';
+      have[chrKey(nm)] = true;
+    });
+    var missing = CANON.filter(function (c) { return !have[c]; });
+    if (!missing.length) return inv;
+    var entries = range(inv.n).map(function (i) { return { synth: false, chr: tcol(inv, 'chromosome')[i], i: i, seq: i }; });
+    missing.forEach(function (c, k) { entries.push({ synth: true, chr: prefix + c, i: -1, seq: inv.n + k }); });
+    entries.sort(function (a, b) { var d = chrRank(a.chr) - chrRank(b.chr); return d !== 0 ? d : a.seq - b.seq; });
+    var out = { cols: inv.cols.slice(), data: {}, n: entries.length };
+    inv.cols.forEach(function (col) {
+      var arr = tcol(inv, col);
+      out.data[col] = entries.map(function (e) {
+        if (!e.synth) return arr[e.i];
+        var key = chrKey(e.chr);
+        if (col === 'chromosome') return e.chr;
+        if (col === 'class') return (key === 'X' || key === 'Y') ? key : (key === 'M' ? 'other' : 'autosome');
+        if (col === 'targets_in_bed' || col === 'targets_analysed') return 0;
+        if (col === 'analysed') return false;
+        if (arr.length && typeof arr[0] === 'number') return 0;
+        return '';
+      });
+    });
+    return out;
+  }
+  // One flag vocabulary for both pipelines; a flag is shown only when the payload carries its column.
+  var CALL_FLAG_COLS = [['homology_gene', 'homology gene'], ['bg_flag', 'background'], ['terminal_only', 'terminal exon only'],
+                        ['single_target', 'single target'], ['sparse_span', 'sparse span'], ['recurrent', 'recurrent']];
+  function callFlagList(i) {
+    var out = [];
+    CALL_FLAG_COLS.forEach(function (f) {
+      var a = tcol(CALLS, f[0]);
+      if (a.length && a[i]) out.push(f[1]);
+    });
+    return out;
+  }
+  function callFlags(i) {
+    var out = callFlagList(i);
+    if (!hasPlot(i)) out.push('no plot');
+    return out.join(', ');
+  }
+
+  // Unified column list: [label, [candidate payload columns]]. A column is shown
+  // only when at least one candidate holds a value, so the table is identical in
+  // structure for ECHO and CANOPE and silently omits what a pipeline lacks.
+  var CALL_COLS = [
+    ['ID', ['id', 'ID']], ['Sample', ['sample', 'Sample']], ['Chr', ['chr', 'Chr']], ['Start', ['start', 'Start']], ['End', ['end', 'End']],
+    ['Gene', ['gene', 'Gene']], ['Type', ['type', 'Type']], ['Exons', ['exons']], ['Targets', ['num_targ', 'nexons']], ['KB', ['kb']],
+    ['Ratio', ['ratio']], ['BF', ['bf']], ['Q_SOME', ['q_some']], ['MLCN', ['mlcn', 'cn_label']], ['Refs', ['n_comp', 'num_refs']],
+    ['Confidence', ['confidence', 'Confidence']], ['Correlation', ['correlation']], ['Carriers', ['carriers']],
+    ['Calibration', ['calibration', 'Calibration']]
+  ];
+  function nonEmpty(arr) { return arr.length && arr.some(function (v) { return v !== null && v !== undefined && v !== '' && !(typeof v === 'number' && !isFinite(v)); }); }
+  function callsTableDisplay() {
+    var cols = [], data = {};
+    CALL_COLS.forEach(function (d) {
+      for (var k = 0; k < d[1].length; k++) {
+        var arr = tcol(CALLS, d[1][k]);
+        if (nonEmpty(arr)) { cols.push(d[0]); data[d[0]] = arr; return; }
+      }
+    });
+    var flags = range(CALLS.n).map(function (i) { return callFlagList(i).join(', '); });
+    if (flags.some(function (f) { return f; })) { cols.push('Flags'); data['Flags'] = flags; }
+    return { cols: cols, n: CALLS.n, data: data };
+  }
+  // Locus helpers (copy / IGV / BED export)
+  function callLocus(i) {
+    var chr = tcol(CALLS, 'chr')[i] || tcol(CALLS, 'Chr')[i], s = tcol(CALLS, 'start')[i] || tcol(CALLS, 'Start')[i], e = tcol(CALLS, 'end')[i] || tcol(CALLS, 'End')[i];
+    if (chr === undefined || s === undefined || e === undefined || s === null || e === null) return callInterval(i);
+    return chr + ':' + fmtIntRaw(s) + '-' + fmtIntRaw(e);
+  }
+  function fmtIntRaw(n) { return String(Math.round(Number(n))); }
+  function callsToBed(rows) {
+    var lines = rows.map(function (i) {
+      var chr = tcol(CALLS, 'chr')[i] || tcol(CALLS, 'Chr')[i], s = Number(tcol(CALLS, 'start')[i] || tcol(CALLS, 'Start')[i]), e = Number(tcol(CALLS, 'end')[i] || tcol(CALLS, 'End')[i]);
+      var name = [callSample(i), callType(i), callGene(i) || '.', callConf(i) || 'NA'].join('|').replace(/\s+/g, '_');
+      return [chr, Math.max(0, Math.round(s) - 1), Math.round(e), name].join('\t');
+    });
+    return lines.join('\n') + (lines.length ? '\n' : '');
+  }
+
+  function genomeCallHistogram(box) {
+    var chrCol = hasCol(CALLS, 'chr') ? 'chr' : 'Chr';
+    var chromosomes = uniq(tcol(CALLS, chrCol)).sort(function (a, b) { return chrNum(a) - chrNum(b); });
+    if (!chromosomes.length) { box.appendChild(emptyNote('No chromosome coordinates were available for the calls.')); return; }
+    plot(box, function (t) {
+      var c = SEM[t], rows = range(CALLS.n).filter(function (i) { return !state.sample || callSample(i) === state.sample; });
+      function counts(type) {
+        return chromosomes.map(function (chr) {
+          return rows.filter(function (i) { return String(tcol(CALLS, chrCol)[i]) === String(chr) && callType(i) === type; }).length;
+        });
+      }
+      var del = counts('DEL'), dup = counts('DUP');
+      var data = [
+        { type: 'bar', name: 'DEL', x: chromosomes, y: del, marker: { color: c.DEL }, hovertemplate: '%{x}<br>DEL: %{y}<extra></extra>' },
+        { type: 'bar', name: 'DUP', x: chromosomes, y: dup, marker: { color: c.DUP }, hovertemplate: '%{x}<br>DUP: %{y}<extra></extra>' }
+      ];
+      return { data: data, layout: baseLayout(t, { xlab: 'Chromosome', ylab: 'CNV calls', barmode: 'stack', legend: true,
+        xaxis: { type: 'category', tickangle: -45 }, yaxis: { rangemode: 'tozero', dtick: 1 },
+        margin: { l: 56, r: 16, t: 16, b: 76 } }) };
+    });
+  }
+
+  // ---- 4-panel call viewer ----
+  // ---- 4-panel call viewer ----
+  function viewerTargetName(P, j) {
+    var xlab = asArray(P.xlab), off = P.off ? asArray(P.off) : null;
+    return off && off[j] ? xlab[j] : 'exon ' + (xlab[j] || '');
+  }
+  function viewerWindowTraces(P, t, y, refY, tip, refSize, showRefs) {
+    var c = SEM[t], px = asArray(P.px), affected = asArray(P.affected), refNames = asArray(P.ref_names), data = [];
+    if (showRefs && refY.length) {
+      var rx = [], ry = [], rt = [];
+      refY.forEach(function (vals, r) {
+        vals.forEach(function (v, j) {
+          rx.push(px[j]); ry.push(v); rt.push((refNames[r] || ('Reference ' + (r + 1))) + '<br>' + viewerTargetName(P, j));
+        });
+      });
+      data.push({ type: 'scatter', mode: 'markers', name: 'Reference samples', x: rx, y: ry, text: rt,
+        hoverinfo: 'text+y', marker: { color: c.ref, size: refSize, opacity: 0.7 } });
+    }
+    var pts = function (keep) {
+      var ii = range(px.length).filter(function (j) { return !!affected[j] === keep; });
+      return { x: ii.map(function (j) { return px[j]; }), y: ii.map(function (j) { return y[j]; }), text: ii.map(tip) };
+    };
+    var unaffected = pts(false), called = pts(true), hoverMode = showRefs && refY.length ? 'text+y' : 'text';
+    data.push({ type: 'scatter', mode: 'markers', name: 'Test sample', x: unaffected.x, y: unaffected.y,
+      text: unaffected.text, hoverinfo: hoverMode, marker: { color: c.test, size: 8 } });
+    data.push({ type: 'scatter', mode: 'markers', name: 'Affected exon(s)', x: called.x, y: called.y,
+      text: called.text, hoverinfo: hoverMode, marker: { color: c.hit, size: 11, symbol: 'diamond' } });
+    return data;
+  }
+  function affectedRegionShape(P, theme) {
+    var px = asArray(P.px), affected = asArray(P.affected), hits = [];
+    for (var i = 0; i < Math.min(px.length, affected.length); i++) {
+      var x = Number(px[i]);
+      if (affected[i] && isFinite(x)) hits.push(x);
+    }
+    if (!hits.length) return null;
+    var dark = theme === 'dark';
+    return {
+      type: 'rect', xref: 'x', yref: 'paper',
+      x0: Math.min.apply(null, hits) - 0.4,
+      x1: Math.max.apply(null, hits) + 0.4,
+      y0: 0, y1: 1, layer: 'below',
+      fillcolor: dark ? 'rgba(230,103,103,0.12)' : 'rgba(227,73,72,0.08)',
+      line: { width: 0 }
+    };
+  }
+  // Filled-scatter form of the affected-region overlay, used by panels where
+  // the overlay must sit BETWEEN two trace groups -- e.g. on top of the
+  // confidence-interval band but below the ratio points. Plotly shapes are
+  // either above or below every trace, so a paper-space shape cannot be
+  // sandwiched between the band and the points; a scatter polygon can, simply
+  // by being pushed onto the data array between them.
+  // `yMin` / `yMax` should cover the panel's full visible y-range (use
+  // ciYRange()) so the rectangle spans the entire height, matching the
+  // paper-space shape form produced by affectedRegionShape().
+  function affectedRegionTrace(P, theme, yMin, yMax) {
+    var px = asArray(P.px), affected = asArray(P.affected), hits = [];
+    for (var i = 0; i < Math.min(px.length, affected.length); i++) {
+      var x = Number(px[i]);
+      if (affected[i] && isFinite(x)) hits.push(x);
+    }
+    if (!hits.length) return null;
+    var dark = theme === 'dark';
+    var x0 = Math.min.apply(null, hits) - 0.4;
+    var x1 = Math.max.apply(null, hits) + 0.4;
+    return {
+      type: 'scatter', mode: 'lines',
+      x: [x0, x1, x1, x0, x0],
+      y: [yMin, yMin, yMax, yMax, yMin],
+      fill: 'toself',
+      fillcolor: dark ? 'rgba(230,103,103,0.18)' : 'rgba(227,73,72,0.18)',
+      line: { width: 0 },
+      hoverinfo: 'skip',
+      showlegend: false,
+      name: 'Affected region'
+    };
+  }
+  // Visible y-axis range of the CI panel: the min/max of the band bounds (lo,
+  // hi) and the ratio values, plus the y=1 reference line, with a small
+  // padding. Used both as the explicit yaxis.range and as the vertical extent
+  // of the affected-region trace so the overlay covers the full visible
+  // height while edge points stay on screen.
+  function ciYRange(lo, hi, ratio, base) {
+    var min = Infinity, max = -Infinity;
+    [lo, hi, ratio, [base === undefined || base === null ? 1 : base]].forEach(function (arr) {
+      asArray(arr).forEach(function (v) {
+        var n = Number(v);
+        if (isFinite(n)) {
+          if (n < min) min = n;
+          if (n > max) max = n;
+        }
+      });
+    });
+    if (!isFinite(min) || !isFinite(max)) return [0, 2];
+    var span = max - min;
+    var pad = span > 0 ? span * 0.1 : 0.1;
+    return [min - pad, max + pad];
+  }
+  function syncCallViewerXAxes(divs) {
+    var syncing = false;
+    function bind(source, handler, attempts) {
+      if (source.on) {
+        source._echoSyncHandler = handler;
+        source.on('plotly_relayout', handler);
+      } else if (attempts < 20) {
+        window.setTimeout(function () { bind(source, handler, attempts + 1); }, 25);
+      }
+    }
+    divs.forEach(function (source) {
+      if (source._echoSyncHandler && source.removeListener)
+        source.removeListener('plotly_relayout', source._echoSyncHandler);
+      var handler = function (eventData) {
+        if (syncing || !eventData) return;
+        var update = {};
+        if (eventData['xaxis.autorange'] === true) {
+          update['xaxis.autorange'] = true;
+        } else {
+          var lo = eventData['xaxis.range[0]'];
+          var hi = eventData['xaxis.range[1]'];
+          if (eventData['xaxis.range'] && eventData['xaxis.range'].length === 2) {
+            lo = eventData['xaxis.range'][0]; hi = eventData['xaxis.range'][1];
+          }
+          if (lo === undefined || hi === undefined) return;
+          update['xaxis.range[0]'] = lo;
+          update['xaxis.range[1]'] = hi;
+        }
+        syncing = true;
+        divs.forEach(function (target) {
+          if (target !== source && target.data && window.Plotly)
+            window.Plotly.relayout(target, update);
+        });
+        window.setTimeout(function () { syncing = false; }, 50);
+      };
+      bind(source, handler, 0);
+    });
+  }
+  function viewerPlots(P, cov, ci, z, showRefs) {
+    var px = asArray(P.px), xlab = asArray(P.xlab), group = asArray(P.gene_group || P.group);
+    var refCov = P.ref_cov ? asArray(P.ref_cov).map(asArray) : [];
+    var refZ = P.ref_z ? asArray(P.ref_z).map(asArray) : [];
+    var test = asArray(P.test_log || P.test), ratio = asArray(P.ratio), lo = asArray(P.lo), hi = asArray(P.hi), zScore = asArray(P.z);
+    var zValues = zScore.concat.apply(zScore.slice(), refZ);
+    var zMax = zValues.reduce(function (m, v) {
+      var n = Number(v); return isFinite(n) ? Math.max(m, Math.abs(n)) : m;
+    }, 0);
+    var zLimit = Math.max(3.2, zMax * 1.1);
+    // Each pipeline states its own baseline (ECHO: ratio 1, CANOPE: log2 ratio 0) and axis titles.
+    var base0 = asArray(P.baseline)[0];
+    var base = (base0 === undefined || base0 === null || !isFinite(Number(base0))) ? (IS_CANOPE ? 0 : 1) : Number(base0);
+    var LAB = P.labels || {};
+    var labCov = asArray(LAB.cov)[0] || 'log(coverage)', labRatio = asArray(LAB.ratio)[0] || 'Observed / expected', labZ = asArray(LAB.z)[0] || 'Z-score';
+    var axis = function () {
+      var low = Math.min.apply(null, px) - 0.8, high = Math.max.apply(null, px) + 0.8;
+      return { tickmode: 'array', tickvals: px, ticktext: xlab, tickangle: -45, range: [low, high], showgrid: false };
+    };
+    var tipCoverage = function (j) { return viewerTargetName(P, j); };
+    plot(cov, function (t) {
+      var data = viewerWindowTraces(P, t, test, refCov, tipCoverage, 6, showRefs);
+      var bg = affectedRegionShape(P, t);
+      return { data: data, layout: baseLayout(t, { ylab: labCov, legend: true, xaxis: axis(),
+        shapes: bg ? [bg] : [] }) };
+    });
+    plot(ci, function (t) {
+      var data = [], c = CHROME[t], groups = group.length ? uniq(group) : ['all'];
+      // Lock the y-axis to the data range so the affected-region trace (a
+      // scatter polygon in data coordinates, not a paper-space shape) can
+      // span the full visible height.
+      var yRange = ciYRange(lo, hi, ratio, base);
+      // 1. Draw the confidence-interval band FIRST.
+      groups.forEach(function (g, k) {
+        var ii = range(px.length).filter(function (j) { return group.length ? group[j] === g : true; });
+        if (!ii.length) return;
+        var xs = ii.length === 1 ? [px[ii[0]] - 0.3, px[ii[0]] + 0.3] : ii.map(function (j) { return px[j]; });
+        var band = function (values) { return ii.length === 1 ? [values[ii[0]], values[ii[0]]] : ii.map(function (j) { return values[j]; }); };
+        data.push({ type: 'scatter', mode: 'lines', x: xs, y: band(lo), line: { width: 0 }, hoverinfo: 'skip', showlegend: false });
+        data.push({ type: 'scatter', mode: 'lines', x: xs, y: band(hi), line: { width: 0 }, fill: 'tonexty', fillcolor: c.grid,
+          name: '95% interval', showlegend: k === 0, hoverinfo: 'skip' });
+      });
+      // 2. Then the translucent red affected-region overlay, drawn ON TOP of
+      //    the band. A paper-space shape (layer: 'below') would hide under the
+      //    band traces; a scatter polygon placed after the band traces paints
+      //    over the band while the points (added next) stay above it.
+      var affected = affectedRegionTrace(P, t, yRange[0], yRange[1]);
+      if (affected) data.push(affected);
+      // 3. Then the coverage points/lines remain visible above both.
+      var tipRatio = function (j) {
+        return viewerTargetName(P, j) + '<br>observed ' + fmt(P.observed && P.observed[j]) +
+          '<br>expected ' + fmt(P.expected && P.expected[j]) + '<br>ratio ' + fmt(ratio[j]) +
+          ' [' + fmt(lo[j]) + ' – ' + fmt(hi[j]) + ']';
+      };
+      var points = viewerWindowTraces(P, t, ratio, [], tipRatio, 0, false);
+      points[0].name = 'Observed'; points[0].marker.size = 9; points[1].name = 'Affected';
+      data = data.concat(points);
+      var shapes = [{ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: base, y1: base,
+        line: { color: c.axis, width: 1, dash: 'dash' } }];
+      return { data: data, layout: baseLayout(t, { ylab: labRatio, legend: true, xaxis: axis(),
+        yaxis: { range: yRange }, shapes: shapes }) };
+    });
+    plot(z, function (t) {
+      var data = viewerWindowTraces(P, t, zScore, refZ, function (j) { return viewerTargetName(P, j); }, 5, showRefs);
+      var c = CHROME[t];
+      var bg = affectedRegionShape(P, t);
+      var shapes = [
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 0, y1: 0,
+          line: { color: c.axis, width: 1, dash: 'dash' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 2, y1: 2,
+          line: { color: c.warn, width: 1, dash: 'dot' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: -2, y1: -2,
+          line: { color: c.warn, width: 1, dash: 'dot' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 3, y1: 3,
+          line: { color: c.hit, width: 1, dash: 'dash' } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: -3, y1: -3,
+          line: { color: c.hit, width: 1, dash: 'dash' } }
+      ];
+      if (bg) shapes.unshift(bg);
+      return { data: data, layout: baseLayout(t, { ylab: labZ, legend: true, xaxis: axis(),
+        yaxis: { range: [-zLimit, zLimit] }, shapes: shapes }) };
+    });
+  }
+  function renderGeneTrack(host, P, plotDiv) {
+    clear(host);
+    var px = asArray(P.px), genes = asArray(P.gene), groups = asArray(P.gene_group || P.group), off = asArray(P.off);
+    if (!genes.length || !px.length) {
+      host.appendChild(emptyNote('Gene annotations are not available for this call.'));
+      return;
+    }
+
+    // Build contiguous annotation runs. The group ID is authoritative because
+    // the same gene can occur on both sides of an off-target block.
+    var runs = [], begin = 0;
+    function keyAt(i) {
+      return String(groups.length ? groups[i] : '') + '\u0000' + String(genes[i] || '');
+    }
+    for (var i = 1; i <= genes.length; i++) {
+      if (i === genes.length || keyAt(i) !== keyAt(begin)) {
+        var name = String(genes[begin] || '').trim() || 'Unannotated target';
+        runs.push({ name: name, startIndex: begin, endIndex: i - 1, count: i - begin,
+          off: !!off[begin], first: P.xlab && P.xlab[begin], last: P.xlab && P.xlab[i - 1] });
+        begin = i;
+      }
+    }
+
+    var track = h('div', { class: 'gene-track', role: 'group', 'aria-label': 'Genes aligned to genomic target positions' });
+    runs.forEach(function (r, idx) {
+      var cls = 'gene-track-segment track-' + ['a', 'b', 'c', 'd', 'e', 'f'][idx % 6] + (r.off ? ' off' : '');
+      var range = r.first !== undefined && r.first !== null ? String(r.first) +
+        (r.last !== undefined && r.last !== null && r.last !== r.first ? '\u2013' + String(r.last) : '') : '';
+      var meta = r.count + ' target' + (r.count === 1 ? '' : 's') + (range ? ' \u00b7 ' + range : '');
+      track.appendChild(h('div', { class: cls, title: r.name + ' \u00b7 ' + meta,
+        'aria-label': r.name + ', ' + meta },
+        h('div', { class: 'gene-track-name', text: r.name }),
+        h('div', { class: 'gene-track-meta', text: meta })));
+    });
+    host.appendChild(track);
+
+    function align() {
+      if (!plotDiv || !host.isConnected || !plotDiv._fullLayout || !plotDiv._fullLayout.xaxis) return;
+      var axis = plotDiv._fullLayout.xaxis;
+      var range = axis.range;
+      if (!range || range.length !== 2) return;
+      var lo = Number(range[0]), hi = Number(range[1]);
+      if (!isFinite(lo) || !isFinite(hi) || hi === lo) return;
+
+      // Use the actual Plotly drag rectangle as the plotting-area geometry.
+      // _offset is an internal SVG coordinate and combining it with the graph
+      // div's client rectangle can shift the track when Plotly's SVG is scaled
+      // or nested in a padded card. The drag rectangle is already in viewport
+      // coordinates, exactly matching the visible data plotting region.
+      var plotArea = plotDiv.querySelector('.nsewdrag');
+      var areaRect = plotArea && plotArea.getBoundingClientRect();
+      if (!areaRect || !areaRect.width) {
+        // Fallback for Plotly builds that do not expose .nsewdrag.
+        var plotRect = plotDiv.getBoundingClientRect();
+        var offset = Number(axis._offset), length = Number(axis._length);
+        if (!isFinite(offset) || !isFinite(length) || length <= 0) return;
+        areaRect = { left: plotRect.left + offset, width: length };
+      }
+
+      var hostRect = host.getBoundingClientRect();
+      // Absolute children are positioned from the host's padding edge.
+      var trackLeft = areaRect.left - hostRect.left - host.clientLeft;
+      track.style.left = trackLeft + 'px';
+      track.style.width = areaRect.width + 'px';
+
+      var span = hi - lo;
+      runs.forEach(function (r, idx) {
+        var first = Number(px[r.startIndex]), last = Number(px[r.endIndex]);
+        if (!isFinite(first) || !isFinite(last)) return;
+        var prev = r.startIndex > 0 ? Number(px[r.startIndex - 1]) : first - (px.length > 1 ? Number(px[1]) - first : 1);
+        var next = r.endIndex < px.length - 1 ? Number(px[r.endIndex + 1]) : last + (px.length > 1 ? last - Number(px[px.length - 2]) : 1);
+        if (!isFinite(prev)) prev = first - 1;
+        if (!isFinite(next)) next = last + 1;
+        var x0 = r.startIndex === 0 ? first - (next - first) / 2 : (prev + first) / 2;
+        var x1 = r.endIndex === px.length - 1 ? last + (last - prev) / 2 : (last + next) / 2;
+        var el = track.children[idx];
+        var leftPx = ((x0 - lo) / span) * areaRect.width;
+        var rightPx = ((x1 - lo) / span) * areaRect.width;
+        el.style.left = leftPx + 'px';
+        el.style.width = Math.max(0, rightPx - leftPx) + 'px';
+      });
+    }
+
+    // Plotly's render() promise looks for this callback on the plot div.
+    // Keep it there (not only on the track host), so every newly loaded CNV
+    // call receives a final alignment pass after Plotly.react() completes.
+    // Defer one animation frame: Plotly may resolve its promise just before
+    // the browser has committed the final SVG/layout geometry.
+    function scheduleAlign() {
+      if (scheduleAlign.pending) return;
+      scheduleAlign.pending = true;
+      var raf = window.requestAnimationFrame || function (cb) { window.setTimeout(cb, 16); };
+      raf(function () {
+        scheduleAlign.pending = false;
+        if (host.isConnected && plotDiv && plotDiv._fullLayout) align();
+      });
+    }
+    host._echoGeneTrackSync = scheduleAlign;
+    host._echoGeneTrackPlotDiv = plotDiv;
+    if (plotDiv) plotDiv._echoGeneTrackSync = scheduleAlign;
+
+    function bindPlotlyEvents() {
+      if (!plotDiv || !plotDiv.on) return;
+      if (plotDiv._echoGeneTrackAfterPlot && plotDiv.removeListener)
+        plotDiv.removeListener('plotly_afterplot', plotDiv._echoGeneTrackAfterPlot);
+      if (plotDiv._echoGeneTrackRelayout && plotDiv.removeListener)
+        plotDiv.removeListener('plotly_relayout', plotDiv._echoGeneTrackRelayout);
+      plotDiv._echoGeneTrackAfterPlot = scheduleAlign;
+      plotDiv._echoGeneTrackRelayout = scheduleAlign;
+      plotDiv.on('plotly_afterplot', scheduleAlign);
+      plotDiv.on('plotly_relayout', scheduleAlign);
+      scheduleAlign();
+    }
+    if (plotDiv && plotDiv.on) bindPlotlyEvents();
+    else if (plotDiv) {
+      var tries = 0;
+      (function waitForPlotly() {
+        if (!host.isConnected) return;
+        if (plotDiv.on) bindPlotlyEvents();
+        else if (tries++ < 80) window.setTimeout(waitForPlotly, 25);
+      })();
+    }
+
+    // Also catch width changes caused by opening/reloading call details,
+    // expanding cards, or changing the browser viewport. Disconnect observers
+    // when the old call-detail DOM is discarded.
+    function resizeAndAlign() {
+      if (!host.isConnected) return;
+      if (plotDiv && window.Plotly && Plotly.Plots && Plotly.Plots.resize) {
+        try {
+          var result = Plotly.Plots.resize(plotDiv);
+          if (result && typeof result.then === 'function') result.then(scheduleAlign, scheduleAlign);
+          else scheduleAlign();
+        } catch (e) { scheduleAlign(); }
+      } else scheduleAlign();
+    }
+    if (window.ResizeObserver) {
+      if (host._echoGeneTrackResizeObserver) host._echoGeneTrackResizeObserver.disconnect();
+      var resizeObserver = new ResizeObserver(resizeAndAlign);
+      resizeObserver.observe(host);
+      host._echoGeneTrackResizeObserver = resizeObserver;
+    } else {
+      if (host._echoGeneTrackResize) window.removeEventListener('resize', host._echoGeneTrackResize);
+      host._echoGeneTrackResize = resizeAndAlign;
+      window.addEventListener('resize', resizeAndAlign);
+    }
+    scheduleAlign();
+  }
+
+  tab('calls', 'CNV calls', function () { return true; }, function (root) {
+    var stack = h('div', { class: 'stack' });
+    if (!CALLS.n) {
+      stack.appendChild(alertBox('info', 'No CNV was called.', 'A run without calls can be a valid result for the chromosomes analysed; see chromosome scope in Overview.'));
+      root.appendChild(stack); return;
+    }
+
+    var confidenceValues = tcol(CALLS, hasCol(CALLS, 'confidence') ? 'confidence' : 'Confidence');
+    var confLevels = ['HIGH', 'MEDIUM', 'LOW'];
+    if (confidenceValues.some(function (v) { return v && confLevels.indexOf(String(v)) < 0; })) confLevels.push('NA');
+    var f = { type: '', chr: '', flag: '', conf: {} };
+    confLevels.forEach(function (k) { f.conf[k] = true; });
+
+    var typeSel = selectOf([
+      { value: '', text: 'All types' },
+      { value: 'DEL', text: 'Deletions' },
+      { value: 'DUP', text: 'Duplications' }
+    ], '', null, 'Call type');
+    var chrCol = hasCol(CALLS, 'chr') ? 'chr' : 'Chr';
+    var chrs = uniq(tcol(CALLS, chrCol)).sort(function (a, b) { return chrNum(a) - chrNum(b); });
+    var chrSel = selectOf([{ value: '', text: 'All chromosomes' }].concat(chrs.map(function (c) {
+      return { value: c, text: c };
+    })), '', null, 'Chromosome');
+
+    var presentFlags = CALL_FLAG_COLS.filter(function (fl) { return tcol(CALLS, fl[0]).some(Boolean); });
+    var flagSel = selectOf([{ value: '', text: 'All calls' }, { value: '__any', text: 'Flagged only' }, { value: '__none', text: 'Unflagged only' }]
+      .concat(presentFlags.map(function (fl) { return { value: fl[1], text: 'Flag: ' + fl[1] }; })), '', null, 'Call flags');
+    var confBox = h('div', { class: 'seg', role: 'group', 'aria-label': 'Confidence' });
+    confLevels.forEach(function (level) {
+      var label = level === 'NA' ? 'Unscored' : level;
+      confBox.appendChild(h('button', {
+        type: 'button', 'aria-pressed': 'true', text: label,
+        onclick: function () {
+          f.conf[level] = !f.conf[level];
+          this.setAttribute('aria-pressed', f.conf[level] ? 'true' : 'false');
+          apply();
+        }
+      }));
+    });
+
+    var count = h('span', { class: 'muted small' });
+    var tableHost = h('div'), detail = h('div', { class: 'call-detail-wrap' });
+    var Tdisp = callsTableDisplay();
+    var table = null;
+
+    function pass(i) {
+      if (state.sample && callSample(i) !== state.sample) return false;
+      if (f.type && callType(i) !== f.type) return false;
+      if (f.chr && String(tcol(CALLS, chrCol)[i]) !== f.chr) return false;
+      if (f.flag) {
+        var fl = callFlagList(i);
+        if (f.flag === '__any' ? !fl.length : f.flag === '__none' ? fl.length : fl.indexOf(f.flag) < 0) return false;
+      }
+      var ck = callConf(i);
+      ck = (ck === 'HIGH' || ck === 'MEDIUM' || ck === 'LOW') ? ck : 'NA';
+      return f.conf[ck] !== false;
+    }
+
+    var resetBtn = h('button', { class: 'btn small-btn', type: 'button', text: 'Reset filters', onclick: function () {
+      f.type = ''; f.chr = ''; f.flag = ''; typeSel.value = ''; chrSel.value = ''; flagSel.value = '';
+      confLevels.forEach(function (k) { f.conf[k] = true; });
+      $$('button', confBox).forEach(function (b) { b.setAttribute('aria-pressed', 'true'); });
+      apply();
+    } });
+    stack.appendChild(h('div', { class: 'toolbar calls-toolbar' },
+      field('Confidence', confBox), field('Type', typeSel), field('Chromosome', chrSel), presentFlags.length ? field('Flags', flagSel) : null, resetBtn, count));
+    stack.appendChild(card('CNV calls', 'Select a row to inspect its coverage evidence below.', tableHost));
+    stack.appendChild(detail);
+    root.appendChild(stack);
+
+    var callsBase = String(META.source || 'cnv').toLowerCase();
+    var bedTool = function (view) {
+      return h('button', { class: 'btn', type: 'button', text: 'Export BED', title: 'BED file (0-based) of the calls currently shown',
+        onclick: function () { download(callsBase + '_calls.bed', callsToBed(view.visible()), 'text/plain;charset=utf-8'); } });
+    };
+    table = tableView(tableHost, Tdisp, {
+      filename: callsBase + '_cnv_calls', pageSize: 20, tools: [bedTool], labels: { Q_SOME: 'Q_SOME', KB: 'KB', BF: 'BF', MLCN: 'MLCN', ID: 'ID' },
+      sort: ['ID', 'asc'],
+      wrap: ['Gene'],
+      render: {
+        Type: typeChip,
+        Confidence: confChip,
+        Sample: function (v) { return h('strong', { text: v }); },
+        Calibration: function (v) { return v === 'check' ? chip('warn', 'check') : v ? chip('ok', v) : ''; },
+        Flags: function (v) { return v ? h('span', { class: 'muted small', text: v }) : ''; },
+        Start: function (v) { return fmtInt(v); },
+        End: function (v) { return fmtInt(v); }
+      },
+      selected: function () { return state.call === null || state.call === '' ? -1 : CALL_ROW[state.call]; },
+      onRow: function (i) {
+        var clicked = callId(i);
+        state.call = state.call === clicked ? '' : clicked;
+        notify();
+      }
+    });
+
+    function apply() {
+      table.setPredicate(pass);
+      var visible = table.visible();
+      count.textContent = visible.length + ' of ' + CALLS.n + ' calls';
+      if (state.call !== null && state.call !== '' && visible.indexOf(CALL_ROW[state.call]) < 0) state.call = null;
+      if (state.call === null && visible.length) state.call = callId(visible[0]);
+      var row = (state.call === null || state.call === '') ? undefined : CALL_ROW[state.call];
+      if (row !== undefined && visible.indexOf(row) >= 0) showCallDetail(detail, row);
+      else {
+        clear(detail);
+        detail.appendChild(card('Call evidence', null, emptyNote('No call selected. Select a row to display its values and figures; select the same row again to clear the selection.')));
+      }
+      // Redraw once the current call is known so the selected table row is visible (and on the right page).
+      if (row !== undefined && visible.indexOf(row) >= 0) table.select(row); else table.redraw();
+    }
+
+    typeSel.addEventListener('change', function () { f.type = typeSel.value; apply(); });
+    chrSel.addEventListener('change', function () { f.chr = chrSel.value; apply(); });
+    flagSel.addEventListener('change', function () { f.flag = flagSel.value; apply(); });
+    CALLS_NAV = { move: function (d) {
+      var vis = table.visible(); if (!vis.length) return;
+      var cur = (state.call === null || state.call === '') ? -1 : vis.indexOf(CALL_ROW[state.call]);
+      state.call = callId(vis[Math.max(0, Math.min(vis.length - 1, cur + d))]); notify();
+    } };
+    onState(apply);
+    apply();
+  });
+
+  function disposeGeneTrackTree(root) {
+    if (!root) return;
+    var nodes = [];
+    if (root.matches && root.matches('.gene-track-container')) nodes.push(root);
+    if (root.querySelectorAll) nodes = nodes.concat(Array.prototype.slice.call(root.querySelectorAll('.gene-track-container')));
+    nodes.forEach(function (node) {
+      if (node._echoGeneTrackResizeObserver) { node._echoGeneTrackResizeObserver.disconnect(); node._echoGeneTrackResizeObserver = null; }
+      if (node._echoGeneTrackResize) { window.removeEventListener('resize', node._echoGeneTrackResize); node._echoGeneTrackResize = null; }
+      var plot = node._echoGeneTrackPlotDiv;
+      if (plot) {
+        if (plot._echoGeneTrackAfterPlot && plot.removeListener) plot.removeListener('plotly_afterplot', plot._echoGeneTrackAfterPlot);
+        if (plot._echoGeneTrackRelayout && plot.removeListener) plot.removeListener('plotly_relayout', plot._echoGeneTrackRelayout);
+        delete plot._echoGeneTrackAfterPlot; delete plot._echoGeneTrackRelayout; delete plot._echoGeneTrackSync;
+        if (window.Plotly && Plotly.purge) { try { Plotly.purge(plot); } catch (e) {} }
+      }
+      delete node._echoGeneTrackSync;
+    });
+  }
+
+  function showCallDetail(host, i) {
+    disposeGeneTrackTree(host);
+    clear(host);
+    var id = callId(i), P = PLOTS[String(id)];
+    var head = h('div', { class: 'detail-head' },
+      h('h2', { text: callSample(i) + ' \u00b7 ' + callGene(i) }),
+      typeChip(callType(i)), confChip(callConf(i)),
+      h('span', { class: 'muted', text: callInterval(i) }));
+    // Model-level values that are not already columns of the calls table.
+    var kvPairs = [], additionalFlags = callFlags(i);
+    function put(label, col, fn) {
+      var a = tcol(CALLS, col); if (!a.length) return;
+      var v = a[i]; if (v === null || v === undefined || v === '' || (typeof v === 'number' && !isFinite(v))) return;
+      kvPairs.push([label, fn ? fn(v) : orNa(v)]);
+    }
+    if (additionalFlags) kvPairs.push(['Flags', additionalFlags]);
+    put('Observed count', 'observed'); put('Expected count', 'expected'); put('Comparators', 'comparators');
+    put('Copy number', 'cn_label'); put('Size (kb)', 'kb'); put('Carriers in cohort', 'carriers'); put('Target ids', 'targets');
+    var locus = callLocus(i);
+    var tools = h('div', { class: 'locus-tools' },
+      h('button', { class: 'btn small-btn', type: 'button', text: 'Copy locus', title: locus, onclick: function () { copyText(locus, 'Copied ' + locus); } }),
+      h('button', { class: 'btn small-btn', type: 'button', text: 'Open in IGV', title: 'Sends the locus to a running IGV desktop (port 60151)', onclick: function () { sendToIgv(locus); } }));
+    var body = h('div', { class: 'stack' });
+    if (!P) {
+      body.appendChild(emptyNote(META.windows_limited ? 'Coverage profiles were only embedded for the first ' + META.windows_limit + ' calls.' : 'No coverage window for this call.'));
+    } else {
+      // Call-level calibration is shown in the selected call details and call table.
+      var stripBox = h('div', { class: 'gene-track-container' }), covBox = plotBox('mid'), ciBox = plotBox('mid'), zBox = plotBox('mid');
+      var refsChk = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Show reference samples' });
+      body.appendChild(h('div', { class: 'toolbar' }, h('label', { class: 'field inline' }, refsChk, 'Show reference samples')));
+      body.appendChild(stripBox);
+      body.appendChild(card('Log coverage (scaled references vs test sample)', null, covBox));
+      body.appendChild(card(IS_ECHO ? 'Observed / expected with 95% beta-binomial interval' : 'Observed / expected with 95% negative-binomial interval', asArray(P.subtitle)[0] || null, ciBox));
+      body.appendChild(card('Z-score vs references', null, zBox));
+      function drawPanels() {
+        renderGeneTrack(stripBox, P, covBox);
+        viewerPlots(P, covBox, ciBox, zBox, refsChk.checked);
+        syncCallViewerXAxes([covBox, ciBox, zBox]);
+      }
+      refsChk.addEventListener('change', drawPanels);
+      stripBox._echoGeneTrackDrawPanels = drawPanels;
+    }
+    var detailGrid = kvPairs.length ? h('div', { class: 'grid g-main' }, h('div', { class: 'stack' }, body), kv(kvPairs)) : body;
+    host.appendChild(card('Call details', 'CNV.ID ' + id, h('div', null, head, tools, detailGrid)));
+    // Plotly must render only after its containers are connected and measurable.
+    if (P) {
+      var trackHost = host.querySelector('.gene-track-container');
+      if (trackHost && trackHost._echoGeneTrackDrawPanels) trackHost._echoGeneTrackDrawPanels();
+    }
+    applyGlobalAlertFilter();
+    host.scrollIntoView && host.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function pcaPlot(div) {
+    var P = PCA;
+    plot(div, function (t) {
+      var c = SEM[t];
+      var names = P.names || P.samples, pc1 = P.pc1 || P.pcs.PC1, pc2 = P.pc2 || P.pcs.PC2;
+      var groups = P.group ? uniq(P.group) : ['All'], cc = catColors(Math.max(groups.length, 1), t), s = state.sample;
+      // Pre-compute the not-analysed sample-name set so excluded samples can
+      // be drawn in red regardless of their group colour.
+      var failedSet = {}; notAnalysedSampleNames().forEach(function (n) { failedSet[n] = true; });
+      var data = groups.map(function (g, k) {
+        var ii = range(names.length).filter(function (i) { return (P.group ? P.group[i] : 'All') === g; });
+        return { type: glType(names.length), mode: 'markers+text', name: g, x: ii.map(function (i) { return pc1[i]; }), y: ii.map(function (i) { return pc2[i]; }),
+          text: ii.map(function (i) { return names[i]; }), textposition: 'top right', textfont: { size: 10, color: CHROME[t].secondary },
+          hovertemplate: '<b>%{text}</b><br>PC1 %{x:.2f}<br>PC2 %{y:.2f}<extra>' + g + (failedSet[names[ii[0]]] ? ' (excluded)' : '') + '</extra>',
+          // Failed samples inside this group get the fail (red) colour and an
+          // 'x' marker symbol; the rest keep their group colour.
+          marker: { color: ii.map(function (i) { return failedSet[names[i]] ? c.fail : cc[k]; }),
+                    symbol: ii.map(function (i) { return failedSet[names[i]] ? 'x' : 'circle'; }),
+                    size: ii.map(function (i) { return (s && names[i] === s) || failedSet[names[i]] ? 15 : 9; }),
+                    line: { width: ii.map(function (i) { return s && names[i] === s ? 3 : 0; }), color: CHROME[t].text } } };
+      });
+      var v1 = P.var1 || (P.var ? P.var[0] : 0), v2 = P.var2 || (P.var ? P.var[1] : 0);
+      return { data: data, layout: baseLayout(t, { xlab: 'PC1 (' + fmt(v1) + '%)', ylab: 'PC2 (' + fmt(v2) + '%)', legend: groups.length > 1, margin: { l: 56, r: 24, t: 28, b: 48 } }) };
+    });
+  }
+  function depthHist(div) {
+    var Hh = DEPTH_HIST;
+    plot(div, function (t) {
+      var sem = SEM[t];
+      var data = [{ type: 'bar', x: Hh.mid, y: Hh.counts, marker: { color: Hh.mid.map(function (m) { return (TH.qc_min_cov || TH.min_cov) && Math.pow(10, m) < (TH.qc_min_cov || TH.min_cov) ? sem.bad : sem.dup; }) },
+        hovertemplate: 'median depth \u2248 %{customdata:.0f}<br>%{y} targets<extra></extra>', customdata: Hh.mid.map(function (m) { return Math.pow(10, m); }) }];
+      var thr = Math.log10(Math.max(TH.qc_min_cov || TH.min_cov || 1, 1));
+      return { data: data, layout: baseLayout(t, { xlab: 'Median depth per target (log)', ylab: 'Targets',
+        shapes: (TH.qc_min_cov || TH.min_cov) ? [{ type: 'line', xref: 'x', yref: 'paper', x0: thr, x1: thr, y0: 0, y1: 1, line: { color: sem.warn, width: 2, dash: 'dash' } }] : [] }) };
+    });
+  }
+
+  // Build a list of individual chromosomes that are absent from the BED,
+  // grouped by class, for the prominent "Missing chromosomes" card at the
+  // top of the Chromosomes subtab.  Uses the same inventory source as
+  // autosomesMissingFromBed() so the two never disagree.
+  function missingChromosomesDetailed() {
+    var have = {}, seenAny = false;
+    [CHR && CHR.inventory, DATA.chr_all, DATA.chr].forEach(function (T) {
+      if (!T || !T.n || !hasCol(T, 'chromosome')) return;
+      seenAny = true;
+      range(T.n).forEach(function (i) {
+        var k = String(tcol(T, 'chromosome')[i]).replace(/^chr/i, '').toUpperCase();
+        if (k) have[k] = true;
+      });
+    });
+    if (!seenAny) return null;
+    var auto = [], gon = [];
+    for (var c = 1; c <= 22; c++) if (!have[String(c)]) auto.push('chr' + c);
+    if (!have['X']) gon.push('chrX');
+    if (!have['Y']) gon.push('chrY');
+    if (!auto.length && !gon.length) return null;
+    return { autosomes: auto, gonosomes: gon };
+  }
+
+  function buildChromosomeOverview(root) {
+    // Prominent "Missing chromosomes" card first: lists every chromosome
+    // absent from the BED as a red chip, grouped by class, so the user
+    // sees the scope gap before the inventory table.  This is the
+    // "missing chromosome should be displayed" the user asked for.
+    var missing = missingChromosomesDetailed();
+    if (missing) {
+      var chips = h('div', { class: 'chips' });
+      if (missing.autosomes.length) {
+        chips.appendChild(h('span', { class: 'muted small', text: 'Autosomes: ' }));
+        missing.autosomes.forEach(function (c) { chips.appendChild(chip('fail', c)); });
+      }
+      if (missing.gonosomes.length) {
+        chips.appendChild(h('span', { class: 'muted small', text: (missing.autosomes.length ? ' \u00b7 ' : '') + 'Gonosomes: ' }));
+        missing.gonosomes.forEach(function (c) { chips.appendChild(chip('fail', c)); });
+      }
+      var missingBody = h('div', { class: 'stack tight' },
+        chips,
+        h('p', { class: 'note', text: missing.autosomes.length + missing.gonosomes.length +
+          ' chromosome(s) are absent from the panel BED file. No CNV call can be made for these regions in any run; absence of calls is not a negative result. Re-run with a BED that includes them, or accept the scope limitation.' }));
+      root.appendChild(card('Missing chromosomes', 'Chromosomes absent from the BED file', missingBody, 'flagged'));
+    }
+    var scopeCard = chromosomeScopeCard();
+    if (scopeCard) { scopeCard.id = 'chromosome-scope'; root.appendChild(scopeCard); }
+    var inv = CHR.inventory;
+    if (inv && inv.n) {
+      // Pad the inventory to the full canonical set (chr1-22, X, Y, M) so
+      // chromosomes absent from the BED also appear as rows (with 0 targets
+      // and a "not in BED" status), matching the "Missing chromosomes" card
+      // above and the announced scope.
+      inv = completeChromosomeInventory(inv);
+      var invHost = h('div'), barBox = plotBox('short');
+      tableView(invHost, inv, { filename: 'chromosomes', pageSize: 30,
+        labels: { targets_in_bed: 'targets in BED', targets_analysed: 'targets analysed' },
+        render: { analysed: function (v, i) {
+          // Three states: analysed (green), in BED but not analysed (yellow),
+          // not in BED (red).  The latter only happens for synthesised rows
+          // (targets_in_bed == 0) so missing chromosomes read as failures.
+          if (v) return chip('ok', 'analysed');
+          return Number(tcol(inv, 'targets_in_bed')[i]) === 0 ? chip('fail', 'not in BED') : chip('warn', 'not analysed');
+        } },
+        cellClass: { targets_in_bed: function (v, i) { return Number(v) === 0 ? 'fail' : ''; },
+                     targets_analysed: function (v, i) { return tcol(inv, 'analysed')[i] ? '' : 'warn'; } } });
+      root.appendChild(card('Chromosome inventory', 'Targets in BED and analysed status by chromosome; chromosomes absent from the BED are listed with 0 targets', invHost));
+      root.appendChild(card('Targets per chromosome', 'Targets in BED vs. analysed', barBox));
+      plot(barBox, function (t) {
+        var c = tcol(inv, 'chromosome');
+        return { data: [
+          { type: 'bar', name: 'in BED', x: c, y: tcol(inv, 'targets_in_bed'), marker: { color: SEM[t].NA } },
+          { type: 'bar', name: 'analysed', x: c, y: tcol(inv, 'targets_analysed'), marker: { color: CAT[t][0] } }
+        ], layout: baseLayout(t, { ylab: 'targets', barmode: 'overlay', legend: true,
+          xaxis: { type: 'category', tickangle: -45 }, margin: { l: 56, r: 16, t: 10, b: 80 } }) };
+      });
+    }
+    var D = CHR.depth;
+    if (D && D.chromosomes && asArray(D.chromosomes).length) {
+      var hbox = plotBox('tall');
+      root.appendChild(card('Chromosome depth relative to autosomes', 'Median target depth / sample autosomal median', hbox));
+      plot(hbox, function (t) {
+        var dz = asArray(D.z).map(asArray);
+        return { data: [{ type: 'heatmap', x: asArray(D.samples), y: asArray(D.chromosomes), z: dz, zmin: 0, zmax: 2,
+          colorscale: [[0, DIV[0]], [0.25, DIV[1]], [0.5, DIV[2]], [0.75, DIV[3]], [1, DIV[4]]],
+          hovertemplate: '%{x}<br>%{y}: %{z:.2f}<extra></extra>', colorbar: { title: { text: 'ratio' } } }],
+          layout: baseLayout(t, { xaxis: { type: 'category', tickangle: -45 }, yaxis: { type: 'category', autorange: 'reversed' }, margin: { l: 70, r: 16, t: 10, b: 90 } }),
+          onClick: function (ev) { var p = ev.points && ev.points[0]; if (p) setSample(p.x); } };
+      });
+    }
+    var X = CHR.sex;
+    if (X && X.n) {
+      var sbox = plotBox(''), sh = h('div');
+      tableView(sh, X, { filename: 'sex_check', pageSize: 10,
+        labels: { x_ratio: 'chrX ratio', y_ratio: 'chrY ratio' },
+        cellClass: { mismatch: function (v) { return v ? 'warn' : ''; } },
+        onRow: function (i) { setSample(tcol(X, 'sample')[i]); } });
+      root.appendChild(h('div', { class: 'grid g2' },
+        card('Sex check', 'chrX vs chrY depth ratio', sbox), card('Sex check table', null, sh)));
+      plot(sbox, function (t) {
+        var sem = SEM[t];
+        var names = asArray(X.sample), xr = asArray(X.x_ratio), yr = asArray(X.y_ratio);
+        var mismatch = asArray(X.mismatch);
+        var failedSet = {}; notAnalysedSampleNames().forEach(function (n) { failedSet[n] = true; });
+        return { data: [{ type: 'scatter', mode: 'markers+text', x: xr, y: yr, text: names, textposition: 'top right',
+          // Failed samples win: red 'x' marker; sex mismatch is yellow;
+          // everything else is green.
+          marker: { color: names.map(function (n, i) { return failedSet[n] ? sem.fail : mismatch[i] ? sem.warn : sem.ok; }),
+                    symbol: names.map(function (n) { return failedSet[n] ? 'x' : 'circle'; }),
+                    size: names.map(function (n) { return failedSet[n] ? 13 : 9; }) },
+          hovertemplate: '%{text}<br>chrX ratio %{x}<br>chrY ratio %{y}<extra></extra>' }],
+          layout: baseLayout(t, { xlab: 'chrX ratio', ylab: 'chrY ratio' }),
+          onClick: function (ev) { var p = ev.points && ev.points[0]; if (p && p.text) setSample(p.text); } };
+      });
+    }
+  }
+
+  // ================================================================ METHODS
+  tab('methods', 'Methods', function () { return true; }, function (root) {
+    var stack = h('div', { class: 'stack' });
+    var R = CONF_RULES, sc = SCORING;
+
+    // 1. Confidence score (both ECHO scoring and CANOPE conf_rules)
+    if (sc || R) {
+      var confRulesList = h('ul', null,
+        h('li', null, h('b', { text: 'HIGH' }), ' only if all HIGH criteria are met.'),
+        h('li', null, h('b', { text: 'MEDIUM' }), ' if HIGH is not met but all MEDIUM criteria are.'),
+        h('li', null, h('b', { text: 'LOW' }), ' otherwise.'));
+      var lowGenes = [], seenLow = {};
+      [].concat(R && R.genes ? asArray(R.genes) : [], sc && sc.forced_low ? asArray(sc.forced_low) : []).forEach(function (g) {
+        var gene = String(g || '').trim(), key = gene.toUpperCase();
+        if (gene && !seenLow[key]) { seenLow[key] = true; lowGenes.push(gene); }
+      });
+      if (lowGenes.length) confRulesList.appendChild(h('li', null, h('b', { text: 'Always LOW' }), ' (homology): ' + lowGenes.join(', ')));
+      if (sc && sc.terminal) confRulesList.appendChild(h('li', { text: sc.terminal }));
+      var confTable;
+      if (sc && sc.rows) {
+        confTable = h('table', { class: 'tbl' },
+          h('thead', null, h('tr', null, ['Category', 'Correlation', 'References', 'Fold change'].map(function (c) { return h('th', { text: c }); }))),
+          h('tbody', null, sc.rows.map(function (r) { return h('tr', null, r.map(function (v, j) { return h('td', null, j === 0 ? chip(v, v) : v); })); })));
+      } else {
+        confTable = h('table', { class: 'tbl' },
+          h('thead', null, h('tr', null, ['Category', 'Q_SOME / BF', 'References', 'Targets'].map(function (c) { return h('th', { text: c }); }))),
+          h('tbody', null,
+            h('tr', null, h('td', null, chip('conf HIGH', 'HIGH')), h('td', { text: '>= ' + (R.high_q || '') }), h('td', { text: '>= ' + (R.high_refs || '') }), h('td', { text: '>= ' + (R.high_targ || '') })),
+            h('tr', null, h('td', null, chip('conf MEDIUM', 'MEDIUM')), h('td', { text: '>= ' + (R.med_q || '') }), h('td', { text: '>= ' + (R.med_refs || '') }), h('td', { text: '>= ' + (R.med_targ || '') })),
+            h('tr', null, h('td', null, chip('conf LOW', 'LOW')), h('td', { text: 'anything else' }), h('td', { text: 'any' }), h('td', { text: 'any' }))));
+      }
+      stack.appendChild(detailCard('Confidence score', null, h('div', null, confRulesList, h('div', { class: 'tbl-wrap', style: { marginTop: '10px' } }, confTable))));
+    }
+
+    // 2. Reading the plots
+    stack.appendChild(detailCard('Reading the plots', null, h('div', { class: 'prose' },
+      h('p', { text: 'Each CNV call shows the test sample against its selected reference samples over the affected exons ± 5 neighbouring targets. Coverage is shown on a log scale after scaling each reference to the median coverage of the test sample in the window.' }),
+      h('p', { text: IS_ECHO
+        ? 'Observed / expected is the test count divided by the count expected from the reference aggregate; the grey ribbon is the 95% interval of the beta-binomial model (overdispersion phi fitted by ExomeDepth). The z-score uses the model’s own standard deviation, so reference samples should scatter around 0.'
+        : 'Observed / expected is the test count divided by the count expected from the reference aggregate; the grey ribbon is the 95% predictive interval of the negative-binomial model. The z-score is measured against the reference distribution, so reference samples should scatter around 0.' }),
+      h('p', { text: 'The horizontal z-score guides at ±2 and ±3 are visual reference levels only; they are not independent CNV-calling thresholds or clinical significance criteria.' }),
+      h('p', { text: 'If more background exons than expected fall outside the interval, the call is flagged “check” (poorly calibrated reference set).' }))));
+    // 4. Calling model
+    stack.appendChild(detailCard(IS_ECHO ? 'How ECHO works' : 'How CANOPE works', null, h('div', { class: 'prose' },
+      IS_ECHO
+        ? [h('p', { text: 'ECHO is an ExomeDepth-based exome CNV caller. For every sample it selects the most correlated reference samples, combines them into an expected coverage per exon, and models the read count with a beta-binomial distribution whose overdispersion (phi) is fitted from the references. A Bayes factor scores each candidate call; confidence (HIGH / MEDIUM / LOW) is derived from the correlation, the number of references and the fold change.' }),
+           h('p', { text: 'One run covers one chromosome mode: autosomes (A), chrX (X) or chrY (Y). Sex chromosomes are therefore never analysed together with the autosomes.' })]
+        : [h('p', { text: 'CANOPE is a CANOES-derived exome CNV caller. For every sample it selects the most correlated reference samples, combines them with non-negative weights into an expected coverage per exon, and models the read count with a negative binomial whose variance is estimated from the references. A hidden Markov model with distance-decayed transitions (Viterbi) calls deletions and duplications; Q_SOME is the phred-scaled probability that at least one exon of the call is abnormal, and MLCN the most likely copy number.' }),
+           h('p', { text: 'One run covers one chromosome mode: autosomes (A), chrX with female references (XX) or chrX/chrY with male references (XY).' })])));
+
+    // 5. Sample outlier detection (sample_qc) -- the metric that produces the
+    //    "Outlier: noise z = X (> Y)" tag in the sample table.  Plain-English
+    //    explanation + formula + analogy + a pointer to the QC figure.
+    var qcZ = TH.qc_zscore, sides = TH.outlier_sides || 'upper';
+    var outlierTitle = 'How outlier samples are detected (sample_qc)';
+    var outlierBody = h('div', { class: 'prose' },
+      h('p', { text: 'Before CNV calling, the pipeline flags outlier samples and removes them from both the test list and the reference list ("used neither as test nor reference"). An outlier sample is excluded even when its depth, read count and pairwise correlation all pass their thresholds -- the outlier check is a separate metric.' }),
+      h('p', { text: 'Plain-English version: for every sample, the pipeline measures how "wiggly" its coverage is across all the targeted exons. Most samples in a cohort wiggle in a similar way -- their coverage goes up and down from exon to exon in a comparable pattern. A sample whose coverage wiggles a lot more than the cohort average (and, only with outlier_sides = "both", a lot less) cannot be modelled reliably: the expected coverage computed for it would not match what is observed, and CNV calls would be unreliable. Such a sample is flagged as an outlier and excluded from calling, which is why References = 0 for it in the sample table.' }),
+      h('p', { text: 'Formula (identical in ECHO and CANOPE; cnv_apply_qc() / detect_outlier_samples()):' }),
+      h('ol', null,
+        h('li', { text: 'For every target (exon) of every sample, compute log2(counts + 0.5).' }),
+        h('li', { text: 'For each sample, take the MAD (median absolute deviation, scaled by 1.4826) of those log2 values across all targets -- one "noise score" per sample. This is the cross-target dispersion of the sample\'s log-coverage profile.' }),
+        h('li', { text: 'Compute the cohort median and cohort MAD of those per-sample noise scores.' }),
+        h('li', { text: 'Robust z-score = (sample noise score - cohort median) / cohort MAD. The robust z is in "cohort MAD" units, so a value of 3 means "3 dispersion-units away from the typical sample".' }),
+        h('li', null, h('span', { text: sides === 'both' ? 'Flag the sample as an outlier when |robust z| > ' : 'Flag the sample as an outlier when robust z > ' }),
+                h('strong', { text: String(qcZ != null ? qcZ : 3) }),
+                h('span', { text: ' (the qc_zscore threshold; outlier_sides = "' + sides + '"' + (sides === 'both' ? ': unusually smooth samples are excluded too' : ': unusually smooth samples are kept, they make the best references') + '). Excluded samples cannot be used as test or as reference, so they end up with 0 references and no CNV calls.' }))),
+      h('p', { text: 'Options, identical in both pipelines: sample_qc = FALSE keeps every sample (noisy ones are only flagged), qc_zscore sets the threshold, outlier_sides = "both" also excludes unusually smooth samples.' }),
+      h('p', { text: 'See the value for every sample in QC & warnings > Sample variability ("Sample noise (robust z of the exon-count dispersion)"); the dashed line on that chart is the qc_zscore threshold, and bars above it are the outliers excluded from calling.' }));
+    stack.appendChild(detailCard(outlierTitle, 'The "Outlier: noise z = X (> Y)" tag in the sample table refers to this metric.', outlierBody));
+
+    // 6. Warning glossary
+    var glossary = [
+      ['Chromosomes not analysed', 'The BED/count table contains targets that this run did not call. A missing call there is not a negative result.'],
+      ['Sample failed / excluded', 'Failed samples raised an error while calling; excluded samples were dropped before calling. Neither has CNV calls, and excluded samples are not used as references. The "Outlier: noise z" tag means the sample was dropped by the sample_qc step -- see "How outlier samples are detected" above.'],
+      ['Low depth / low reads', 'Median target depth or total reads below the QC threshold: reduced sensitivity, especially for single-exon events.'],
+      ['Low correlation / few references', 'No other sample resembles this one (batch, capture kit, tissue), so the expected coverage is poor and false calls are likely.'],
+      ['Noisy sample (outlier)', 'The cross-target dispersion of the sample\'s log-coverage profile is an outlier within the cohort (robust z-score on the per-sample MAD of log2 coverage). See "How outlier samples are detected" above for the formula and the QC chart.'],
+      ['Genotyping skipped', 'Too many calls were produced; Q_SOME and MLCN were not computed and every call is LOW.'],
+      ['Sex / mode mismatch', 'The annotated sex disagrees with chrX/chrY coverage, or the sample does not match the sex expected by the mode.'],
+      ['Background calibration', 'A high share of non-called exons around a call fall outside their 95% interval, meaning the expected-coverage model is miscalibrated.']];
+    stack.appendChild(detailCard('Warning glossary', null, kv(glossary)));
+
+    root.appendChild(stack);
+  });
+
+  // ================================================================ RUN
+  function logHint(L) {
+    var c = L.counts || {}, bits = [];
+    ['ERROR', 'WARNING'].forEach(function (k) { var v = asArray(c[k])[0]; if (v) bits.push(v + ' ' + k.toLowerCase() + (v === 1 ? '' : 's')); });
+    var secs = asArray(L.seconds)[0];
+    if (isNum(secs)) bits.push(secs >= 90 ? Math.round(secs / 60) + ' min' : Math.round(secs) + ' s');
+    return bits.join(' · ') || null;
+  }
+  // Level filter + search + copy/download over the embedded log tail.
+  function logViewer(L) {
+    var lines = asArray(L.tail), levels = ['ERROR', 'WARNING', 'INFO', 'DEBUG'], parsed = [], last = 'INFO', on = {}, counts = {};
+    lines.forEach(function (ln) {
+      var m = /^\[(DEBUG|INFO|WARNING|ERROR)\]/.exec(String(ln));
+      if (m) last = m[1];
+      parsed.push({ lvl: last, text: String(ln) });
+    });
+    levels.forEach(function (k) { on[k] = true; counts[k] = parsed.filter(function (p) { return p.lvl === k; }).length; });
+    var search = h('input', { type: 'search', placeholder: 'Search the log…', 'aria-label': 'Search the log' });
+    var pre = h('pre', { class: 'logv' }), info = h('span', { class: 'muted small' });
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Log levels' });
+    levels.forEach(function (k) {
+      if (!counts[k]) return;
+      seg.appendChild(h('button', { type: 'button', 'aria-pressed': 'true', text: k.charAt(0) + k.slice(1).toLowerCase() + ' ' + counts[k],
+        onclick: function () { on[k] = !on[k]; this.setAttribute('aria-pressed', on[k] ? 'true' : 'false'); draw(); } }));
+    });
+    function shownLines() {
+      var q = search.value.trim().toLowerCase();
+      return parsed.filter(function (p) { return on[p.lvl] && (!q || p.text.toLowerCase().indexOf(q) >= 0); });
+    }
+    function draw() {
+      var v = shownLines(); clear(pre);
+      v.forEach(function (p) { pre.appendChild(h('span', { class: 'll ll-' + p.lvl, text: p.text + '\n' })); });
+      info.textContent = v.length + ' of ' + parsed.length + ' lines' + (L.truncated ? ' (last lines only)' : '');
+    }
+    search.addEventListener('input', draw);
+    draw();
+    return h('div', null,
+      h('div', { class: 'tbl-bar' }, search, seg, info,
+        h('button', { class: 'btn', type: 'button', text: 'Copy', onclick: function () { copyText(shownLines().map(function (p) { return p.text; }).join('\n'), 'Log copied'); } }),
+        h('button', { class: 'btn', type: 'button', text: 'Download', onclick: function () { download((META.source || 'cnv').toLowerCase() + '_pipeline.log', shownLines().map(function (p) { return p.text; }).join('\n') + '\n', 'text/plain;charset=utf-8'); } })),
+      pre);
+  }
+  tab('run', 'Run', function () { return true; }, function (root) {
+    var L = LOG || {}, blocks = [];
+    var summary = runKv();
+    if (summary.childElementCount) blocks.push(detailCard('Report metadata', null, summary));
+
+    // Show the original configuration OR a resolved fallback, never both.
+    if (DATA.config_yaml) blocks.push(detailCard('Configuration used', 'Original configuration for this run', h('pre', { text: DATA.config_yaml })));
+    else if (SETTINGS && SETTINGS.length) blocks.push(detailCard('Resolved settings', null, kv(SETTINGS.map(function (s) { return [s[0], s[1]]; }))));
+    else if (Object.keys(PARAMS).length) blocks.push(detailCard('Run parameters', null,
+      kv(Object.keys(PARAMS).map(function (k) { return [k, Array.isArray(PARAMS[k]) ? PARAMS[k].join(', ') : String(PARAMS[k])]; }))));
+
+    if (DATA.sample_table && DATA.sample_table.n) {
+      var sampleManifest = h('div');
+      tableView(sampleManifest, DATA.sample_table, { filename: 'sample_manifest', pageSize: 15 });
+      blocks.push(detailCard('Input sample manifest', null, sampleManifest));
+    }
+    if (DATA.ref_bams && DATA.ref_bams.n) {
+      var refs = h('div');
+      tableView(refs, DATA.ref_bams, { filename: 'reference_bams', pageSize: 15 });
+      blocks.push(detailCard('External reference BAMs', null, refs));
+    }
+    // Keep the raw execution log in one place; structured QC flags remain in Samples.
+    if (L.tail && L.tail.length) blocks.push(detailCard('Pipeline log' + (L.truncated ? ' (last lines)' : ''), logHint(L), logViewer(L)));
+    if (L.session && L.session.length) blocks.push(detailCard('Session information', null, h('pre', { text: L.session.join('\n') })));
+
+    if (!blocks.length) {
+      root.appendChild(emptyNote('No run metadata, configuration or execution log was recorded.'));
+      return;
+    }
+    root.appendChild(h('div', { class: 'stack' }, blocks));
+  });
+
+  // ================================================================ shell
+  var panels = {}, tabButtons = {}, active = null;
+  function hashParams() {
+    var out = {};
+    String(location.hash || '').replace(/^#/, '').split('&').forEach(function (kv) {
+      var k = kv.split('=');
+      if (!k[0]) return;
+      try { out[k[0]] = decodeURIComponent((k[1] || '').replace(/\+/g, ' ')); } catch (e) { out[k[0]] = k[1] || ''; }
+    });
+    return out;
+  }
+  // The address bar always describes the current view (tab, sample, call) so a link can be shared.
+  function writeHash() {
+    var parts = ['tab=' + (active || 'overview')];
+    if (state.sample) parts.push('sample=' + encodeURIComponent(state.sample));
+    if (active === 'calls' && state.call !== null && state.call !== '' && state.call !== undefined) parts.push('call=' + encodeURIComponent(String(state.call)));
+    try { history.replaceState(null, '', '#' + parts.join('&')); } catch (e) {}
+  }
+  function closeHelp() { var el = document.getElementById('kbd-help'); if (el) el.remove(); }
+  function toggleHelp() {
+    if (document.getElementById('kbd-help')) { closeHelp(); return; }
+    var rows = [['/', 'Focus the search box of the current tab'], ['j / k', 'Next / previous CNV call (CNV calls tab)'],
+                ['1 – 9', 'Switch tab'], ['?', 'Show or hide this help'], ['Esc', 'Close this help / leave a field']];
+    document.body.appendChild(h('div', { id: 'kbd-help', class: 'kbd-help', role: 'dialog', 'aria-label': 'Keyboard shortcuts' },
+      h('h3', { text: 'Keyboard shortcuts' }),
+      h('dl', { class: 'kv' }, rows.map(function (r) { return [h('dt', null, h('kbd', { text: r[0] })), h('dd', { text: r[1] })]; })),
+      h('button', { class: 'btn small-btn', type: 'button', text: 'Close', onclick: closeHelp })));
+  }
+  function activate(id, push) {
+    var t = TABS.filter(function (x) { return x.id === id && x.available(); })[0] || TABS.filter(function (x) { return x.available(); })[0];
+    if (!t) return;
+    id = t.id;
+    Object.keys(panels).forEach(function (k) {
+      var on = k === id; panels[k].hidden = !on;
+      tabButtons[k].setAttribute('aria-selected', on ? 'true' : 'false'); tabButtons[k].tabIndex = on ? 0 : -1;
+    });
+    if (!t.built) {
+      t.built = true;
+      try { t.build(panels[id]); }
+      catch (e) { panels[id].appendChild(h('div', { class: 'empty', text: 'This tab could not be built: ' + e.message })); if (window.console) console.error(e); }
+    } else refreshVisible(panels[id]);
+    applyGlobalAlertFilter();
+    setTimeout(function () { refreshVisible(panels[id]); applyGlobalAlertFilter(); }, 60);
+    active = id;
+    if (push) writeHash();
+  }
+  function init() {
+    applyThemeAttr();
+    var reportTitle = String(META.title || 'ECHO report').replace(/^ECHO\s+report\s*-\s*(.+)$/i, 'ECHO - $1 report');
+    document.title = reportTitle;
+    var tabsEl = $('#tabs'), main = $('#panels');
+    var tabOrder = { overview: 0, samples: 1, qc: 2, calls: 3, methods: 4, run: 5 };
+    var avail = TABS.filter(function (t) { return t.available(); }).sort(function (a, b) {
+      var ao = tabOrder[a.id] === undefined ? 99 : tabOrder[a.id];
+      var bo = tabOrder[b.id] === undefined ? 99 : tabOrder[b.id];
+      return ao - bo;
+    });
+    avail.forEach(function (t, i) {
+      var b = h('button', { class: 'tab', role: 'tab', id: 'tab-' + t.id, 'aria-controls': 'panel-' + t.id, 'aria-selected': 'false', tabindex: '-1', type: 'button', text: t.label,
+        onclick: function () { activate(t.id, true); },
+        onkeydown: function (e) {
+          var k = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+          if (!k) return; e.preventDefault();
+          var nx = avail[(i + k + avail.length) % avail.length]; activate(nx.id, true); tabButtons[nx.id].focus();
+        } });
+      tabButtons[t.id] = b; tabsEl.appendChild(b);
+      panels[t.id] = h('section', { class: 'panel', role: 'tabpanel', id: 'panel-' + t.id, 'aria-labelledby': 'tab-' + t.id, hidden: true });
+      main.appendChild(panels[t.id]);
+    });
+    // header sample picker
+    var pick = $('#sample-pick');
+    if (pick && SAMPLES.length > 0) {
+      headerPicker = h('select', { id: 'sample-sel', 'aria-label': 'Filter report by sample' },
+        h('option', { value: '', text: 'All samples (' + SAMPLES.length + ')' }),
+        SAMPLES.map(function (s) { return h('option', { value: s, text: s }); }));
+      headerPicker.value = state.sample;
+      headerPicker.addEventListener('change', function () { setSample(headerPicker.value); });
+      pick.appendChild(h('label', { for: 'sample-sel', text: 'Filter sample' }));
+      pick.appendChild(headerPicker);
+    } else if (pick) { pick.hidden = false; }
+    if (pick) {
+      globalSeverityControl = makeSeveritySegments(state.alertFilter, [
+        { value: 'all', label: 'All' }, { value: 'fail', label: 'Fail' },
+        { value: 'warning', label: 'Warn' }, { value: 'note', label: 'Note' }, { value: 'hide', label: 'Off' }
+      ], setAlertFilter, 'Global alert severity filter');
+      pick.appendChild(h('div', { class: 'global-alert-filter', title: 'Show or hide warning levels throughout the report' },
+        h('span', { text: 'Severity' }), globalSeverityControl.el));
+    }
+
+    // Persistent chromosome-scope warning: this lives in the sticky shell so it
+    // remains visible above every tab and is controlled by the single Severity filter.
+    var noticeHost = $('#global-notice');
+    var missingClasses = missingBedChromosomeClasses();
+    if (noticeHost && missingClasses.length) {
+      var scopeLink = h('button', { class: 'btn small-btn', type: 'button', text: 'Chromosome scope details', onclick: function () {
+        activate('overview', true);
+        if (overviewSubtabs) overviewSubtabs.switchTo('chromosomes');
+      } });
+      noticeHost.appendChild(alertBox('fail', 'Chromosome class missing from the BED file', missingClasses.join(', ') + ' not present in BED file.', scopeLink));
+    }
+    if (noticeHost) {
+      var notAnalysedAlert = notAnalysedSampleNames();
+      if (notAnalysedAlert.length) {
+        // Show each name followed by its reason (in parentheses) when present,
+        // so the failure banner explains why each sample was excluded.
+        var body = notAnalysedAlert.map(function (n) {
+          var r = EXCLUSION_REASONS[n];
+          return r ? n + ' (' + r + ')' : n;
+        }).join(', ');
+        noticeHost.appendChild(alertBox('fail', 'Samples not analysed (' + notAnalysedAlert.length + ')',
+          body + ' not analysed.'));
+      }
+    }
+
+    var btn = $('#theme-btn');
+    var labelFn = function () { btn.textContent = 'Theme: ' + themePref; };
+    labelFn();
+    btn.addEventListener('click', function () {
+      themePref = themePref === 'auto' ? 'light' : themePref === 'light' ? 'dark' : 'auto';
+      store('unified-report-theme', themePref); applyThemeAttr(); labelFn(); rerenderAll();
+    });
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      var onChange = function () { if (themePref === 'auto') rerenderAll(); };
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+    }
+    var hp = hashParams();
+    if (hp.sample && SIDX[hp.sample] !== undefined) setSample(hp.sample, true);
+    if (hp.call && CALL_ROW[hp.call] !== undefined) state.call = callId(CALL_ROW[hp.call]);
+    activate(hp.tab || 'overview', false);
+    onState(writeHash);
+    var helpBtn = h('button', { class: 'btn', type: 'button', text: '?', 'aria-label': 'Keyboard shortcuts', title: 'Keyboard shortcuts (?)', onclick: toggleHelp });
+    if (btn && btn.parentNode) btn.parentNode.insertBefore(helpBtn, btn.nextSibling);
+    document.addEventListener('keydown', function (e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var tg = e.target, tag = tg && tg.tagName ? tg.tagName.toLowerCase() : '';
+      var typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (tg && tg.isContentEditable);
+      if (e.key === 'Escape') { closeHelp(); if (typing && tg.blur) tg.blur(); return; }
+      if (typing) return;
+      if (e.key === '/') { var s = $('.panel:not([hidden]) input[type=search]'); if (s) { e.preventDefault(); s.focus(); } }
+      else if (e.key === '?') toggleHelp();
+      else if ((e.key === 'j' || e.key === 'k') && active === 'calls' && CALLS_NAV) { e.preventDefault(); CALLS_NAV.move(e.key === 'j' ? 1 : -1); }
+      else if (/^[1-9]$/.test(e.key) && avail[Number(e.key) - 1]) activate(avail[Number(e.key) - 1].id, true);
+    });
+    applyGlobalAlertFilter();
+    window.addEventListener('hashchange', function () { var hh = hashParams(); if (hh.tab && hh.tab !== active) activate(hh.tab, false); });
+    document.documentElement.setAttribute('data-ready', '1');
+  }
+
+  function ensurePlotly(cb, timeoutMs) {
+    timeoutMs = timeoutMs || 8000;
+    var done = false;
+    function has() { return (typeof window.Plotly !== 'undefined') && window.Plotly && (typeof window.Plotly.react === 'function'); }
+    function finish(ok) {
+      if (done) return; done = true; clearTimeout(timer);
+      if (ok && has()) cb();
+      else {
+        var host = document.getElementById('panels');
+        if (host) host.innerHTML = '<div class="empty">Plotly.js failed to load. Check your connection or reinstall the R package.</div>';
+        if (window.console) console.error('[report] Plotly unavailable.');
+      }
+    }
+    var timer = setTimeout(function () { finish(false); }, timeoutMs);
+    if (has()) { finish(true); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js';
+    s.async = false; s.onload = function () { finish(true); }; s.onerror = function () { finish(false); };
+    document.head.appendChild(s);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { ensurePlotly(init); });
+  else ensurePlotly(init);
+})();
+)---"
+
+
+# ----------------------------------------------------------------------------
+# R helpers (shared by both packages)
+# ----------------------------------------------------------------------------
+
+#' CSS string for the unified report
+#' @export
+report_css <- function() REPORT_CSS
+
+#' JS string for the unified report
+#' @export
+report_js <- function() REPORT_JS
+
+#' Column-oriented table serialiser (data.frame -> list for JSON)
+#' @export
+rep_table <- function(df) {
+  if (is.null(df)) return(list(cols = I(character()), n = 0L, data = list()))
+  df <- as.data.frame(df, stringsAsFactors = FALSE, check.names = FALSE)
+  data <- lapply(df, function(v) {
+    if (is.factor(v)) v <- as.character(v)
+    if (is.double(v)) v <- round(v, 4)
+    I(unname(v))
+  })
+  list(cols = I(colnames(df)), n = nrow(df), data = data)
+}
+
+#' Empty table placeholder
+#' @export
+rep_empty_table <- function(cols) {
+  rep_table(stats::setNames(rep(list(character()), length(cols)), cols))
+}
+
+#' Inert JSON for a <script type="application/json"> element
+#' @export
+report_json <- function(x) {
+  json <- as.character(jsonlite::toJSON(x, auto_unbox = TRUE, null = "null", na = "null",
+                                        digits = NA, force = TRUE))
+  json <- gsub("</", "<\\/", json, fixed = TRUE)
+  gsub("<!--", "<\\u0021--", json, fixed = TRUE)
+}
+
+#' Read the plotly.js bundle from the installed plotly R package (or NULL)
+#' @export
+report_plotly_js <- function() {
+  if (!requireNamespace("plotly", quietly = TRUE)) return(NULL)
+  deps <- tryCatch(suppressWarnings(suppressMessages(htmltools::findDependencies(plotly::plot_ly()))),
+                   error = function(e) list())
+  dep <- Filter(function(d) identical(d$name, "plotly-main"), deps)
+  if (!length(dep)) return(NULL)
+  dep <- dep[[1]]
+  path <- file.path(dep$src$file, dep$script)
+  if (!file.exists(path)) path <- system.file(dep$src$file, dep$script, package = dep$package %||% "plotly")
+  if (!nzchar(path) || !file.exists(path)) return(NULL)
+  raw <- readBin(path, "raw", file.size(path))
+  txt <- rawToChar(raw); Encoding(txt) <- "UTF-8"
+  gsub("</script", "<\\/script", txt, fixed = TRUE)
+}
+
+#' HTML-escape a string
+#' @export
+report_esc <- function(x) {
+  x <- gsub("&", "&amp;", as.character(x), fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  gsub(">", "&gt;", x, fixed = TRUE)
+}
+
+#' Assemble the full HTML document from a payload and write it to out_file.
+#'
+#' Both echo_report.R and canope_report.R call this with their payload
+#' (a list with a \code{meta$source} field set to "ECHO" or "CANOPE").
+#' The resulting HTML is byte-identical in structure and styling regardless
+#' of source; only the embedded JSON blob differs.
+#'
+#' @param payload List (the report data, with meta$source set).
+#' @param settings Optional list; \code{settings$report_plotly} can be "inline" (default) or "cdn".
+#' @param out_file Path to write the HTML file to.
+#' @return Invisibly, out_file.
+#' @export
+report_html <- function(payload, settings = list(), out_file) {
+  css <- report_css()
+  js  <- report_js()
+  mode <- tolower(as.character(settings$report_plotly %||% "inline")[1])
+  plotly_tag <- NULL
+  if (mode != "cdn") {
+    src <- report_plotly_js()
+    if (is.null(src)) {
+      message("[WARNING] plotly.js bundle not found; loading from CDN (needs internet).")
+    } else {
+      plotly_tag <- paste0("<script>\n", src, "\n</script>\n")
+    }
+  }
+  if (is.null(plotly_tag))
+    plotly_tag <- "<script src=\"https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js\"></script>\n"
+
+  title_value <- as.character(payload$meta$title %||% paste(payload$meta$source %||% "CNV", "report"))
+  title_value <- sub('^(ECHO|CANOPE)\\s+report\\s*-\\s*(.+)$', '\\1 - \\2 report', title_value, ignore.case = TRUE)
+  payload$meta$title <- title_value
+  title <- report_esc(title_value)
+  html <- paste0(
+    "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n",
+    "<title>", title, "</title>\n<style>\n", css, "\n</style>\n</head>\n<body>\n",
+    "<header class=\"top\"><div class=\"top-inner\">\n",
+    "<div class=\"title-row\"><h1>", title, "</h1>",
+    "<span class=\"spacer\"></span>",
+    "<div id=\"sample-pick\" class=\"sample-pick\"></div>",
+    "<button id=\"theme-btn\" class=\"btn\" type=\"button\" aria-label=\"Colour theme\">Theme</button></div>\n",
+    "<div id=\"global-notice\" class=\"global-notice\" aria-live=\"polite\"></div>\n",
+    "<nav id=\"tabs\" class=\"tabs\" role=\"tablist\" aria-label=\"Report sections\"></nav>\n",
+    "</div></header>\n<main id=\"panels\"></main>\n",
+    "<noscript><p style=\"padding:16px\">This report needs JavaScript enabled.</p></noscript>\n",
+    plotly_tag,
+    "<script id=\"unified-data\" type=\"application/json\">", report_json(payload), "</script>\n",
+    "<script>\n", js, "\n</script>\n</body>\n</html>\n")
+  con <- file(out_file, "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(charToRaw(enc2utf8(html)), con)
+  message("[INFO] ", payload$meta$source, " report written: ", out_file, " (",
+          format(structure(file.size(out_file), class = "object_size"), units = "auto"), ")")
+  invisible(out_file)
+}

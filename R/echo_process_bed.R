@@ -1,3 +1,45 @@
+#' Annotate BED intervals from a reference exon table (REGEN mode)
+#'
+#' @param input_df Data frame with \code{Chr}, \code{Start}, \code{End},
+#'   \code{OriginalName} (the BED as read).
+#' @param ref_df Reference exons: \code{Chr}, \code{Start}, \code{End}
+#'   (1-based), \code{Transcript}, \code{Gene} and optionally \code{Strand}.
+#' @param bed_zero_based Whether \code{input_df$Start} is 0-based.
+#' @return Lowercase-column table (\code{chromosome}, \code{start}, \code{end},
+#'   \code{gene}, \code{ExonNum}, \code{OriginalName}), one row per input row;
+#'   \code{gene} is \code{"Unknown"} and \code{ExonNum} \code{NA} when no
+#'   reference exon overlaps.
+#' @noRd
+annotate_bed_regen <- function(input_df, ref_df, bed_zero_based = TRUE) {
+  ref_df <- ref_df[order(ref_df$Chr, ref_df$Start, ref_df$End, ref_df$Transcript, method = "radix"), , drop = FALSE]
+  strand <- if ("Strand" %in% names(ref_df)) as.character(ref_df$Strand) else rep("+", nrow(ref_df))
+  # exon number within the transcript, counted in transcription order
+  tx_exon <- integer(nrow(ref_df))
+  for (idx in split(seq_len(nrow(ref_df)), ref_df$Transcript)) {
+    o <- order(ref_df$Start[idx], decreasing = identical(strand[idx[1L]], "-"))
+    tx_exon[idx[o]] <- seq_along(idx)
+  }
+  start1 <- if (bed_zero_based) input_df$Start + 1L else input_df$Start
+  bed_gr <- GenomicRanges::GRanges(input_df$Chr, IRanges::IRanges(start = start1, end = input_df$End))
+  ref_gr <- GenomicRanges::GRanges(ref_df$Chr, IRanges::IRanges(start = ref_df$Start, end = ref_df$End))
+  common <- intersect(unique(as.character(GenomicRanges::seqnames(bed_gr))),
+                      unique(as.character(GenomicRanges::seqnames(ref_gr))))
+  if (!length(common))
+    warning("The BED and the reference share no chromosome name (a 'chr' prefix mismatch?): ",
+            "every interval will be annotated 'Unknown'.", immediate. = TRUE)
+  hits <- if (length(common)) GenomicRanges::findOverlaps(bed_gr, ref_gr) else NULL
+  sel  <- select_best_hits(bed_gr, ref_gr, hits)
+  out <- data.frame(chromosome = as.character(input_df$Chr),
+                    start = if (bed_zero_based) input_df$Start else input_df$Start - 1,
+                    end = input_df$End, gene = "Unknown", ExonNum = NA_integer_,
+                    OriginalName = input_df$OriginalName, stringsAsFactors = FALSE)
+  if (length(sel$q)) {
+    out$gene[sel$q]    <- as.character(ref_df$Gene[sel$s])
+    out$ExonNum[sel$q] <- tx_exon[sel$s]
+  }
+  out
+}
+
 #' Process BED File for CNV Analysis
 #' @param input_bed BED file with at least chromosome, start, and end columns.
 #' @param output_bed Path for the processed BED output.
@@ -220,6 +262,7 @@ ref_df <- data.frame(
   Chr = as.character(GenomicRanges::seqnames(ex)),
   Start = GenomicRanges::start(ex),
   End = GenomicRanges::end(ex),
+  Strand = as.character(GenomicRanges::strand(ex)),
   Transcript = sub(",.*", "", transcripts),
   GeneID = sub(",.*", "", gene_ids),
   stringsAsFactors = FALSE
@@ -253,13 +296,11 @@ if (requireNamespace("org.Hs.eg.db", quietly = TRUE) &&
 # Stable subject ordering defines which annotation wins equal-overlap ties.
 ref_df <- ref_df[order(ref_df$Chr, ref_df$Start, ref_df$End,
                        ref_df$Transcript, ref_df$Gene, method = "radix"), , drop = FALSE]
+# Gene symbol (and the transcript's own exon number) of the best-overlapping
+# reference exon; unmatched intervals stay "Unknown". Exon numbering and
+# off-target handling then follow the same path as STANDARD / NO.
 df <- annotate_bed_regen(input_df, ref_df, bed_zero_based = bed_zero_based)
-names(df)[names(df) == "chromosome"] <- "Chr"
-names(df)[names(df) == "start"] <- "Start"
-names(df)[names(df) == "end"] <- "End"
-names(df)[names(df) == "gene"] <- "Gene"
-names(df)[names(df) == "exon_number"] <- "ExonNum"
-df$Custom.Exon <- df$ExonNum
+df <- number_targets(df)
 } else if (bed_process %in% c("STANDARD", "NO")) {
 # "NO" keeps the names parsed from the BED; "STANDARD" re-annotates from the
 # panel BEDs when some are given. ("NO" used to stop() with an error that

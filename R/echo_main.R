@@ -11,12 +11,17 @@
 #' @param plots Logical. Generate per-CNV PDF plots? Default \code{FALSE}. Can also be set
 #'   in the YAML config under \code{plots} or \code{settings$plots}.
 #' @param vcf_per_sample Logical. Write a separate VCF file for each sample? Default \code{FALSE}.
+#' @param reuse_coverage Logical. Skip the BAM counting when the coverage RData of a previous run
+#'   exists and the BAMs, the BED, the FASTA and every counting setting (padding, sample names,
+#'   genome, BED processing) are unchanged (checked with a fingerprint stored next to the RData).
+#'   Re-running with other calling / QC / report options is then fast. Default \code{FALSE}.
 #' @param sample_name_delim Character string. Delimiter(s) to split the filename.
 #' @param sample_name_keep Character string. Specifies which parts to keep after splitting.
 #' @param sample_name_collapse Character string. Separator for rejoining parts. Default NULL.
 #' @param custom_sample_names Optional character vector. Custom sample names.
 #' @param log_file Character string. Path to log file.
-#' @param gene_field_index Integer. Which field to keep after splitting by exon_sep.
+#' @param gene_field_index Integer or \code{NULL} (default). Which field to keep after
+#'   splitting by exon_sep; \code{NULL} lets \code{process_bed_file()} decide.
 #' @param sample_table Optional character string. Path to a CSV/TSV with sample_name / gender.
 #' @param ref_bams Optional character string. Path to TSV with external reference BAM list.
 #' @param panel_files Optional character vector. BED file paths for target restriction.
@@ -27,12 +32,13 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                  report = TRUE,
                  plots = NULL,  # NULL means "use config"
                  vcf_per_sample = FALSE,
+                 reuse_coverage = FALSE,
                  sample_name_delim = "\\.",
                  sample_name_keep = "1",
                  sample_name_collapse = NULL,
                  custom_sample_names = NULL,
                  log_file = NULL,
-                 gene_field_index = 1,
+                 gene_field_index = NULL,
                  sample_table = NULL,
                  ref_bams = NULL,
                  panel_files = NULL,
@@ -88,6 +94,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         sample_qc                  = args$sample_qc %||% TRUE,
         exon_qc                    = args$exon_qc %||% TRUE,
         qc_zscore                  = args$qc_zscore %||% 3,
+        outlier_sides              = args$outlier_sides %||% "upper",
+        recurrence_action          = args$recurrence_action %||% "flag",
+        recurrence_min_samples     = args$recurrence_min_samples %||% 3L,
+        recurrence_min_fraction    = args$recurrence_min_fraction %||% 0.25,
+        recurrence_min_overlap     = args$recurrence_min_overlap %||% 0.5,
         exon_mad_quantile          = args$exon_mad_quantile %||% 0.90,
         gc_extreme_filter          = args$gc_extreme_filter %||% c(0.15, 0.85),
         min_exon_mean              = args$min_exon_mean %||% 20,
@@ -180,33 +191,16 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
   log_dir <- dirname(log_file)
   if (!dir.exists(log_dir)) dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
 
-  # log_msg() writes to the file itself; the message handler below captures
-  # everything the pipeline functions emit with message() (QC exclusions, BED
-  # warnings, ...) so that the log -- and the report built from it -- is
-  # complete. `in_log_msg` stops log_msg()'s own message() being logged twice.
-  in_log_msg <- FALSE
-  log_msg <- function(msg, type = "INFO") {
-    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    formatted <- paste0("[", type, "] ", timestamp, " ", msg)
-    in_log_msg <<- TRUE
-    on.exit(in_log_msg <<- FALSE, add = TRUE)
-    message(formatted)
-    cat(formatted, "\n", file = log_file, append = TRUE, sep = "")
-  }
-
-  log_msg("ECHO pipeline started")
-  log_msg(paste("Configuration:", ifelse(is.null(config_path), "command-line parameters", config_path)))
+  # ONE logger for the whole run (shared with CANOPE): timestamped lines in the
+  # file AND on the console, the file is truncated at start so the report only
+  # shows this run, and lg$capture() routes everything the callees emit with
+  # message() / warning() into the same file.
+  lg <- cnv_logger(log_file, tag = "ECHO", level = cfg$settings$log_level %||% cfg$log_level %||% "INFO",
+                    total_steps = NA_integer_)
+  log_msg <- function(msg, type = "INFO") lg$log(msg, type)
+  lg$header(config = if (is.null(config_path)) "command-line parameters" else config_path,
+            packages = c("ExomeDepth", "data.table", "GenomicRanges"))
   log_msg(paste("Output directory:", basename(cfg$output$dir)))
-  log_msg(paste("Log file:", basename(log_file)))
-
-  si <- utils::sessionInfo()
-  log_msg(paste0("R version: ", si$R.version$version.string))
-  log_msg(paste0("Platform: ", si$platform))
-  log_msg("Packages:")
-  for (pkg in names(si$otherPkgs)) {
-    log_msg(paste0("   ", pkg, ": ", si$otherPkgs[[pkg]]$Version))
-  }
-  log_msg(" ")
 
   auto_regen <- cfg$auto_regen %||% TRUE
   if (auto_regen && !is.null(cfg$input$bed) && is.null(cfg$bed_process)) {
@@ -254,11 +248,11 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
                                  grch37 = "hg19", grch38 = "hg38", cfg$genome_version)
   }
 
-  old_warn <- options(warn = 1)
-  on.exit(options(warn = old_warn$warn), add = TRUE)
+  ok <- FALSE
+  on.exit(lg$footer(ok), add = TRUE)
 
   tryCatch({
-    withCallingHandlers({
+    lg$capture({
       log_msg(paste("Plots enabled:", plots))
       log_msg(paste("BED processing mode:", cfg$bed_process))
       log_msg(paste("Genome version:", cfg$genome_version))
@@ -357,23 +351,35 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
         log_msg("BED preprocessing skipped (bed_process = 'NO').")
       }
 
-      # The PCA block below runs outside run_step(); count it too, or the
-      # "Step k/N" log counter under-reports N whenever PCA is enabled.
-      steps_total   <- 3L +  
-                       as.integer(cfg$settings$pca_plot %||% TRUE) +
-                       as.integer(plots) +
-                       as.integer(report) +
-                       as.integer(!is.null(vcf_output) || vcf_per_sample)
-      step_current  <- 0L
-      run_step <- function(step_name, expr) {
-        step_current <<- step_current + 1L
-        log_msg(paste0("Step ", step_current, "/", steps_total, ": ", step_name, "..."))
-        result <- expr
-        log_msg(paste0("Step ", step_current, "/", steps_total, " completed."))
-        invisible(result)
-      }
+      steps_total <- 3L +
+                     as.integer(cfg$settings$pca_plot %||% TRUE) +
+                     as.integer(plots) +
+                     as.integer(report) +
+                     as.integer(!is.null(vcf_output) || vcf_per_sample)
+      lg$set_total(steps_total)
+      # a failed step stops the run (`on_error = "stop"`); optional outputs
+      # (PCA, plots, report, VCF) only warn so the calls are never lost
+      run_step <- function(step_name, expr, on_error = "stop") lg$step(step_name, expr, on_error = on_error)
 
+      cov_fp <- NULL; cov_fp_file <- paste0(paths$rdata, ".fingerprint")
+      if (isTRUE(reuse_coverage)) {
+        cov_fp <- echo_coverage_fingerprint(
+          files = c(echo_input_bams(cfg$input$bamfiles, cfg$input$bamdir, cfg$input$rbams),
+                    cfg$input$bed, if (identical(fasta_source, "file")) cfg$input$fasta, cfg$input$rbams),
+          settings = list(pad = cfg$settings$pad_terminal_exons %||% 0, zero_based = bed_zero_based_run,
+                          fasta_source = fasta_source, genome = cfg$genome_version,
+                          delim = sample_name_delim, keep = sample_name_keep,
+                          collapse = cfg$sample_name_collapse %||% sample_name_collapse,
+                          custom = custom_sample_names, skip_invalid = cfg$skip_invalid_intervals %||% TRUE,
+                          bed_process = cfg$bed_process))
+      }
       run_step("Extracting BAM coverage", {
+        if (!is.null(cov_fp) && file.exists(paths$rdata) && file.exists(cov_fp_file) &&
+            identical(readLines(cov_fp_file, n = 1L, warn = FALSE), cov_fp)) {
+          log_msg(paste("Reusing", basename(paths$rdata), "(BAMs, BED, FASTA and counting settings unchanged since it was written)"))
+        } else {
+          if (!is.null(cov_fp) && file.exists(paths$rdata))
+            log_msg("reuse_coverage: inputs or counting settings changed -> counting again")
         run_bam_coverage(
           bamfiles             = cfg$input$bamfiles,
           bamdir               = cfg$input$bamdir,
@@ -393,218 +399,125 @@ echo <- function(config_path = NULL, vcf_output = NULL, save_ed_objects = FALSE,
           skip_invalid_intervals = cfg$skip_invalid_intervals %||% TRUE,
           pad_terminal_exons   = cfg$settings$pad_terminal_exons %||% 0
         )
+          if (!is.null(cov_fp)) writeLines(cov_fp, cov_fp_file)
+        }
       })
 
-      if (cfg$settings$pca_plot %||% TRUE) {
-        # PCA is counted in steps_total, so give it its own "Step k/N" log
-        # lines. It used to run unlogged between steps 1 and 2, leaving the
-        # counter one short (a 7-step run ended at "Step 6/7 completed").
+      st <- cfg$settings
+      if (st$pca_plot %||% TRUE) {
         run_step("Generating PCA plot", {
-          tryCatch({
-            objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
-            counts       <- objs$counts
-            sample_names <- objs$sample_names
-            pca_file     <- file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf"))
-            group_info   <- NULL
-            if (!is.null(sample_table) && file.exists(sample_table)) {
-              sample_df  <- read.table(sample_table, header = TRUE, sep = "\t")
-              group_info <- sample_df$gender[match(sample_names, sample_df$sample_name)]
-            }
-            plot_coverage_pca(counts, sample_names, output_pdf = pca_file, color_by = group_info)
-          }, error = function(e) log_msg(paste("PCA plot step failed:", conditionMessage(e)), "WARNING")
-          )
-        })
+          objs         <- load_rdata(paths$rdata, required = c("counts", "sample_names"))
+          group_info   <- NULL
+          if (!is.null(sample_table) && file.exists(sample_table)) {
+            sample_df  <- utils::read.table(sample_table, header = TRUE, sep = "\t")
+            group_info <- sample_df$gender[match(objs$sample_names, sample_df$sample_name)]
+          }
+          plot_coverage_pca(objs$counts, objs$sample_names,
+                            output_pdf = file.path(cfg$output$dir, paste0("ECHO_", cfg$output$prefix, "_PCA.pdf")),
+                            color_by = group_info)
+        }, on_error = "warn")
       }
 
+      # the SAME QC arguments are given to the QC-metrics step and to the caller,
+      # so the table in the report describes exactly what was excluded
+      qc_args <- list(
+        sample_table = sample_table,
+        sample_qc = st$sample_qc %||% TRUE, exon_qc = st$exon_qc %||% TRUE,
+        qc_zscore = st$qc_zscore %||% 3, outlier_sides = st$outlier_sides %||% "upper",
+        exon_mad_quantile = st$exon_mad_quantile %||% 0.90,
+        gc_extreme_filter = st$gc_extreme_filter %||% c(0.15, 0.85),
+        min_exon_mean = st$min_exon_mean %||% 20)
+
       run_step("Running QC metrics", {
-        tryCatch(
-          run_qc_metrics(
-            rdata_file      = paths$rdata,
-            output_file     = paths$metrics,
-            min_corr        = cfg$settings$min_corr,
-            min_cov         = cfg$settings$min_cov,
-            min_total_reads = cfg$settings$min_total_reads,
-            max_exon_cv     = cfg$settings$max_exon_cv,
-            modechrom       = cfg$settings$modechrom
-          ),
-          error = function(e) log_msg(paste("QC metrics step failed:", conditionMessage(e)), "WARNING")
-        )
-      })
+        do.call(run_qc_metrics, c(list(
+          rdata_file = paths$rdata, output_file = paths$metrics,
+          min_corr = st$min_corr, min_cov = st$min_cov, min_total_reads = st$min_total_reads,
+          max_exon_cv = st$max_exon_cv, modechrom = st$modechrom), qc_args))
+      }, on_error = "warn")
 
       run_step("Calling CNVs", {
-        cnv_args <- cfg$settings[grepl("^score_", names(cfg$settings))]
         cnv_args <- c(list(
           rdata_file             = paths$rdata,
           output_file            = paths$cnvs,
           out_rdata              = paths$summary,
-          transition.probability = cfg$settings$transition_probability,
-          expected.CNV.length    = cfg$settings$expected_CNV_length,
-          n.bins.reduced         = cfg$settings$n_bins_reduced,
-          phi.bins               = cfg$settings$phi_bins,
-          formula                = cfg$settings$formula,
+          transition.probability = st$transition_probability,
+          expected.CNV.length    = st$expected_CNV_length,
+          n.bins.reduced         = st$n_bins_reduced,
+          phi.bins               = st$phi_bins,
+          formula                = st$formula,
           data                   = NULL,
           save_ed_objects        = save_ed_objects,
-          modechrom              = cfg$settings$modechrom,
-          sample_table           = sample_table,
-          sample_qc              = cfg$settings$sample_qc %||% TRUE,
-          exon_qc                = cfg$settings$exon_qc %||% TRUE,
-          qc_zscore              = cfg$settings$qc_zscore %||% 3,
-          exon_mad_quantile      = cfg$settings$exon_mad_quantile %||% 0.90,
-          gc_extreme_filter      = cfg$settings$gc_extreme_filter %||% c(0.15, 0.85),
-          min_exon_mean          = cfg$settings$min_exon_mean %||% 20,
-          remove_terminal_only   = cfg$settings$remove_terminal_only %||% FALSE,
-          penalize_terminal_only = cfg$settings$penalize_terminal_only %||% FALSE
-        ), cnv_args)
+          modechrom              = st$modechrom,
+          remove_terminal_only   = st$remove_terminal_only %||% FALSE,
+          penalize_terminal_only = st$penalize_terminal_only %||% FALSE,
+          recurrence_action      = st$recurrence_action %||% "flag",
+          recurrence_min_samples = st$recurrence_min_samples %||% 3L,
+          recurrence_min_fraction = st$recurrence_min_fraction %||% 0.25,
+          recurrence_min_overlap = st$recurrence_min_overlap %||% 0.5),
+          qc_args, st[grepl("^score_", names(st))])
         do.call(run_cnv_calling, cnv_args)
       })
 
       if (plots) {
         run_step("Generating plots", {
-          tryCatch(
-            generate_plots(
-              rdata_file = paths$summary,
-              output_dir = paths$plots,
-              modechrom  = cfg$settings$modechrom,
-              prefix     = cfg$output$prefix,
-              log_file   = NULL,  # its message() output is captured by the handler below
-              gene_gap   = cfg$settings$plot_gene_gap %||% 1,
-              off_target_pattern = cfg$off_target_pattern %||% "^HorsROI"
-            ),
-            error = function(e) log_msg(paste("Plot generation failed:", conditionMessage(e)), "WARNING")
-          )
-        })
+          generate_plots(rdata_file = paths$summary, output_dir = paths$plots,
+                         modechrom = st$modechrom, prefix = cfg$output$prefix,
+                         gene_gap = st$plot_gene_gap %||% 1,
+                         off_target_pattern = cfg$off_target_pattern %||% "^HorsROI")
+        }, on_error = "warn")
       } else {
         log_msg("Plot generation skipped (plots = FALSE).")
       }
 
       if (report) {
         run_step("Generating HTML report", {
-          tryCatch(
-            generate_report(
-              summary_rdata   = paths$summary,
-              qc_metrics_file = paths$metrics,
-              output_dir      = cfg$output$dir,
-              settings        = cfg$settings,
-              config          = cfg,
-              sample_table    = sample_table,
-              ref_bams        = ref_bams %||% cfg$input$rbams,
-              log_file        = log_file,
-              pdf_output      = cfg$settings$pdf_output %||% FALSE,
-              prefix          = cfg$output$prefix,
-              coverage_rdata  = paths$rdata
-            ),
-            error = function(e) log_msg(paste("Report generation failed:", conditionMessage(e)), "WARNING")
-          )
-        })
+          generate_report(summary_rdata = paths$summary, qc_metrics_file = paths$metrics,
+                          output_dir = cfg$output$dir, settings = st, config = cfg,
+                          sample_table = sample_table, ref_bams = ref_bams %||% cfg$input$rbams,
+                          log_file = log_file, pdf_output = st$pdf_output %||% FALSE,
+                          prefix = cfg$output$prefix, coverage_rdata = paths$rdata)
+        }, on_error = "warn")
       } else {
         log_msg("Report generation skipped (report = FALSE).")
       }
 
       if (!is.null(vcf_output) || vcf_per_sample) {
         run_step("Exporting CNVs to VCF", {
-          tryCatch({
-          if (file.exists(paths$summary)) {
-            summary_env <- new.env(parent = emptyenv())
-            load(paths$summary, envir = summary_env)
-            cnv_calls_local <- summary_env$cnv_calls
-            if (is.null(cnv_calls_local)) cnv_calls_local <- data.frame()
-            analysis_samples_local <- as.character(
-              summary_env$sample_names %||% character(0)
-            )
-            analysis_samples_local <- unique(
-              analysis_samples_local[!is.na(analysis_samples_local) &
-                                       nzchar(analysis_samples_local)]
-            )
-            n_calls_local <- nrow(cnv_calls_local)
-
-            if (!is.null(vcf_output)) {
-              export_cnvs_to_vcf(
-                cnv_calls_local, vcf_output, sample_name = NULL,
-                reference = cfg$genome_version,
-                sample_names = analysis_samples_local
-              )
-              if (n_calls_local > 0) {
-                log_msg(paste("Combined VCF written to:", basename(vcf_output)))
-              } else {
-                log_msg(paste("Header-only combined VCF written (zero CNVs):",
-                              basename(vcf_output)))
-              }
-            }
-
-            if (vcf_per_sample) {
-              # Remove old per-sample VCFs for this ECHO prefix first, including
-              # files for samples excluded from the current run. Then regenerate
-              # one VCF per current analysis sample, even if it has no records.
-              plots_root <- file.path(cfg$output$dir, "Plots")
-              if (dir.exists(plots_root)) {
-                old_vcfs <- list.files(plots_root, pattern = "\\.vcf$",
-                                       recursive = TRUE, full.names = TRUE)
-                prefix_start <- paste0("ECHO_", cfg$output$prefix, "_")
-                old_vcfs <- old_vcfs[startsWith(basename(old_vcfs), prefix_start)]
-                if (length(old_vcfs) && !all(file.remove(old_vcfs))) {
-                  stop("Could not remove one or more stale per-sample VCF files under: ",
-                       plots_root)
-                }
-              }
-
-              for (s in analysis_samples_local) {
-                sample_folder <- file.path(plots_root, sanitize_filename(s))
-                if (!dir.exists(sample_folder))
-                  dir.create(sample_folder, recursive = TRUE, showWarnings = FALSE)
-                vcf_file <- file.path(sample_folder,
-                                      paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf"))
-                export_cnvs_to_vcf(
-                  cnv_calls_local, vcf_file, sample_name = s,
-                  reference = cfg$genome_version,
-                  sample_names = s
-                )
-                if (n_calls_local > 0 && "Sample" %in% names(cnv_calls_local) &&
-                    any(cnv_calls_local$Sample == s, na.rm = TRUE)) {
-                  log_msg(paste("Per-sample VCF written:", basename(vcf_file)))
-                } else {
-                  log_msg(paste("Header-only per-sample VCF written (zero CNVs):",
-                                basename(vcf_file)))
-                }
-              }
-            }
-            if (n_calls_local == 0) {
-              log_msg("No CNV calls detected; valid header-only VCF output(s) were written.")
-            }
-          } else {
-            log_msg("Summary RData not found – cannot export VCF.", "WARNING")
+          if (!file.exists(paths$summary)) stop("Summary RData not found, cannot export the VCF")
+          env <- new.env(parent = emptyenv())
+          load(paths$summary, envir = env)
+          calls <- env$cnv_calls %||% data.frame()
+          samples_all <- unique(as.character(env$sample_names %||% character()))
+          samples_all <- samples_all[!is.na(samples_all) & nzchar(samples_all)]
+          if (!is.null(vcf_output)) {
+            export_cnvs_to_vcf(calls, vcf_output, sample_name = NULL,
+                               reference = cfg$genome_version, sample_names = samples_all)
           }
-          }, error = function(e) log_msg(paste("VCF export failed:", conditionMessage(e)), "WARNING")
-        )
-        })
+          if (vcf_per_sample) {
+            # one VCF per analysed sample, header-only when it has no call; old
+            # per-sample files of this prefix are removed first
+            plots_root <- file.path(cfg$output$dir, "Plots")
+            if (dir.exists(plots_root)) {
+              old <- list.files(plots_root, pattern = "\\.vcf$", recursive = TRUE, full.names = TRUE)
+              old <- old[startsWith(basename(old), paste0("ECHO_", cfg$output$prefix, "_"))]
+              if (length(old)) unlink(old)
+            }
+            for (s in samples_all) {
+              folder <- file.path(plots_root, sanitize_filename(s))
+              dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+              export_cnvs_to_vcf(calls, file.path(folder, paste0("ECHO_", cfg$output$prefix, "_", s, ".vcf")),
+                                 sample_name = s, reference = cfg$genome_version, sample_names = s)
+            }
+          }
+        }, on_error = "warn")
       } else {
         log_msg("VCF export skipped.")
       }
-
-      log_msg("Pipeline finished successfully!")
-    }, message = function(m) {
-      if (in_log_msg) return(invisible(NULL))
-      txt <- sub("\n+$", "", conditionMessage(m))
-      if (!nzchar(trimws(txt))) return(invisible(NULL))
-      ts <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-      line <- if (grepl("^\\[(INFO|WARNING|ERROR)\\] [0-9]{4}-[0-9]{2}-[0-9]{2} ", txt)) {
-        txt
-      } else if (grepl("^\\[(INFO|WARNING|ERROR)\\]", txt)) {
-        paste0("[", sub("^\\[([A-Z]+)\\].*$", "\\1", txt), "] ", ts, " ",
-               sub("^\\[[A-Z]+\\]\\s*", "", txt))
-      } else {
-        paste0("[INFO] ", ts, " ", txt)
-      }
-      cat(line, "\n", file = log_file, append = TRUE, sep = "")
-    }, warning = function(w) {
-      if (grepl("sequence levels not in the other", conditionMessage(w))) {
-        invokeRestart("muffleWarning")
-      }
-      log_msg(sub("^\\[WARNING\\]\\s*", "", conditionMessage(w)), "WARNING")
-      invokeRestart("muffleWarning")
     })
+    ok <- TRUE
     invisible(TRUE)
   }, error = function(e) {
-    log_msg(paste("FATAL:", e$message), "ERROR")
+    lg$error(paste("FATAL:", conditionMessage(e)))
     stop(e)
   })
 }
