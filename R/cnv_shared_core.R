@@ -1297,14 +1297,14 @@ cnv_apply_recurrence <- function(calls, cols, n_samples, action = c("flag", "dow
 #' @export
 cnv_palette <- function() {
   list(
-    del = "#D55E00", dup = "#0072B2", normal = "#7A7A75",
-    high = "#1B9E77", medium = "#E69F00", low = "#8C8C86", na = "#C3C2B7",
-    fail = "#B3261E", warn = "#B36B00", ok = "#0B6B3A", info = "#2A78D6",
-    accent = "#2A78D6", test = "#3B4A5A", reference = "#B4B4AE", band = "#E4E4DF",
-    affected = "#D55E00", grid = "#E1E0D9", text = "#1B1B1A",
-    dark = list(del = "#F08A4B", dup = "#56B4E9", high = "#3CC59A", medium = "#F2B134",
-                low = "#8C8C86", fail = "#FF8A80", warn = "#FAB219", ok = "#5FD38D",
-                info = "#6AA6F0", accent = "#6AA6F0", test = "#A9BCD0", reference = "#6F6E68", band = "#2C2C2A")
+    del = "#b85000", dup = "#0072b2", normal = "#7d8590",
+    high = "#0e8a5f", medium = "#e69f00", low = "#8a8f98", na = "#ccd2db",
+    fail = "#c92020", warn = "#b45309", ok = "#0a7c4a", info = "#3b66f5",
+    accent = "#3b66f5", test = "#3d4a5c", reference = "#b0b7c0", band = "#e6e9ef",
+    affected = "#b85000", grid = "#e6e9ef", text = "#111827",
+    dark = list(del = "#f59a5f", dup = "#5faeec", high = "#41cf9f", medium = "#f2c141",
+                low = "#8a8f98", fail = "#f58a8a", warn = "#f5b544", ok = "#52d68f",
+                info = "#7c92f8", accent = "#7c92f8", test = "#aebccd", reference = "#6b7484", band = "#272e3a")
   )
 }
 
